@@ -48,7 +48,7 @@ use crate::store::postgres::{
 /// Bump this when the Dockerfile template changes in a way that must produce a
 /// new image for an unchanged recipe. Without it a code deploy would keep
 /// reusing the previous template's image because no recipe field moved.
-const GENERATOR_VERSION: u32 = 5;
+const GENERATOR_VERSION: u32 = 6;
 
 /// The supervisor program shipped inside every image the builder produces.
 ///
@@ -1509,6 +1509,21 @@ pub fn dockerfile(plan: &ImagePlan) -> Result<String, String> {
     out.push_str("# Do not edit: the next build regenerates this file from the recipe.\n");
     out.push_str(&format!("FROM {base}\n"));
 
+    // A repository is reached over HTTPS, and a minimal base image has no trust
+    // store: without ca-certificates `apt-get update` answers "No system
+    // certificates available" before the repository is ever used.
+    if !plan.repositories.is_empty() {
+        match manager {
+            PackageManager::Apt => out.push_str(
+                "RUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates \\\n && rm -rf /var/lib/apt/lists/*\n",
+            ),
+            PackageManager::Dnf => out.push_str(
+                "RUN dnf install -y ca-certificates \\\n && dnf clean all\n",
+            ),
+            PackageManager::Apk => out.push_str("RUN apk add --no-cache ca-certificates\n"),
+        }
+    }
+
     for repository in &plan.repositories {
         let name = super::selection::repository_name(&repository.name)?;
         let url = super::selection::repository_url(&repository.url)?;
@@ -2360,10 +2375,17 @@ mod tests {
             credential_ref: None,
         }];
         let text = dockerfile(&plan).expect("a valid repository renders");
+        let trust = text.find("install -y --no-install-recommends ca-certificates")
+            .expect("the trust store is installed before the repository");
         let keyring = text.find("/etc/apt/keyrings/nestbox-artgate.asc").expect("keyring written");
         let list = text.find("/etc/apt/sources.list.d/nestbox-artgate.list").expect("repo written");
-        let install = text.find("apt-get install").expect("install step");
-        assert!(keyring < install && list < install, "the repository exists before the install");
+        let install = text
+            .find("apt-get install -y --no-install-recommends nginx")
+            .expect("install step");
+        assert!(
+            trust < keyring && keyring < install && list < install,
+            "the trust store, then the repository, then the install"
+        );
         let encoded = dockerfile_payload(
             "deb [signed-by=/etc/apt/keyrings/nestbox-artgate.asc] https://packages.example.test/apt stable main\n",
         );
