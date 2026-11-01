@@ -388,16 +388,21 @@ def scene_egress(sandbox_id: str) -> None:
     check("Control meldet allow_all", allow_all is True, "allow_all ist true",
           f"allow_all lautet {describe(allow_all)} (HTTP {summary_status})")
 
-    # The proxy may still hold a tunnel from before the switch; ask again a
-    # couple of times rather than reading the first answer as a verdict.
+    # Two things may still be catching up: a proxy tunnel from before the switch,
+    # and the OpenShell policy of a suspended sandbox. The gateway has no host
+    # wildcard, so "allow everything" allows what the sandbox was seen reaching;
+    # a host it never contacted is refused once and allowed after the next push
+    # (ADR 0058, package B09). The check therefore waits up to ~70 s and reports
+    # how long that took instead of reading the first answer as a verdict.
     code: int | None = None
     output = ""
-    for attempt in range(3):
+    delays = [5, 35, 35]
+    for attempt in range(4):
         code, output = exec_in(sandbox_id, "curl -sS -m 20 -o /dev/null -w '%{http_code}' https://example.com", 40)
         if code == 0 and output.isdigit() and output != "403":
             break
-        if attempt < 2:
-            time.sleep(5)
+        if attempt < len(delays):
+            time.sleep(delays[attempt])
     if code is None or "not found" in output.lower():
         skip("Erreichbarkeit im Modus off_allow_all", f"curl fehlt in der Sandbox: {output[:80]}")
     else:
