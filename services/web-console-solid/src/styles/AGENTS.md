@@ -39,6 +39,8 @@ uses it, not from `main.jsx`.
 Every stylesheet except `tokens.css` reads colours only through tokens: square corners
 (`--radius`), 1 px olive lines, lime accent, tinted state backgrounds written as
 `color-mix(in srgb, var(--bad) 14%, transparent)`. No hex or rgb colour outside `tokens.css`.
+The one exception to square corners: status dots (`.status-dot`, `.dot`, a badge's `<i>`) are
+7 px circles, so "round" always means "this is a state, not a control" (V03).
 `app.css` also defines `.eyebrow`, `.figure` and `.num`.
 - `dock.css` — dock tabs, alert cards and the alert stack (F13); imported by `features/dock/AlertStack.jsx`.
 - `models.css` — model cards, node picker, wizard options and deploy progress (F08); imported by `features/models/ModelsPage.jsx` and `ModelPage.jsx`.

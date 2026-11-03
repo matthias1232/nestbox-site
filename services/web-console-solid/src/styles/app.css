@@ -137,7 +137,7 @@ tr.row-deny { background: color-mix(in srgb, var(--bad) 10%, transparent); }
 
 .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
          padding: 2px 8px; border-radius: var(--radius); border: 1px solid transparent; white-space: nowrap; }
-.badge i { width: 7px; height: 7px; border-radius: var(--radius); background: currentColor; }
+.badge i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .badge.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); border-color: color-mix(in srgb, var(--ok) 40%, var(--bg)); }
 .badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, var(--bg)); }
 .badge.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); border-color: color-mix(in srgb, var(--bad) 40%, var(--bg)); }
@@ -288,7 +288,7 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
             background: var(--bg-inset); padding: var(--space-3); }
 .topology .legend { display: flex; gap: var(--space-4); font-size: 12px;
                     color: var(--fg-muted); margin-bottom: var(--space-2); }
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius); margin-right: 5px; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
 .dot.ok { background: var(--ok); }
 .dot.warn { background: var(--warn); }
 .dot.bad { background: var(--bad); }

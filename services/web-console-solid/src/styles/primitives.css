@@ -78,7 +78,7 @@
 /* SelectTable */
 .select-table-wrap { overflow: auto; border: 1px solid var(--border); }
 .select-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.select-table thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-raised); color: var(--fg-muted); font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; text-align: left; padding: 0 var(--space-3); height: var(--row-height); border-bottom: 1px solid var(--border-strong); }
+.select-table thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-raised); color: var(--fg-muted); font: 400 0.78rem var(--font); text-transform: none; letter-spacing: 0; text-align: left; padding: 0 var(--space-3); height: var(--row-height); border-bottom: 1px solid var(--border); }
 .select-table td { padding: 0 var(--space-3); height: var(--row-height); border-bottom: 1px solid var(--border); }
 .select-table tr.selected td { background: var(--accent-dim); }
 .select-table tr.clickable { cursor: pointer; }

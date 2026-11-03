@@ -122,7 +122,7 @@
 .cc-sidebar.collapsed .cc-nav button { text-align: center; padding: var(--space-2) 0; }
 .cc-nav-icon { font-size: 0.72rem; text-transform: uppercase; }
 .cc-badge-alert { margin-left: var(--space-2); padding: 0 var(--space-1); border: 1px solid var(--bad); color: var(--bad); font-size: 0.68rem; }
-.cc-badge-open { display: inline-block; width: 8px; height: 8px; margin-left: var(--space-2); background: var(--accent); }
+.cc-badge-open { display: inline-block; width: 7px; height: 7px; margin-left: var(--space-2); background: var(--accent); border-radius: 50%; }
 .cc-resizer { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 6; touch-action: none; }
 .cc-resizer:hover, .cc-resizer:focus-visible { background: var(--border-strong); outline: none; }
 .cc-resizer:focus-visible { background: var(--accent); }
