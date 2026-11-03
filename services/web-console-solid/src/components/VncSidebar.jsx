@@ -1,24 +1,28 @@
-// The desktop's sidebar, like Proxmox's noVNC panel: clipboard, full screen, settings,
-// send key, power, and the status line under the picture.
+// The desktop's sidebar, like Proxmox's noVNC panel: display, clipboard, full screen,
+// settings, send key, power, and the status line under the picture.
 //
 // Props in, callbacks out: the panel never opens a connection itself. Everything it
-// shows comes from `options`, `state` and `sandbox`; every click goes back through
-// `onChange`, `onSendKey`, `onSendClipboard`, `onFullscreen`, `onReconnect`,
-// `onDisconnect` or `onPower`. The caller owns the RFB connection, so the same panel
-// serves the console tab and the pop-out window.
+// shows comes from `options`, `state`, `display` and `sandbox`; every click goes back
+// through `onChange`, `onSendKey`, `onSendClipboard`, `onFullscreen`, `onReconnect`,
+// `onDisconnect` or `onPower`, and the display panel's own calls through the
+// `display` object the caller owns. The caller owns the RFB connection, so the same
+// panel serves the console tab and the pop-out window.
 //
 // `VncStatus` is the second half of the panel: the one line under the screen that says
 // what the picture is doing, with the two buttons that fix or end it.
 import { For, Show, createEffect, createSignal } from 'solid-js';
 import ConfirmDialog from './ConfirmDialog.jsx';
+import DisplayArrange from './DisplayArrange.jsx';
 import IconButton from './IconButton.jsx';
 import Segmented from './Segmented.jsx';
 import Switch from './Switch.jsx';
 import { Icon } from './icons.jsx';
 import { KEYS, SCALINGS, STICKY, statusText } from '../features/sandboxes/vncOptions.js';
+import { PRESETS } from '../features/sandboxes/displayLayout.js';
 import '../styles/vnc.css';
 
 const SECTIONS = [
+  { id: 'display', label: 'Display', icon: 'Desktop' },
   { id: 'clipboard', label: 'Clipboard', icon: 'Copy' },
   { id: 'settings', label: 'Settings', icon: 'Settings' },
   { id: 'keys', label: 'Send key', icon: 'Terminal' },
@@ -38,7 +42,7 @@ const KEYS_GRID = Object.keys(KEYS)
 // The panel on the left edge of the desktop view.
 export default function VncSidebar(props) {
   const [collapsed, setCollapsed] = createSignal(false);
-  const [section, setSection] = createSignal('clipboard');
+  const [section, setSection] = createSignal('display');
   const [text, setText] = createSignal('');
   const [sticky, setSticky] = createSignal([]);
   const [confirm, setConfirm] = createSignal(null);
@@ -121,6 +125,33 @@ export default function VncSidebar(props) {
           <button type="button" class="tiny secondary vnc-wide" onClick={() => props.onFullscreen?.()}>
             <Icon name="Desktop" /> Full screen
           </button>
+
+          <Show when={section() === 'display'}>
+            <section class="vnc-sec">
+              <h4>Display</h4>
+              <Show
+                when={props.display?.layout()}
+                fallback={<p class="vnc-hint">Reading the sandbox's monitors …</p>}
+              >
+                <DisplayArrange
+                  layout={props.display?.layout()}
+                  selected={props.activeMonitor}
+                  presets={PRESETS}
+                  status={props.display?.status()}
+                  problems={props.display?.problems()}
+                  onSelect={props.onSelectMonitor}
+                  onMove={props.display?.move}
+                  onResize={props.display?.resize}
+                  onRotate={props.display?.rotate}
+                  onPrimary={props.display?.primary}
+                  onMode={props.display?.mode}
+                />
+              </Show>
+              <p class="vnc-hint">
+                Drag a monitor to arrange it; it snaps to the next free edge. Changes apply while you make them.
+              </p>
+            </section>
+          </Show>
 
           <Show when={section() === 'clipboard'}>
             <section class="vnc-sec">

@@ -39,8 +39,7 @@ test('out-of-range and unknown values fall back', () => {
   assert.deepEqual(prefs.logPanes, ['ok']);
 });
 
-test('the console options of each sandbox round-trip, completed and clamped', () => {
-  const prefs = {
+test('the console options of each sandbox round-trip, completed and clamped', () => {  const prefs = {
     ...DEFAULTS,
     vncOptions: { 'sbx-1': { ...DEFAULT_VNC, scaling: 'none', quality: 9, viewOnly: true } },
   };
@@ -48,6 +47,14 @@ test('the console options of each sandbox round-trip, completed and clamped', ()
   assert.deepEqual(sanitize({ vncOptions: { 'sbx-1': { quality: 99, scaling: 'x' }, 'sbx-2': 'nope' } }).vncOptions['sbx-1'], { ...DEFAULT_VNC, quality: 9 });
   assert.equal(sanitize({ vncOptions: { 'sbx-2': 'nope' } }).vncOptions['sbx-2'], undefined);
   assert.deepEqual(sanitize({ vncOptions: [1, 2] }).vncOptions, {});
+});
+
+test('the monitor tab of each sandbox round-trips and keeps only strings', () => {
+  const prefs = { ...DEFAULTS, monitorTabs: { 'sbx-1': 'm2', 'sbx-2': 'all' } };
+  assert.deepEqual(parse(serialize(prefs)), prefs);
+  assert.deepEqual(sanitize({ monitorTabs: { 'sbx-1': 5, 'sbx-2': 'm1' } }).monitorTabs, { 'sbx-2': 'm1' });
+  assert.deepEqual(sanitize({ monitorTabs: [1, 2] }).monitorTabs, {});
+  assert.deepEqual(sanitize({ monitorTabs: 'm1' }).monitorTabs, {});
 });
 
 test('nothing that looks like a token is part of the stored shape', () => {

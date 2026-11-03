@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePath, paths, boxPath, terminalPath } from './routing.js';
+import { parsePath, paths, boxPath, desktopPath, terminalPath } from './routing.js';
 
 const ID = '11111111-2222-3333-4444-555555555555';
 
@@ -25,8 +25,16 @@ test('the Admin Center reads the tab query', () => {
 test('the workbox and its pop-outs', () => {
   assert.deepEqual(parsePath(boxPath(ID)), { kind: 'box', id: ID });
   assert.deepEqual(parsePath(terminalPath(ID, 't-1')), { kind: 'terminal', id: ID, tab: 't-1' });
-  assert.deepEqual(parsePath(`/box/${ID}/desktop`), { kind: 'desktop', id: ID });
+  assert.deepEqual(parsePath(`/box/${ID}/desktop`), { kind: 'desktop', id: ID, monitor: null });
   assert.equal(parsePath('/my').kind, 'my');
+});
+
+test('a desktop pop-out may name one monitor', () => {
+  assert.equal(desktopPath(ID), `/box/${ID}/desktop`);
+  assert.equal(desktopPath(ID, 'all'), `/box/${ID}/desktop`);
+  assert.equal(desktopPath(ID, 'm2'), `/box/${ID}/desktop?monitor=m2`);
+  assert.deepEqual(parsePath(`/box/${ID}/desktop`, '?monitor=m2'), { kind: 'desktop', id: ID, monitor: 'm2' });
+  assert.deepEqual(parsePath(`/box/${ID}/desktop`, '?monitor='), { kind: 'desktop', id: ID, monitor: null });
 });
 
 test('model, cluster and docs addresses', () => {

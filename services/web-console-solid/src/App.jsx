@@ -216,7 +216,7 @@ export default function App() {
       <Show when={session.identity()} fallback={<LoginPage />}>
         {/* Pop-out windows own their window: no sidebar, no menu. */}
         <Show when={place().kind === 'terminal'}><TerminalPopout sandboxId={place().id} tab={place().tab} /></Show>
-        <Show when={place().kind === 'desktop'}><DesktopPopout sandboxId={place().id} /></Show>
+        <Show when={place().kind === 'desktop'}><DesktopPopout sandboxId={place().id} monitor={place().monitor} /></Show>
         <Show when={place().kind === 'poplogs'}><LogsPopout id={place().id} /></Show>
         <Show when={place().kind === 'poptraffic'}><TrafficPopout /></Show>
         <Show when={!SHELLLESS.has(place().kind)}>

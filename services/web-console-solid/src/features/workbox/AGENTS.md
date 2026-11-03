@@ -21,7 +21,7 @@ evaluation windows, plus live chats, the topology and the shared terminals.
 | `TerminalPopout.jsx`, `DesktopPopout.jsx` | the pop-out windows without a sidebar |
 | `SessionsPanel.jsx` | all shared terminal tabs ("Connected now" from `control.presence`, then terminals and desktop behind two tabs) |
 | `sessions.js`, `sessions.test.js` | pure logic of the shared tabs: `mergeTabs` (my list + everybody's, each tab once), `sshCommand`, `puttyHint`; tested with `node --test sessions.test.js` |
-| `TerminalPopout.jsx`, `DesktopPopout.jsx` | the pop-out windows without a sidebar: one tab with its viewers, or the desktop, each filling the window |
+| `TerminalPopout.jsx`, `DesktopPopout.jsx` | the pop-out windows without a sidebar: one tab with its viewers, or the desktop, each filling the window. A desktop pop-out carries `?monitor=<id>&environment=<dc>`: with a monitor id it pins that one screen (`fixedMonitor`), so an operator with two physical screens can put one sandbox monitor on each (U10b) |
 | `LiveChatsPanel.jsx` | the agents' conversation, live |
 | `livechats.js` | turns a recorded call into a turn, groups turns by session, shortens text (pure, tested by `livechats.test.js`) |
 | `TopologyPanel.jsx` | the live topology of the sandbox: re-reads the deck at most every two seconds while the shared telemetry stream reports traffic for this sandbox (it holds `wantTelemetry()` while mounted) |

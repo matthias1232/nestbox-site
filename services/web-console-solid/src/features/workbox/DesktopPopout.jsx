@@ -4,6 +4,10 @@
 // while something else is on the screen. The pop-out is the same stream as the
 // panel, opened by a person who wants the whole window for it.
 //
+// With `?monitor=<id>` the window shows exactly one monitor of the arrangement
+// (U10b): an operator with two physical screens can put one sandbox monitor on
+// each. Without it the window shows everything, tabs and all.
+//
 // Watching without touching is the server's decision (`?view=1`), set by the
 // checkbox in the panel; this window offers the same control.
 
@@ -61,7 +65,7 @@ export default function DesktopPopout(props) {
             </Show>
           }
         >
-          {(value) => <DesktopTab sandbox={value()} fullWindow />}
+          {(value) => <DesktopTab sandbox={value()} fullWindow fixedMonitor={props.monitor || null} />}
         </Show>
       </div>
     </div>

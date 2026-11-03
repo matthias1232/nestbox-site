@@ -17,14 +17,26 @@
 // Every noVNC option (scaling, quality, compression, dot cursor, shared mode,
 // automatic reconnect) is stored per sandbox in `ui.console`, applied on connect
 // and on change; the panel on the left is `components/VncSidebar.jsx`.
+//
+// Monitor tabs (U10b): the strip above the picture is `components/MonitorTabs.jsx`.
+// `All` is the whole framebuffer with the person's scaling option; a monitor tab
+// shows only that monitor, scaled to the box, with the clicks mapped back into
+// framebuffer pixels by `monitorView.js` — one VNC connection either way, because
+// the sandbox has one framebuffer and VNC sends all of it. The layout itself comes
+// from `useDisplay.js` and is edited in the sidebar's Display section.
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import RFB from '@novnc/novnc/lib/rfb';
 import * as deck from '../../api/deck.js';
 import * as sandboxes from '../../api/sandboxes.js';
 import { environmentUrl } from '../../api/client.js';
+import { desktopPath } from '../../routing.js';
 import { useUi } from '../../state/ui.jsx';
 import VncSidebar, { VncStatus } from '../../components/VncSidebar.jsx';
+import MonitorTabs from '../../components/MonitorTabs.jsx';
 import { DEFAULTS, applyOptions, sanitizeOptions, sendCombo, withSticky } from './vncOptions.js';
+import { useDisplay } from './useDisplay.js';
+import { showAll, showMonitor } from './monitorView.js';
+import { PRESETS, monitorSize } from './displayLayout.js';
 import '../../styles/workbox-sessions.css';
 
 export default function DesktopTab(props) {
@@ -34,6 +46,8 @@ export default function DesktopTab(props) {
   let manualClose = false;
   let retryTimer = null;
   let sizeObserver = null;
+  let cropObserver = null;
+  let cropFrame = 0;
   const [state, setState] = createSignal('idle');
   const [reason, setReason] = createSignal(null);
   const [note, setNote] = createSignal(null);
@@ -42,7 +56,30 @@ export default function DesktopTab(props) {
   const [retryIn, setRetryIn] = createSignal(0);
   const [busy, setBusy] = createSignal(false);
   const [browser, setBrowser] = createSignal(null);
+  // The live connection is a signal too, because the crop has to re-run when the
+  // stream is replaced: a plain variable would leave the new client unconfigured.
+  const [client, setClient] = createSignal(null);
   const running = () => props.sandbox.status === 'running';
+
+  // The display layout: which monitors exist and where they sit (U10b/U10c).
+  const display = useDisplay(() => props.sandbox.id);
+  const monitors = () => display.layout()?.monitors || [];
+  // The tab this window shows: a pop-out may pin one monitor, otherwise the stored
+  // choice, and a remembered monitor that no longer exists falls back to `All`.
+  const activeId = () => {
+    if (props.fixedMonitor) {
+      return monitors().some((monitor) => monitor.id === props.fixedMonitor) ? props.fixedMonitor : 'all';
+    }
+    const stored = ui.console.monitor(props.sandbox.id);
+    return stored && stored !== 'all' && !monitors().some((monitor) => monitor.id === stored) ? 'all' : stored || 'all';
+  };
+  const activeMonitor = () => monitors().find((monitor) => monitor.id === activeId()) || null;
+  // What the status line should call the picture: the monitor's own size when one
+  // is cropped out, the framebuffer's when everything is shown.
+  const shownSize = () => {
+    const monitor = activeMonitor();
+    return monitor ? { width: monitor.width, height: monitor.height } : size();
+  };
 
   // The options of this sandbox: the browser's remembered taste, completed.
   const options = createMemo(() => sanitizeOptions(ui.console.vncOptions(props.sandbox.id) || DEFAULTS));
@@ -63,6 +100,41 @@ export default function DesktopTab(props) {
     const width = rfb?._display?.width || Number(canvas?.getAttribute('width')) || 0;
     const height = rfb?._display?.height || Number(canvas?.getAttribute('height')) || 0;
     setSize(width > 0 && height > 0 ? { width, height } : null);
+    // The framebuffer arriving is also when a crop first has something to crop.
+    if (activeMonitor()) recrop();
+  }
+
+  // The box a cropped monitor is fitted into: the picture area, not the canvas,
+  // because the canvas is exactly what the crop resizes.
+  function screenBox() {
+    return { w: screen?.clientWidth || 0, h: screen?.clientHeight || 0 };
+  }
+
+  // Put the active monitor back a frame later. noVNC's own clip update runs on a
+  // window resize and resizes the viewport to the whole box; re-cropping in the
+  // same turn would be overwritten, in an animation frame it wins.
+  function recrop() {
+    const live = client();
+    if (!live || !activeMonitor()) return;
+    if (cropFrame) cancelAnimationFrame(cropFrame);
+    cropFrame = requestAnimationFrame(() => {
+      cropFrame = 0;
+      if (live !== client()) return;
+      const monitor = activeMonitor();
+      if (monitor) showMonitor(live, monitor, screenBox());
+    });
+  }
+
+  // The box changes when the window resizes, the sidebar collapses or the tab strip
+  // grows, and a cropped monitor has to be refitted every time.
+  function watchCrop(on) {
+    if (on && !cropObserver && typeof ResizeObserver !== 'undefined') {
+      cropObserver = new ResizeObserver(recrop);
+      if (screen) cropObserver.observe(screen);
+    } else if (!on && cropObserver) {
+      cropObserver.disconnect();
+      cropObserver = null;
+    }
   }
 
   function cancelReconnect() {
@@ -125,6 +197,7 @@ export default function DesktopTab(props) {
       shared: options().shared,
     });
     rfb = client;
+    setClient(client);
     // Local effect at once; the server's answer is the one that counts.
     applyOptions(client, options());
     // An old connection's late events must not speak for the one that replaced
@@ -144,6 +217,7 @@ export default function DesktopTab(props) {
       sizeObserver?.disconnect();
       sizeObserver = null;
       rfb = null;
+      setClient(null);
       setSize(null);
       setState('closed');
       // A close this window asked for is the end; anything else is a broken
@@ -172,6 +246,7 @@ export default function DesktopTab(props) {
     // Cleared first: the close event arrives later and must not be mistaken for
     // a broken picture by the connection that is about to open.
     rfb = null;
+    setClient(null);
     try { closing?.disconnect(); } catch { /* already closed */ }
   }
 
@@ -243,12 +318,28 @@ export default function DesktopTab(props) {
     }
   }
 
-  // A change to scaling, quality, compression or the cursor reaches the live
-  // connection without reopening it.
+  // Options and crop in one effect: they own the same noVNC viewport, so two
+  // effects would fight over the order.
+  //
+  // A monitor tab is always fitted and never asks the desktop to change its
+  // resolution — a remote resize would change the framebuffer the crop is a
+  // window onto. Everything else uses the person's own scaling option.
   createEffect(() => {
+    const live = client();
+    // Read the layout revision so an apply (ours or an agent's) re-crops at once.
+    display.revision();
+    const monitor = activeMonitor();
     const wanted = options();
-    if (!rfb) return;
-    applyOptions(rfb, wanted);
+    if (!live) return;
+    if (monitor) {
+      applyOptions(live, { ...wanted, scaling: 'none' });
+      showMonitor(live, monitor, screenBox());
+    } else {
+      applyOptions(live, wanted);
+      if (wanted.scaling !== 'none') showAll(live);
+    }
+    screen?.classList.toggle('cropped', Boolean(monitor));
+    watchCrop(Boolean(monitor));
   });
 
   onMount(() => {
@@ -270,12 +361,53 @@ export default function DesktopTab(props) {
   onCleanup(() => {
     disconnect();
     cancelReconnect();
+    if (cropFrame) cancelAnimationFrame(cropFrame);
+    cropObserver?.disconnect();
+    cropObserver = null;
   });
+
+  // One tab per monitor, remembered per sandbox; a pop-out pins one instead.
+  function chooseTab(id) {
+    if (props.fixedMonitor) return;
+    ui.console.setMonitor(props.sandbox.id, id);
+  }
+
+  function popOut(id) {
+    window.open(
+      environmentUrl(desktopPath(props.sandbox.id, id)),
+      `nb-desk-${props.sandbox.id}-${id}`,
+      'popup,width=1440,height=900',
+    );
+  }
 
   return (
     <section class={`tab-panel ${props.fullWindow ? 'desktop-fill' : ''}`}>
       <Show when={!running()}><p class="muted">The sandbox is not running.</p></Show>
       <Show when={note()}><p class="notice">{note()}</p></Show>
+      <Show when={monitors().length > 0 && !props.fixedMonitor}>
+        <MonitorTabs
+          monitors={monitors()}
+          active={activeId()}
+          presets={PRESETS}
+          onSelect={chooseTab}
+          onAdd={(spec) => display.add(spec)}
+          onRename={(id, name) => display.rename(id, name)}
+          onResize={(id, width, height) => display.resize(id, width, height)}
+          onPrimary={(id) => display.primary(id)}
+          onPopOut={popOut}
+          onRemove={(id) => {
+            display.remove(id);
+            if (activeId() === id) chooseTab('all');
+          }}
+        />
+      </Show>
+      <Show when={props.fixedMonitor && activeMonitor()}>
+        {(monitor) => (
+          <p class="muted small monitor-pinned">
+            {monitor().name} · {monitorSize(monitor())} — this window shows only this monitor.
+          </p>
+        )}
+      </Show>
       <div class="controls">
         <Show when={browser() === false}>
           <button class="tiny" onClick={giveBrowser} title="Attach the Chrome DevTools MCP server so agents can open pages and take screenshots in this Chrome">Give agents this browser (MCP)</button>
@@ -294,6 +426,10 @@ export default function DesktopTab(props) {
           running={running()}
           busy={busy()}
           clipboard={clipboard()}
+          display={display}
+          monitors={monitors()}
+          activeMonitor={activeId()}
+          onSelectMonitor={chooseTab}
           onSendClipboard={clipboardSend}
           onSendKey={sendKey}
           onFullscreen={fullscreen}
@@ -305,7 +441,7 @@ export default function DesktopTab(props) {
           <div class={`desktop-screen ${props.fullWindow ? 'full' : ''}`} ref={screen} />
           <VncStatus
             state={state()}
-            size={size()}
+            size={shownSize()}
             quality={options().quality}
             reason={reason()}
             retryIn={retryIn()}
