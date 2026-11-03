@@ -371,6 +371,8 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
 | `node_ops_service.rs` | `summary` (node + load + installs + images + tunnel), `drain` (move or stop every sandbox, job `NodeDrain`) and `quick` (rent/connect/script, probe, install a model, job `NodeQuickDeploy`); `drain` and `quick` also take `&Config` (B07) |
 | `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
+| `node_ops_service.rs` | `summary drain quick` (B07) |
+| `alert_service.rs` | `list` (open alerts), `publish_if_refused` (live `alert` event per refused network or DNS event; no DB read) (B08) |
 | `mount_service.rs` | `effective set` (B09) |
 | `policy_preview_service.rs` | `preview compiled` (B10) |
 | `quick_control_service.rs` | `set` (B11) |

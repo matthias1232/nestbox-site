@@ -101,6 +101,8 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 | `model_cluster.rs` | `ModelCluster`, `ClusterMember`, `ClusterStrategy` (`as_str`/`parse`) |
 | `search.rs` | `SearchKind`, `SearchHit`, `SearchParams`, `score`, `score_with_id`, `like_pattern`, `console_path` |
 | `alerts.rs` | `AlertView` and `alert_id` (stable digest of sandbox, host, port) |
+| `search.rs` | `SearchKind`, `SearchHit`, `SearchParams` |
+| `alerts.rs` | `AlertView`, `alert_id` (stable digest of sandbox, host, port), `window` (5m, 15m, 1h or 24h) |
 | `mounts.rs` | `MountSpec`, `EffectiveMounts` and `validate_mount_path` |
 | `permissions.rs` | `ScopeType` and `PermissionRow` |
 

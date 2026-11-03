@@ -113,7 +113,7 @@ serves.
 | `chat_turns.rs` | Rows of `chat_turns`: insert, query, group |
 | `privacy_exceptions.rs` | Rows of `privacy_exceptions` |
 
-Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_clusters.rs` (B05), `alerts.rs` (B08),
+Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_clusters.rs` (B05), `alerts.rs` (B08: `refused_grouped`),
 `permissions.rs` (B12) return empty results until their package fills the queries; `tours.rs` is complete (the table
 `ui_tours_seen` is per user, so it takes the pool, not a tenant scope). Migration `0086_control_center.sql` adds
 `model_clusters`, `model_cluster_members`, `sandboxes.telemetry_mute_until`/`telemetry_mute_bodies_until` and `ui_tours_seen`.

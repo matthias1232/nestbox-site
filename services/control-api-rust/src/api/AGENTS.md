@@ -144,6 +144,8 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 | `model_clusters.rs` | `/model-clusters`, members, and the proxy's `GET /internal/accounting/clusters/{id}` (B05) |
 | `node_ops.rs` | `GET /nodes/{id}/summary`, `POST /nodes/{id}/drain`, `POST /nodes/quick` (B07); drain and quick pass `state.config` to the service |
 | `alerts.rs` | `GET /alerts` (B08) |
+| `node_ops.rs` | `GET /nodes/{id}/summary`, `POST /nodes/{id}/drain`, `POST /nodes/quick` (B07) |
+| `alerts.rs` | `GET /alerts?window=&sandbox=` (B08; 422 on a bad window) |
 | `mounts.rs` | `GET/PUT /sandboxes/{id}/mounts` (B09) |
 | `policy_preview.rs` | `POST /policies/preview`, `GET /policies/{id}/compiled` (B10) |
 | `quick.rs` | `PUT /sandboxes/{id}/quick` (B11) |
