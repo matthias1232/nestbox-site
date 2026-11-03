@@ -16,10 +16,10 @@
 
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { useUi } from '../../state/ui.jsx';
+import { useLive } from '../../state/live.jsx';
 import Empty from '../../components/Empty.jsx';
 import * as nodesConnect from '../../api/nodesConnect.js';
 import * as nodesApi from '../../api/nodes.js';
-import { stateStream } from '../../api/telemetry.js';
 import BudgetBars from './BudgetBars.jsx';
 import NodeDrawer from './NodeDrawer.jsx';
 import DeleteNodeDialog from './DeleteNodeDialog.jsx';
@@ -38,6 +38,7 @@ const LOCK_TEXT = { strict: 'Strict', exit_local: 'Exit locally' };
 
 export default function NodesPage(props) {
   const ui = useUi();
+  const live = useLive();
   const picked = (id) => ui?.selection.kind() === 'node' && ui.selection.ids().has(id);
   onCleanup(() => { if (ui?.selection.kind() === 'node') ui.selection.clear(); });
   const state = useNodes();
@@ -138,16 +139,16 @@ export default function NodesPage(props) {
     loadTunnels();
     const timer = setInterval(loadTunnels, TUNNEL_REFRESH_MS);
     // A tunnel that just changed state is exactly the case the next poll would
-    // report too late, so the live event refreshes the column at once.
-    const stop = stateStream({
-      onEvent: (event) => {
-        if (event.type === 'node_tunnel_changed') loadTunnels();
-      },
-      onError: () => {},
-    });
+    // report too late, so the live event refreshes the column at once. It arrives
+    // as `node_tunnel_changed` on the shared state stream's `node` name.
+    const stops = [
+      live.on('node', (event) => {
+        if (event?.type === 'node_tunnel_changed') loadTunnels();
+      }),
+    ];
     onCleanup(() => {
       clearInterval(timer);
-      stop();
+      for (const stop of stops) stop();
     });
   });
 

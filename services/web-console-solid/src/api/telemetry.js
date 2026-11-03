@@ -1,4 +1,9 @@
-// Telemetry history and the live stream.
+// Telemetry history.
+//
+// The live stream is not here on purpose: the app holds exactly one telemetry
+// connection, in `state/live.jsx`, and every screen subscribes through
+// `useLive()` (pattern J6). An `EventSource` opened from a page would be a second
+// connection against the browser's six-per-host budget.
 
 import { request, query } from './client.js';
 
@@ -12,44 +17,4 @@ export function facets(minutes = 60) {
 
 export function seedDemo() {
   return request('telemetry/seed-demo', { method: 'POST' });
-}
-
-// Open the server-sent event stream.
-//
-// EventSource cannot send headers, so the session cookie is what authenticates
-// it. That is why the stream works from a browser session but not from an API
-// token; automation reads history instead.
-export function stream(kind, handlers) {
-  const source = new EventSource(`/api/v1/telemetry/stream`);
-
-  const onMessage = (event) => {
-    try {
-      const payload = JSON.parse(event.data);
-      if (!kind || payload.kind === kind) handlers.onEvent(payload);
-    } catch {
-      // A malformed frame is dropped rather than breaking the stream.
-    }
-  };
-
-  for (const name of ['network', 'dns', 'inference']) {
-    source.addEventListener(name, onMessage);
-  }
-  source.onerror = () => handlers.onError?.();
-
-  return () => source.close();
-}
-
-export function stateStream(handlers) {
-  const source = new EventSource('/api/v1/events/stream');
-  for (const name of ['sandbox', 'gateway', 'job', 'policy_rollout', 'control', 'models', 'node']) {
-    source.addEventListener(name, (event) => {
-      try {
-        handlers.onEvent(JSON.parse(event.data));
-      } catch {
-        /* ignore a malformed frame */
-      }
-    });
-  }
-  source.onerror = () => handlers.onError?.();
-  return () => source.close();
 }

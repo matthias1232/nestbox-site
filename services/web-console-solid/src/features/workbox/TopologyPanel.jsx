@@ -6,13 +6,14 @@
 // is in. This panel only re-reads it when telemetry for this sandbox arrives,
 // at most every two seconds, so a busy agent does not cause a burst of reads.
 import { createSignal, onCleanup, onMount } from 'solid-js';
-import { stream } from '../../api/telemetry.js';
+import { useLive } from '../../state/live.jsx';
 import StackTopology from '../sandboxes/StackTopology.jsx';
 
 const DEBOUNCE_MS = 2000;
 
 // The panel: the reason it redraws, then the stack diagram for this sandbox.
 export default function TopologyPanel(props) {
+  const live = useLive();
   const [rev, setRev] = createSignal(0);
   let timer = null;
 
@@ -25,12 +26,21 @@ export default function TopologyPanel(props) {
   }
 
   onMount(() => {
-    const stop = stream(null, {
-      onEvent: (event) => {
-        if (event.sandbox_id && event.sandbox_id === props.sandbox?.id) bump();
-      },
+    // The telemetry stream is the app's one connection; this panel asks for it
+    // while it is on screen and hands it back when it leaves.
+    const release = live.wantTelemetry();
+    const handle = (event) => {
+      if (event?.sandbox_id && event.sandbox_id === props.sandbox?.id) bump();
+    };
+    const stops = [
+      live.on('network', handle),
+      live.on('dns', handle),
+      live.on('inference', handle),
+    ];
+    onCleanup(() => {
+      release();
+      for (const stop of stops) stop();
     });
-    onCleanup(stop);
   });
   onCleanup(() => timer && clearTimeout(timer));
 
