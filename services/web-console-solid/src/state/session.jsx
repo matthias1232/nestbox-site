@@ -61,16 +61,27 @@ export function SessionProvider(props) {
       // The CSRF token lives in memory only. Putting it in storage would make it
       // readable by any script on the page, which is the thing it protects.
       setCsrfToken(result.csrf_token);
+      // The login answer names no user id, and the remembered data center is per user, so
+      // ask once who this is. Without an id the console still works, it only forgets the
+      // choice.
+      let userId = result.user_id ?? null;
+      if (!userId) {
+        try {
+          userId = (await auth.me())?.user_id ?? null;
+        } catch {
+          /* the session works; only the remembered data center is lost */
+        }
+      }
       setIdentity({
         display_name: result.display_name,
         role: result.role,
         environment_id: result.environment_id,
-        user_id: result.user_id ?? null,
+        user_id: userId,
       });
       setEnvironments(result.environments || []);
       // A returning user opens the data center they chose last, as long as the server still
       // lists it. Without such a choice the server's current data center opens (X15).
-      const remembered = readRemembered(result.user_id);
+      const remembered = readRemembered(userId);
       const chosen = pickEnvironment(result.environments || [], remembered, result.environment_id)
         || result.environment_id;
       setRememberedEnvironment(remembered && chosen === remembered ? remembered : null);
