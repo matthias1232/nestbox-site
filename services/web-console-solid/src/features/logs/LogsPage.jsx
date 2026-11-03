@@ -16,6 +16,7 @@ import Breadcrumb from '../shell/Breadcrumb.jsx';
 import LogPane from './LogPane.jsx';
 import RedLane from './RedLane.jsx';
 import { sandboxIdsOf } from './logLoaders.js';
+import { environmentUrl } from '../../api/client.js';
 
 const MAX_PANES = 4;
 
@@ -27,7 +28,7 @@ function popRouteId(source) {
 
 // Open a pop-out window for `id` ('all' or a sandbox id).
 function openPopout(id) {
-  window.open(paths.popLogs(id), `nestbox-logs-${id}`, 'popup,width=1100,height=760');
+  window.open(environmentUrl(paths.popLogs(id)), `nestbox-logs-${id}`, 'popup,width=1100,height=760');
 }
 
 // The panes and the red lane. props: panes (getter of source strings), setPanes, role, runAlerts, inWindow.

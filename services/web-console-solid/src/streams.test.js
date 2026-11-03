@@ -110,3 +110,23 @@ test('no feature or page opens its own EventSource', () => {
     'subscribe through useLive(): one state stream and at most one telemetry stream per window',
   );
 });
+
+// U01: a request the browser opens itself (WebSocket, EventSource, noVNC) carries the chosen
+// data center in `?environment=`, because it cannot send the header. Every such call site must
+// pass through `environmentUrl`; a new one that forgets it fails here.
+test('every browser-opened connection carries the data center', () => {
+  const offenders = [];
+  for (const entry of readdirSync(SRC, { recursive: true })) {
+    if (!/\.(js|jsx)$/.test(entry)) continue;
+    const file = join(SRC, entry);
+    const rel = relative(SRC, file).split(sep).join('/');
+    if (rel.endsWith('.test.js')) continue;
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, index) => {
+      if (!/new\s+(WebSocket|EventSource|RFB)\(/.test(line)) return;
+      const window = lines.slice(index, index + 3).join(' ');
+      if (!window.includes('environmentUrl(')) offenders.push(`${rel}:${index + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [], 'wrap the URL in environmentUrl(), see api/client.js');
+});

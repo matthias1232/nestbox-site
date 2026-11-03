@@ -13,6 +13,7 @@ import { useAlerts } from '../dock/useAlerts.js';
 import { usePolling } from '../../components/Poll.js';
 import * as jobsApi from '../../api/jobs.js';
 import { labelFor, summaryLine } from '../jobs/jobLabels.js';
+import { environmentUrl } from '../../api/client.js';
 
 const TABS = [
   { id: 'tasks', label: 'Tasks' },
@@ -25,7 +26,7 @@ const MAX_HEIGHT = 480;
 // Open a pop-out window for the logs or traffic view; tasks have none.
 function popOut(tab) {
   const path = tab === 'events' ? paths.popLogs('all') : tab === 'alerts' ? paths.popTraffic() : null;
-  if (path) window.open(path, `nestbox-${tab}`, 'width=1100,height=700');
+  if (path) window.open(environmentUrl(path), `nestbox-${tab}`, 'width=1100,height=700');
 }
 
 export default function Dock() {

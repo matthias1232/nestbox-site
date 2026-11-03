@@ -153,9 +153,12 @@ export function SessionProvider(props) {
     }
   }
 
-  function switchEnvironment(id) {
+  // Switch the data center. A link or a pop-out window adopts its own without
+  // overwriting the user's remembered choice (`remember: false`, U01).
+  function switchEnvironment(id, { remember = true } = {}) {
     setActiveEnvironment(id);
     setEnvironment(id);
+    if (!remember) return;
     // The choice is remembered per user, as an id: the next sign-in opens this one (X15).
     setRememberedEnvironment(id);
     writeRemembered(identity()?.user_id, id);

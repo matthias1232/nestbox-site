@@ -60,6 +60,35 @@ export function adoptOpenerCsrf() {
 
 export function setEnvironment(id) {
   environmentId = id;
+  // A pop-out window opened the same page and needs the data center too; it
+  // cannot ask the server which one the opener used without a second switch.
+  try {
+    window.__nestboxEnvironment = id;
+  } catch {
+    /* a window without a document has nothing to share */
+  }
+}
+
+// Adopt the opener's data center in a pop-out window; false when there is none.
+export function adoptOpenerEnvironment() {
+  try {
+    const id = window.opener && window.opener.__nestboxEnvironment;
+    if (id) {
+      setEnvironment(id);
+      return id;
+    }
+  } catch {
+    /* an opener from another origin */
+  }
+  return null;
+}
+
+// `url` with the active data center appended, for the requests the browser opens
+// itself (WebSocket, EventSource, a download link): they send no headers.
+export { withEnvironment } from './environmentUrl.js';
+
+export function environmentUrl(url) {
+  return withEnvironment(url, environmentId);
 }
 
 export function getEnvironment() {

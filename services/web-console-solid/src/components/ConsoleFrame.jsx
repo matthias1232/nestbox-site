@@ -15,6 +15,7 @@ const DesktopTab = lazy(() => import('../features/sandboxes/DesktopTab.jsx'));
 import ConnectPanel from '../features/sandboxes/ConnectPanel.jsx';
 import { FONT_DEFAULT, modes, nextFont, pickMode } from './consoleFrame.js';
 import '../styles/console.css';
+import { environmentUrl } from '../api/client.js';
 
 const LABELS = { shell: 'Shell', desktop: 'Desktop', ssh: 'SSH' };
 
@@ -55,7 +56,7 @@ export default function ConsoleFrame(props) {
     if (props.onPopOut) return props.onPopOut(mode(), term()?.activeTab?.());
     const id = props.sandbox.id;
     if (mode() === 'desktop') {
-      window.open(desktopPath(id), `nb-desk-${id}`, 'popup,width=1440,height=900');
+      window.open(environmentUrl(desktopPath(id)), `nb-desk-${id}`, 'popup,width=1440,height=900');
     } else {
       const tab = term()?.activeTab?.();
       if (tab) window.open(terminalPath(id, tab), `nb-term-${tab}`, 'popup,width=1200,height=800');

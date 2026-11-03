@@ -18,6 +18,7 @@ import { navigate, paths } from '../../routing.js';
 import { useLive } from '../../state/live.jsx';
 import { useUi } from '../../state/ui.jsx';
 import { LOG_FILTERS, addLine, filterLines, laneAlerts, logLine } from './controlStrip.js';
+import { environmentUrl } from '../../api/client.js';
 
 // Props: sandboxId, onChanged (a rule or window was made).
 export default function LiveLogCard(props) {
@@ -66,7 +67,7 @@ export default function LiveLogCard(props) {
   }
 
   function popOut() {
-    window.open(paths.popLogs(props.sandboxId), 'nestbox-logs', 'width=1100,height=700');
+    window.open(environmentUrl(paths.popLogs(props.sandboxId)), 'nestbox-logs', 'width=1100,height=700');
   }
 
   // Run one answer; the lane row says what happened instead of vanishing silently.

@@ -1,3 +1,5 @@
+import { environmentUrl } from './client.js';
+
 // Opens server-sent event streams for the shared live store (`state/live.jsx`).
 //
 // This is the only place the shared streams are opened, so the store never touches the
@@ -8,7 +10,7 @@
 // Open `path` and call `onEvent(name, parsed)` for each of `names`. Returns a function that
 // closes the stream. `hooks.onOpen` and `hooks.onError` report the connection state.
 export function openStream(path, names, onEvent, hooks = {}) {
-  const source = new EventSource(path);
+  const source = new EventSource(environmentUrl(path));
   for (const name of names) {
     source.addEventListener(name, (event) => {
       try {

@@ -1,6 +1,6 @@
 // Chats: model calls as turns, their groups, one turn, and the live stream.
 
-import { request, query } from './client.js';
+import { request, query, environmentUrl } from './client.js';
 
 // The turn list. Filters: sandbox_id, session_id, model, provider, dlp,
 // account_kind, owner, q, since, until, before (next page), limit.
@@ -18,7 +18,7 @@ export const liveWatch = (what) => request('live/watch', { method: 'POST', body:
 
 // Turns starting, answers growing, turns stored. One connection for the page.
 export function stream(handlers = {}) {
-  const source = new EventSource('/api/v1/chats/stream');
+  const source = new EventSource(environmentUrl('/api/v1/chats/stream'));
   const read = (name, handler) => {
     if (!handler) return;
     source.addEventListener(name, (event) => {

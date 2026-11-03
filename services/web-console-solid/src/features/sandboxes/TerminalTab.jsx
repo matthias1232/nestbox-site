@@ -61,6 +61,7 @@ function legacyCopy(text) {
 }
 import * as api from '../../api/sandboxes.js';
 import * as presence from '../../api/presence.js';
+import { environmentUrl } from '../../api/client.js';
 import PresenceDots from '../../components/PresenceDots.jsx';
 import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 // The tab strip is the same list in the Workbox and in the Admin Center, so the
@@ -142,8 +143,9 @@ export default function TerminalTab(props) {
     setNote(null);
     term?.reset();
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    // A WebSocket carries no header, so the chosen data center travels in the URL (U01).
     socket = new WebSocket(
-      `${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/terminal?tab=${encodeURIComponent(tab)}`,
+      environmentUrl(`${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/terminal?tab=${encodeURIComponent(tab)}`),
       ['nestbox-terminal'],
     );
     socket.onopen = () => {
@@ -311,7 +313,7 @@ export default function TerminalTab(props) {
   function popOut(id) {
     setMenu(null);
     window.open(
-      `/box/${props.sandbox.id}/terminal/${id}`,
+      environmentUrl(`/box/${props.sandbox.id}/terminal/${id}`),
       `nb-term-${id}`,
       'popup,width=1200,height=800',
     );

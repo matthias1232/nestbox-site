@@ -15,6 +15,7 @@
 import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import RFB from '@novnc/novnc/lib/rfb';
 import * as deck from '../../api/deck.js';
+import { environmentUrl } from '../../api/client.js';
 import '../../styles/workbox-sessions.css';
 
 export default function DesktopTab(props) {
@@ -43,7 +44,8 @@ export default function DesktopTab(props) {
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     // `?view=1` is what the server reads to drop this viewer's input.
     const view = viewOnly() ? '?view=1' : '';
-    rfb = new RFB(screen, `${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/desktop${view}`, {
+    // A WebSocket carries no header, so the chosen data center travels in the URL (U01).
+    rfb = new RFB(screen, environmentUrl(`${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/desktop${view}`), {
       wsProtocols: ['binary'],
     });
     rfb.scaleViewport = true;
@@ -91,7 +93,7 @@ export default function DesktopTab(props) {
    */
   function popOut() {
     window.open(
-      `/box/${props.sandbox.id}/desktop`,
+      environmentUrl(`/box/${props.sandbox.id}/desktop`),
       `nb-desk-${props.sandbox.id}`,
       'popup,width=1440,height=900',
     );

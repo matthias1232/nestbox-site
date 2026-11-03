@@ -26,6 +26,7 @@ import {
   DECISION_CHIPS, KIND_CHIPS, applyFilters, counts, isRefused, nodeBySandbox, sandboxOptions, targetOptions,
 } from './trafficFilters.js';
 import '../../styles/traffic.css';
+import { environmentUrl } from '../../api/client.js';
 
 const RED_LANE_MAX = 6;
 
@@ -156,7 +157,7 @@ export function TrafficView(props) {
   }
 
   function popOut() {
-    window.open(paths.popTraffic(), 'nestbox-traffic', 'popup,width=1200,height=800');
+    window.open(environmentUrl(paths.popTraffic()), 'nestbox-traffic', 'popup,width=1200,height=800');
   }
 
   const status = () => (

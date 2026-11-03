@@ -28,7 +28,8 @@ import { useInventory } from './features/shell/useInventory.js';
 import { placeEnvironmentInfo } from './features/shell/placeEnvironment.js';
 import { PAGES } from './features/shell/pages.js';
 import { SHELLLESS, navigate, parsePath, paths } from './routing.js';
-import { adoptOpenerCsrf } from './api/client.js';
+import { adoptOpenerCsrf, adoptOpenerEnvironment } from './api/client.js';
+import { environmentFromUrl } from './api/environmentUrl.js';
 
 const readPlace = () => parsePath(window.location.pathname, window.location.search);
 
@@ -66,6 +67,13 @@ export default function App() {
       session.restore(data);
       if (!(SHELLLESS.has(place().kind) && adoptOpenerCsrf())) {
         await session.refreshCsrf();
+      }
+      // A pop-out window carries no data center of its own: it takes the opener's, or the
+      // one the link named. It never overwrites the user's remembered choice (U01).
+      const fromOpener = SHELLLESS.has(place().kind) ? adoptOpenerEnvironment() : null;
+      const wanted = environmentFromUrl(window.location.search) || fromOpener;
+      if (wanted && wanted !== session.activeEnvironment()) {
+        session.switchEnvironment(wanted, { remember: false });
       }
       // A member's day starts with their own sandboxes, not with the operator's overview.
       if (session.identity()?.role === 'member' && window.location.pathname === '/') {
