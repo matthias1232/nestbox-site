@@ -49,7 +49,7 @@ the codebase where SQL appears.
 | `recipes.rs` | Recipes, the build outcome, applying a template, and the link from a sandbox to its recipe |
 | `image_templates.rs` | Saved builder selections, their sharing rule and the one default per environment |
 | `audit.rs` | Append-only audit writes |
-| `traffic.rs` | Traffic rows for one sandbox and for a whole environment, window counts, map and live edges, one body read, MCP calls, effective rules, the two hashes behind "deployed", and the denied-or-would-deny decisions list |
+| `traffic.rs` | Traffic rows for one sandbox and for a whole environment, window counts, map and live edges, one body read, MCP calls, effective rules, the open windows that cover a sandbox (a window with no end counts), the two hashes behind "deployed", and the denied-or-would-deny decisions list |
 | `geography.rs` | `host_geography`: the cached country and AS per destination host (global table, pool not scope) |
 | `terminal_sessions.rs` | Terminal sessions in `sandbox_sessions`: open, count for the limits, close. Never content (ADR 0023) |
 | `terminal_tabs.rs` | The named terminal tabs one user keeps in one sandbox: list, replace. Never content |
@@ -122,6 +122,11 @@ Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_
 `model_clusters`, `model_cluster_members`, `sandboxes.telemetry_mute_until`/`telemetry_mute_bodies_until` and `ui_tours_seen`.
 `model_clusters.rs` (B05): list/get/create/update/delete, `add_member` (upsert weight), `remove_member`, `members` (joins installs, nodes, provider profiles), `proxy_view` (takes a scope: the tables have RLS), `environment_of` (calls `nb_cluster_environment` on the pool: the one cross-tenant read the accounting proxy needs, migration 0087), `model_exists`, `install_model_key`.
 
+A `traffic_windows` row with `expires_at IS NULL` is an unlimited allow (migration `0078_workbox_control.sql`): no
+end date, not an unknown one. Every query that asks whether a window is in force therefore reads
+`(expires_at IS NULL OR expires_at > now())`; `alerts.rs` (`refused_grouped`), `inventory.rs`
+(`placement_rows`, the tree's alert count) and `traffic.rs` (`open_windows`) all say it that way, and a
+test in `tests/control_center.rs` holds them to it.
 
 ## Files added by the Control Center phase
 

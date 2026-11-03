@@ -1120,7 +1120,7 @@ pub async fn open_windows(
           WHERE environment_id = $1
             AND (sandbox_id = $2 OR sandbox_id IS NULL)
             AND revoked_at IS NULL
-            AND expires_at > now()
+            AND (expires_at IS NULL OR expires_at > now())
           ORDER BY expires_at ASC
           LIMIT 20",
     )

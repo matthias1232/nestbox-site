@@ -585,6 +585,46 @@ async fn alerts_list_a_refused_destination_and_hide_an_answered_one() {
 }
 
 #[tokio::test]
+async fn an_unlimited_window_answers_an_alert() {
+    let Some(pool) = pool().await else {
+        eprintln!("skipping: TEST_DATABASE_URL is not set");
+        return;
+    };
+    let proxy = proxy_node(&pool).await;
+    let ctx = context(&pool, proxy.dir.path().to_path_buf());
+    let environment = default_environment(&pool).await;
+    let who = admin(environment);
+    let suffix = tag();
+    let node_id = node(&pool, environment, &format!("cc-unlimited-node-{suffix}")).await;
+    let sandbox_id =
+        sandbox(&pool, environment, node_id, &format!("cc-unlimited-box-{suffix}"), None).await;
+    let host = format!("unlimited-{suffix}.example.net");
+
+    ingest(&ctx, &proxy, environment, sandbox_id, &host, "deny").await;
+    let open = alert_service::list(&ctx, &who, 15, Some(sandbox_id)).await.expect("alerts");
+    assert_eq!(open.len(), 1, "one refused destination is one alert");
+
+    // No `minutes` means no end date, so `traffic_windows.expires_at` stays NULL (migration 0078).
+    // Such a window has no end, not an unknown one, and answers the alert like a bounded window.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    policy_service::open_window(&ctx, &who, Some(sandbox_id), None, "bypass", "all", "unlimited test")
+        .await
+        .expect("open an unlimited window");
+    let answered = alert_service::list(&ctx, &who, 15, Some(sandbox_id)).await.expect("alerts");
+    assert!(answered.is_empty(), "an unlimited window answers the alert, so it is not listed");
+
+    let tree = inventory_tree_service::tree(&ctx, &who, TreeView::Infrastructure)
+        .await
+        .expect("the tree");
+    let box_node = find(&tree.root, "sandbox", &sandbox_id.to_string()).expect("the sandbox in the tree");
+    assert_eq!(
+        box_node.extra.get("alerts").and_then(serde_json::Value::as_i64),
+        Some(0),
+        "an unlimited window clears the tree's alert count"
+    );
+}
+
+#[tokio::test]
 async fn mounts_set_and_read_back() {
     let Some(pool) = pool().await else {
         eprintln!("skipping: TEST_DATABASE_URL is not set");
