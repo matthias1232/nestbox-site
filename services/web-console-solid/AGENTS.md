@@ -15,7 +15,7 @@ what to show and what to offer.
 | `src/features/` | One folder per screen |
 | `src/state/` | Session and environment |
 | `src/styles/` | Tokens and layout |
-| `nginx.conf` | Same-origin proxy to the API, SSE-safe |
+| `nginx.conf` | Same-origin proxy to the API; gzip for text assets, never for `/api/` (SSE) |
 
 ## Build and run
 
