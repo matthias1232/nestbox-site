@@ -34,4 +34,4 @@ a permanent answer is a draft under Policies (ADR 0011).
 
 | File | Responsibility |
 |---|---|
-| `ClusterPage.jsx` | Gateways, sync, supervisors, topology with its traffic window and the allow-a-blocked-destination panel |
+| `ClusterPage.jsx` | Gateways, sync, supervisors, topology drawn by `TopologyCanvas` (traffic window switch, side panel with Allow 15/30/60 on a refused destination) |

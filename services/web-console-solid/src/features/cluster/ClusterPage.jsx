@@ -1,8 +1,10 @@
 // Gateways, supervisors, and the cluster graph.
 
-import { For, Show, createSignal, onMount } from 'solid-js';
+import { For, Show, createMemo, createSignal, onMount } from 'solid-js';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import TopologyGraph from '../../components/TopologyGraph.jsx';
+import TopologyCanvas from '../../components/TopologyCanvas.jsx';
+import { fromCluster } from '../../components/topologyLayout.js';
+import { navigate, paths } from '../../routing.js';
 import Tabs from '../../components/Tabs.jsx';
 import * as cluster from '../../api/cluster.js';
 import * as policies from '../../api/policies.js';
@@ -23,8 +25,8 @@ export default function ClusterPage() {
   // The traffic window drawn on the graph. Without a window the graph is
   // placement only, and a blocked destination is invisible here.
   const [live, setLive] = createSignal('15m');
-  // The destination an operator clicked, waiting for a duration.
-  const [pending, setPending] = createSignal(null);
+  // The card an operator selected on the canvas.
+  const [selectedId, setSelectedId] = createSignal(null);
   const [busy, setBusy] = createSignal(false);
 
   onMount(load);
@@ -64,12 +66,29 @@ export default function ClusterPage() {
         channel,
       );
       setNotice(`${node.name} is open for ${minutes} minutes on ${channel}.`);
-      setPending(null);
       await load();
     } catch (failure) {
       setError(failure.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // The canvas data: the cluster answer in the shape of contract C15.
+  const drawing = createMemo(() => fromCluster(topology().nodes, topology().edges));
+
+  /// What a canvas action does on this page: navigate, or open a bounded window.
+  function onCanvasAction(id, action) {
+    const item = drawing().nodes.find((entry) => entry.id === id);
+    if (!item) return;
+    if (action.startsWith('allow:')) {
+      allowDestination(item.source || { name: item.label }, Number(action.slice(6)));
+    } else if (action === 'policies') {
+      navigate(paths.menu('policies'));
+    } else if (item.kind === 'sandbox') {
+      navigate(paths.sandbox(id, action === 'logs' ? 'logs' : undefined));
+    } else if (action === 'logs') {
+      navigate(paths.menu('logs'));
     }
   }
 
@@ -128,50 +147,26 @@ export default function ClusterPage() {
 
       <Show when={tab() === 'graph'}>
         <div class="controls">
-          <span class="muted small">Traffic drawn from the last</span>
-          <select
-            value={live()}
-            onChange={(event) => {
-              setLive(event.currentTarget.value);
-              load();
-            }}
-          >
-            <option value="">no traffic</option>
-            <option value="5m">5m</option>
-            <option value="15m">15m</option>
-            <option value="1h">1h</option>
-          </select>
           <button class="secondary tiny" onClick={load}>Refresh</button>
         </div>
 
-        <TopologyGraph
-          nodes={topology().nodes}
-          edges={topology().edges}
-          onDestination={(node) => setPending(node)}
+        <TopologyCanvas
+          label="Cluster topology"
+          nodes={drawing().nodes}
+          edges={drawing().edges}
+          layers={['supervisor', 'gateway', 'sandbox', 'egress', 'destination']}
+          selectedId={selectedId()}
+          onSelect={setSelectedId}
+          onAction={onCanvasAction}
+          trafficWindows={['', '5m', '15m', '1h']}
+          trafficWindow={live()}
+          onTrafficWindow={(value) => {
+            setLive(value);
+            load();
+          }}
+          busy={busy()}
+          height={560}
         />
-
-        <Show when={pending()}>
-          <div class="draft-card">
-            <h3>{pending().name}{pending().port ? `:${pending().port}` : ''}</h3>
-            <p class="muted small">
-              Blocked in this window. Opening it lasts as long as you choose and then
-              reverts on its own; a permanent answer is a rule draft under Policies.
-            </p>
-            <div class="actions">
-              <For each={[15, 30, 60]}>
-                {(minutes) => (
-                  <button
-                    disabled={busy()}
-                    onClick={() => allowDestination(pending(), minutes)}
-                  >
-                    Allow {minutes} min
-                  </button>
-                )}
-              </For>
-              <button class="secondary" onClick={() => setPending(null)}>Dismiss</button>
-            </div>
-          </div>
-        </Show>
 
         <p class="muted small">
           Solid lines are placement: the cluster runs the gateway, the gateway

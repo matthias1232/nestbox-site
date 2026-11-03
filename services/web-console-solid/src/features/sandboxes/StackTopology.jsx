@@ -14,7 +14,9 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import * as sandboxApi from '../../api/sandboxes.js';
 import * as systemApi from '../../api/system.js';
 import LogViewer from '../../components/LogViewer.jsx';
-import { bands, drawnEdges, headline, logLoader, neighbours, tone } from './stackLayout.js';
+import TopologyCanvas from '../../components/TopologyCanvas.jsx';
+import { fromStack } from '../../components/topologyLayout.js';
+import { drawnEdges, headline, logLoader, neighbours, tone } from './stackLayout.js';
 import '../../styles/stack-topology.css';
 
 const POLL_MS = 5000;
@@ -35,11 +37,8 @@ export default function StackTopology(props) {
   const [live, setLive] = createSignal(true);
   const [span, setSpan] = createSignal('5m');
   const [selected, setSelected] = createSignal(null);
-  const [paths, setPaths] = createSignal([]);
   const [readAt, setReadAt] = createSignal(null);
 
-  const cards = new Map();
-  let map;
   let timer = null;
 
   async function load() {
@@ -67,9 +66,6 @@ export default function StackTopology(props) {
   onMount(() => {
     load();
     schedule();
-    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
-    if (map) observer.observe(map);
-    onCleanup(() => observer.disconnect());
   });
   onCleanup(() => timer && clearInterval(timer));
 
@@ -86,56 +82,23 @@ export default function StackTopology(props) {
     load();
   });
 
-  const layout = createMemo(() => bands(topology()));
+  // The canvas data: merged edges (worst status wins) in the shape of contract C15.
+  const drawing = createMemo(() => {
+    const data = topology();
+    return fromStack(data ? { ...data, edges: drawnEdges(data) } : null);
+  });
   const current = createMemo(() => topology()?.nodes.find((node) => node.id === selected()) || null);
   const around = createMemo(() => (selected() ? neighbours(topology(), selected()) : { incoming: [], outgoing: [] }));
 
-  // Lines are measured from the cards' real positions, so wrapping, a narrow
-  // window and a long card all draw correctly without a layout engine.
-  function measure() {
-    if (!map) return;
-    const origin = map.getBoundingClientRect();
-    const out = [];
-    for (const edge of drawnEdges(topology())) {
-      const from = cards.get(edge.from);
-      const to = cards.get(edge.to);
-      if (!from || !to) continue;
-      const a = from.getBoundingClientRect();
-      const b = to.getBoundingClientRect();
-      let d;
-      let mx;
-      let my;
-      if (Math.abs(a.top - b.top) < 4) {
-        const left = a.left < b.left;
-        const x1 = (left ? a.right : a.left) - origin.left;
-        const x2 = (left ? b.left : b.right) - origin.left;
-        const y = a.top + a.height / 2 - origin.top;
-        d = `M${x1},${y} L${x2},${y}`;
-        mx = (x1 + x2) / 2;
-        my = y;
-      } else {
-        const down = a.top < b.top;
-        const x1 = a.left + a.width / 2 - origin.left;
-        const y1 = (down ? a.bottom : a.top) - origin.top;
-        const x2 = b.left + b.width / 2 - origin.left;
-        const y2 = (down ? b.top : b.bottom) - origin.top;
-        const mid = (y1 + y2) / 2;
-        d = `M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`;
-        mx = (x1 + x2) / 2;
-        my = mid;
-      }
-      out.push({ edge, d, mx, my });
+  // The canvas asks for the log panel (or the address) of a card; the detail below shows both.
+  function onCanvasAction(id, action) {
+    setSelected(id);
+    if (action === 'open') {
+      const url = topology()?.nodes.find((node) => node.id === id)?.url;
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
     }
-    setPaths(out);
   }
 
-  createEffect(() => {
-    topology();
-    selected();
-    requestAnimationFrame(measure);
-  });
-
-  const hot = (edge) => edge.from === selected() || edge.to === selected();
   const loader = () => logLoader(current(), { sandboxLogs: (id) => sandboxApi.logs(id, 400), componentLogs: (id) => systemApi.componentLogs(id, 400) });
 
   return (
@@ -174,54 +137,17 @@ export default function StackTopology(props) {
               </ul>
             </Show>
 
-            <div class="stack-map" ref={map}>
-              <svg class="stack-edges" aria-hidden="true">
-                <defs>
-                  <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M0,0 L8,4 L0,8 z" fill="context-stroke" />
-                  </marker>
-                </defs>
-                <For each={paths()}>
-                  {(item) => (
-                    <g class={`edge ${tone(item.edge.status)} ${hot(item.edge) ? 'hot' : 'dim'} ${item.edge.status === 'absent' || item.edge.status === 'idle' ? 'dashed' : ''}`}>
-                      <path d={item.d} marker-end="url(#arrow)" />
-                      <Show when={hot(item.edge) && item.edge.label}>
-                        <text x={item.mx} y={item.my - 4}>{item.edge.label}</text>
-                      </Show>
-                    </g>
-                  )}
-                </For>
-              </svg>
-
-              <For each={layout()}>
-                {(band) => (
-                  <div class="stack-band">
-                    <h4>{band.label}</h4>
-                    <div class="stack-cards">
-                      <For each={band.nodes}>
-                        {(item) => (
-                          <button
-                            ref={(element) => {
-                              cards.set(item.id, element);
-                              onCleanup(() => cards.delete(item.id));
-                            }}
-                            class={`card ${tone(item.status)} ${selected() === item.id ? 'selected' : ''} kind-${item.kind}`}
-                            onClick={() => setSelected(item.id)}
-                            title={item.description}
-                          >
-                            <span class="card-name mono">{item.name}</span>
-                            <span class="card-state">
-                              <i class={`dot ${tone(item.status)}`} />
-                              {item.state}
-                            </span>
-                          </button>
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </div>
+            <TopologyCanvas
+              label="Stack topology"
+              nodes={drawing().nodes}
+              edges={drawing().edges}
+              layers={drawing().layers}
+              selectedId={selected()}
+              onSelect={(id) => id && setSelected(id)}
+              onAction={onCanvasAction}
+              panel={false}
+              height={460}
+            />
 
             <Show when={current()}>
               {(item) => (
