@@ -97,7 +97,7 @@ pub async fn connect(
         .map_err(ApiError::from)?
     {
         return Err(ApiError::conflict(
-            ErrorCode::SANDBOX_NAME_TAKEN,
+            ErrorCode::NODE_NAME_TAKEN,
             "A node with this name exists on this installation.",
         ));
     }

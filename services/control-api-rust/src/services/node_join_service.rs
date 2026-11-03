@@ -178,7 +178,7 @@ pub async fn create_token(
         .await
         .map_err(db)?;
     if taken {
-        return Err(ApiError::conflict(ErrorCode::SANDBOX_NAME_TAKEN, "A node with this name exists on this installation."));
+        return Err(ApiError::conflict(ErrorCode::NODE_NAME_TAKEN, "A node with this name exists on this installation."));
     }
     let token = session::random_token();
     let expires_at = Utc::now() + Duration::minutes(15);
