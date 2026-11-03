@@ -5,3 +5,7 @@ back (ADR 0049). `MovesPage.jsx` has a form (sandbox, target node) and the histo
 the steps it took. A move runs in the background on the control plane; this page polls it.
 
 The source keeps its files as a cold copy. Nothing here deletes anything.
+
+`MovesPage.jsx` now reads as a task list: a table with a nine-step strip per move, a drawer with
+steps, log and snapshots, "Move a sandbox…" (picker, then the workbox `MoveDialog`) and "Recover…".
+Styles are in `styles/jobs.css`.
