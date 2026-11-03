@@ -18,7 +18,7 @@ unit test. Nothing here is imported by a service; each script is started by hand
 
 | File | What it does |
 |---|---|
-| `acceptance-control-center.py` | Acceptance for the Control Center routes (tree, search, bulk, clusters, node summary, alerts, mounts, quick, preview, permissions), the help files and the console bundle. Prints `ok`/`WARN`/`FAIL` per check. |
+| `acceptance-control-center.py` | Acceptance for the Control Center routes (tree, search, bulk, clusters, node summary, alerts, mounts, quick, preview, permissions), the help files and the console bundle. `--environment <uuid>` sends `x-nestbox-environment` and asserts `/auth/me.environment_id` first, then stops instead of grading a data center nobody asked for. Prints `ok`/`WARN`/`FAIL` per check. |
 | `acceptance-control-center-browser.md` | Browser checklist the coordinator walks with a signed-in user after the script passes. |
 | `acceptance-image-builder.py` | Acceptance for the image-builder catalogues, repositories, MCP assignments and templates. |
 | `acceptance-workbox-control.py` | Acceptance for the workbox controls: agent sign-in modes, live egress mode, evaluation window, presence, model grants, tunnels, move preflight, control overview. Prints one German `CLEARAND` line per assertion. |

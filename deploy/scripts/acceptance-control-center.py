@@ -2,12 +2,19 @@
 """Acceptance of the Control Center routes and console bundle against the appliance.
 
     python3 deploy/scripts/acceptance-control-center.py \\
-        --base http://192.168.55.50:8080 --token <ADMIN_BEARER_TOKEN>
+        --base http://192.168.55.50:8080 --token <ADMIN_BEARER_TOKEN> \\
+        --environment 00000000-0000-0000-0000-000000000002
 
 Every check prints ``ok <name>: <message>``, ``WARN <name>: <message>`` or
 ``FAIL <name>: <message>``. The exit code is 1 when at least one check failed.
 Standard library only; no secret is ever printed. The browser part is the
 checklist in ``acceptance-control-center-browser.md``.
+
+``--environment`` sends ``x-nestbox-environment`` on every API call and makes the
+script prove it works there first (``/auth/me``). Without it the token acts in the
+data center the API picks, which on a box with more than one is the one that sorts
+first by name, an empty one as often as not. The run says which one it got either
+way, so it cannot change tenant unnoticed.
 """
 from __future__ import annotations
 
@@ -23,6 +30,7 @@ DEFAULT_BASE = "http://192.168.55.50:8080"
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
 BASE = DEFAULT_BASE
 TOKEN = ""
+ENVIRONMENT = ""
 FAILURES: list[str] = []
 WARNINGS: list[str] = []
 PASSED: list[str] = []
@@ -38,6 +46,8 @@ def raw(path: str, method: str = "GET", body: object | None = None, auth: bool =
         headers["content-type"] = "application/json"
     if auth:
         headers["authorization"] = f"Bearer {TOKEN}"
+        if ENVIRONMENT:
+            headers["x-nestbox-environment"] = ENVIRONMENT
     request = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as answer:
@@ -89,6 +99,23 @@ def items_of(payload: object) -> list[dict]:
     items = payload.get("items") if isinstance(payload, dict) else None
     assert isinstance(items, list), f"no items list: {short(payload)}"
     return [row for row in items if isinstance(row, dict)]
+
+
+# ---------------------------------------------------------------------------
+# Check 0: which data center the token is working in
+# ---------------------------------------------------------------------------
+
+
+def check_environment() -> str:
+    """Check 0: the token acts in the data center named by --environment."""
+    status, payload = api("/auth/me")
+    expect(status, {200}, payload)
+    acting = payload.get("environment_id") if isinstance(payload, dict) else None
+    assert acting, f"no environment_id in /auth/me: {short(payload)}"
+    if not ENVIRONMENT:
+        return f"no --environment given; the token acts in {acting}"
+    assert str(acting).lower() == ENVIRONMENT.lower(), f"the token acts in {acting}, wanted {ENVIRONMENT}"
+    return f"the token acts in {acting}"
 
 
 # ---------------------------------------------------------------------------
@@ -320,15 +347,28 @@ def teardown() -> None:
 
 def main() -> int:
     """Parse arguments, run every check, print the verdict."""
-    global BASE, TOKEN
+    global BASE, TOKEN, ENVIRONMENT
     parser = argparse.ArgumentParser(description="Control Center acceptance against the appliance.")
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--token", required=True, help="Admin bearer token.")
+    parser.add_argument(
+        "--environment",
+        default="",
+        help="Data center the token must work in. Sent as x-nestbox-environment and asserted on /auth/me first.",
+    )
     arguments = parser.parse_args()
     BASE = arguments.base.rstrip("/")
     TOKEN = arguments.token.strip()
-    print(f"Control Center acceptance against {BASE}")
+    ENVIRONMENT = arguments.environment.strip()
+    target = f" (data center {ENVIRONMENT})" if ENVIRONMENT else ""
+    print(f"Control Center acceptance against {BASE}{target}")
     try:
+        run("0 environment", check_environment)
+        if ENVIRONMENT and "0 environment" in FAILURES:
+            # Every later check would grade a different data center than asked for,
+            # so a green run would prove nothing. Say why and stop.
+            print("stopped: the /auth/me assertion failed; later checks would grade the wrong data center")
+            return 1
         run("1 health+openapi", check_health)
         run("2 inventory tree", check_tree)
         run("3 search", check_search)
