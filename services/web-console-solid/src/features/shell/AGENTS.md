@@ -10,7 +10,7 @@ mounts the overlays once. `App.jsx` wraps every page except the pop-outs in `<Sh
 | `Sidebar.jsx` | Tree views, filter and `Tree` above collapsible menu groups from `menuFor(role)`; resizable, collapsible to icons: a local `MENU_ICONS` map picks an `Icon` per route, `Settings` for an unknown one (X10); an empty data center gets a one-line notice with a switch button instead of a silent switch (X15) |
 | `Dock.jsx` | Tasks / Live events / Alerts tabs, collapsed by default, resizable, pop-out, bottom sheet under 720 px |
 | `Breadcrumb.jsx` | The trail at the top of a page |
-| `PageHeader.jsx` | Sticky title row with status and the action bar |
+| `PageHeader.jsx` | Sticky title row with status and the action bar. At >= 1100 px the title block and the action block sit in one grid row (title flexible, actions a separate right column) and actions wrap inside their own column, never over the title; below 1100 px the two blocks stack. Exactly one action is `primary` (V07) |
 | `useInventory.js` | Shared inventory tree hook: one 10 s poll, live-event refresh (debounced 500 ms), view from `ui.tree` |
 | `treeFilter.js` | Pure helpers: `filterTree`, `treePathFor` (breadcrumbs), `pathFor`, `ancestorIds`, `expandableIds` |
 | `treeFilter.test.js` | Tests for the helpers above |

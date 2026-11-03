@@ -89,14 +89,14 @@ export default function ActionBar(props) {
       <Show when={resting()}>
         <button class="primary tiny" disabled={busy()} onClick={() => lifecycle('start', 'started')}>Start</button>
       </Show>
-      <button class="secondary tiny" disabled={busy() || !live()} onClick={askStop}>Stop</button>
+      <button class={live() ? 'primary tiny' : 'secondary tiny'} disabled={busy() || !live()} onClick={askStop}>Stop</button>
       <button class="secondary tiny" disabled={busy() || !live()} onClick={() => lifecycle('restart', 'restarted')}>Restart</button>
       <button class="secondary tiny" disabled={busy()} onClick={() => setConfirm('recreate')}>Recreate</button>
       <button class="secondary tiny" disabled={busy()} onClick={() => setMoving(true)}>Move…</button>
 
       <span class="ac-split">
-        <button class="secondary tiny" disabled={!live()} onClick={() => openConsole(lastMode())}>
-          Console: {lastMode() === 'desktop' ? 'Desktop' : 'Shell'}
+        <button class="secondary tiny" disabled={!live()} title={lastMode() === 'desktop' ? 'Open the desktop' : 'Open the shell'} onClick={() => openConsole(lastMode())}>
+          Console
         </button>
         <button
           class="secondary tiny ac-split-toggle"

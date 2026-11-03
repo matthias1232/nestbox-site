@@ -202,6 +202,7 @@ export default function NodePage(props) {
   const actions = (
     <>
       <Show when={isOperator()}>
+        <button type="button" class="primary" onClick={() => navigate(`${paths.menu('models')}?deploy=1&node=${encodeURIComponent(name())}`)}>Deploy model here</button>
         <button type="button" class="secondary" disabled={busy() === 'probe'} onClick={probe}>Probe</button>
         <button type="button" class="secondary" onClick={() => { setTarget(siblings()[0]?.name || ''); setDialog('drain'); }}>Drain…</button>
         <span class="inv-lock" title="How this node reaches the internet">
@@ -213,7 +214,6 @@ export default function NodePage(props) {
             options={[{ value: 'strict', label: 'Strict' }, { value: 'exit_local', label: 'Exit locally' }]}
           />
         </span>
-        <button type="button" class="secondary" onClick={() => navigate(`${paths.menu('models')}?deploy=1&node=${encodeURIComponent(name())}`)}>Deploy model here</button>
       </Show>
       <Show when={role() === 'admin'}>
         <button

@@ -62,15 +62,19 @@
 .cc-breadcrumb a:hover { color: var(--fg); }
 .cc-crumb-sep { color: var(--fg-faint); }
 
+/* Title and action bar share one row at >= 1100 px: the title takes the free space, the
+ * actions get their own column on the right and wrap inside it, never over the title. */
 .cc-page-header {
   position: sticky; top: 0; z-index: 5;
-  display: flex; justify-content: space-between; align-items: center; gap: var(--space-4);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 60%);
+  align-items: center; gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
   background: var(--bg); border-bottom: 1px solid var(--border);
 }
-.cc-page-title { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+.cc-page-title { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; min-width: 0; }
 .cc-page-title h1 { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.03em; margin: 0; }
-.cc-page-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.cc-page-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
+/* One primary button per action bar; every other action is secondary, ghost or danger. */
 
 /* topbar */
 .cc-topbar button { font: inherit; }
@@ -139,6 +143,8 @@
 
 @media (max-width: 1100px) {
   .cc-shell { grid-template-columns: 1fr; grid-template-areas: "top" "main" "dock"; }
+  .cc-page-header { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .cc-page-actions { justify-content: flex-start; }
   .cc-sidebar { display: none; }
   .cc-overlay-open .cc-sidebar { display: flex; position: fixed; top: var(--topbar-height); bottom: 0; left: 0; width: 272px; z-index: 20; }
   .cc-overlay-open .cc-resizer { display: none; }
