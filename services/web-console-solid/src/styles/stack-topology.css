@@ -62,7 +62,7 @@ a.button { display: inline-block; text-decoration: none; padding: 2px 10px; bord
   border-left: 3px solid var(--bad);
   background: color-mix(in oklab, var(--bad) 8%, transparent);
   padding: 8px 10px;
-  border-radius: 0 6px 6px 0;
+  border-radius: var(--radius);
   color: var(--bad);
 }
 .stack-problems--alert li { color: var(--bad); }
