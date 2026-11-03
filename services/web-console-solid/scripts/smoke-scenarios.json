@@ -1,0 +1,626 @@
+[
+  {
+    "name": "01-home",
+    "path": "/",
+    "wait": 6000,
+    "steps": [
+      {
+        "expectSelector": ".home-page"
+      },
+      {
+        "expectSelector": ".home-tiles"
+      },
+      {
+        "expectSelector": ".home-map"
+      },
+      {
+        "eval": "!!document.querySelector('.home-health') || document.body.innerText.includes('Everything is healthy')"
+      },
+      {
+        "expectNoText": "Loading…"
+      }
+    ]
+  },
+  {
+    "name": "02-tree-node",
+    "path": "/",
+    "wait": 5000,
+    "steps": [
+      {
+        "eval": "(() => { document.querySelectorAll('.tree-row[aria-expanded=\"false\"] .tree-twisty').forEach((twisty) => twisty.click()); return true; })()"
+      },
+      {
+        "wait": 1000
+      },
+      {
+        "expectSelector": ".tree-row[data-kind=\"node\"]"
+      },
+      {
+        "click": ".tree-row[data-kind=\"node\"]"
+      },
+      {
+        "wait": 4000
+      },
+      {
+        "expectText": "Summary"
+      },
+      {
+        "eval": "document.querySelectorAll('.gauge').length === 4"
+      }
+    ]
+  },
+  {
+    "name": "03-palette",
+    "path": "/",
+    "wait": 4000,
+    "steps": [
+      {
+        "key": "ctrl+k"
+      },
+      {
+        "wait": 500
+      },
+      {
+        "expectSelector": ".palette-input"
+      },
+      {
+        "type": "desktop"
+      },
+      {
+        "wait": 2500
+      },
+      {
+        "key": "Enter"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "eval": "location.pathname === '/sandboxes/{{desktop01}}'"
+      },
+      {
+        "expectSelector": ".ac-actionbar"
+      }
+    ]
+  },
+  {
+    "name": "04-admin-actionbar",
+    "path": "/sandboxes/{{desktop01}}",
+    "wait": 4000,
+    "steps": [
+      {
+        "expectSelector": ".ac-actionbar"
+      },
+      {
+        "eval": "(() => { window.scrollTo(0, 2000); return true; })()"
+      },
+      {
+        "wait": 600
+      },
+      {
+        "eval": "(() => { const el = document.querySelector('.ac-actionbar'); return !!el && el.getBoundingClientRect().top >= 0; })()"
+      }
+    ]
+  },
+  {
+    "name": "05-terminal",
+    "path": "/sandboxes/{{desktop01}}?tab=console",
+    "wait": 5000,
+    "steps": [
+      {
+        "click": ".console-toolbar .nb-seg:nth-of-type(1)"
+      },
+      {
+        "wait": 8000
+      },
+      {
+        "expectSelector": ".xterm-rows"
+      },
+      {
+        "click": ".xterm-screen"
+      },
+      {
+        "wait": 500
+      },
+      {
+        "type": "echo nestbox-ok-42"
+      },
+      {
+        "key": "Enter"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "eval": "(document.querySelector('.xterm-rows')?.innerText || '').includes('nestbox-ok-42')"
+      },
+      {
+        "eval": "(() => { history.pushState({}, '', '/sandboxes/{{desktopOS}}?tab=console'); window.dispatchEvent(new PopStateEvent('popstate')); return true; })()"
+      },
+      {
+        "wait": 8000
+      },
+      {
+        "click": ".console-toolbar .nb-seg:nth-of-type(1)"
+      },
+      {
+        "wait": 8000
+      },
+      {
+        "expectSelector": ".xterm-rows"
+      },
+      {
+        "click": ".xterm-screen"
+      },
+      {
+        "wait": 500
+      },
+      {
+        "type": "echo nestbox-ok-42"
+      },
+      {
+        "key": "Enter"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "eval": "(document.querySelector('.xterm-rows')?.innerText || '').includes('nestbox-ok-42')"
+      }
+    ]
+  },
+  {
+    "name": "06-desktop",
+    "path": "/sandboxes/{{desktop01}}?tab=console",
+    "wait": 4000,
+    "steps": [
+      {
+        "click": ".console-toolbar .nb-seg:nth-of-type(2)"
+      },
+      {
+        "wait": 10000
+      },
+      {
+        "eval": "(() => { const c = document.querySelector('.desktop-screen canvas'); if (!c || !c.width || !c.height) return false; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 0; i < d.length; i += 4000) if (d[i] + d[i + 1] + d[i + 2] > 30) lit += 1; return lit > 10; })()"
+      },
+      {
+        "expectSelector": ".vnc-sidebar"
+      },
+      {
+        "click": ".vnc-nav button[aria-label=\"Send key\"]"
+      },
+      {
+        "wait": 800
+      },
+      {
+        "click": ".vnc-sec button.vnc-wide"
+      },
+      {
+        "wait": 1200
+      }
+    ]
+  },
+  {
+    "name": "07-workbox",
+    "path": "/box/{{desktop01}}",
+    "wait": 6000,
+    "steps": [
+      {
+        "expectSelector": ".wb-strip"
+      },
+      {
+        "eval": "(async () => { for (let i = 0; i < 40; i += 1) { const groups = [...document.querySelectorAll('.wb-strip-row:first-child .wb-strip-group')]; const group = groups.find((entry) => entry.querySelector('.wb-strip-label')?.textContent.includes('Recording')); const button = [...(group?.querySelectorAll('.nb-seg') || [])].find((entry) => entry.textContent.trim() === 'Off'); if (button && !button.disabled) { button.click(); break; } await new Promise((r) => setTimeout(r, 250)); } for (let i = 0; i < 48; i += 1) { await new Promise((r) => setTimeout(r, 250)); if (document.body.innerText.includes('store nothing')) return true; } return false; })()"
+      },
+      {
+        "expectText": "store nothing"
+      },
+      {
+        "eval": "(async () => { for (let i = 0; i < 40; i += 1) { const groups = [...document.querySelectorAll('.wb-strip-row:first-child .wb-strip-group')]; const group = groups.find((entry) => entry.querySelector('.wb-strip-label')?.textContent.includes('Recording')); const button = [...(group?.querySelectorAll('.nb-seg') || [])].find((entry) => entry.textContent.trim() === 'Full'); if (button && !button.disabled) { button.click(); break; } await new Promise((r) => setTimeout(r, 250)); } for (let i = 0; i < 48; i += 1) { await new Promise((r) => setTimeout(r, 250)); if (document.body.innerText.includes('store flows, bodies and chats')) return true; } return false; })()"
+      },
+      {
+        "expectText": "store flows, bodies and chats"
+      }
+    ]
+  },
+  {
+    "name": "08-allow-all",
+    "path": "/sandboxes/{{desktop01}}?tab=summary",
+    "wait": 4000,
+    "steps": [
+      {
+        "expectSelector": ".ac-actionbar"
+      },
+      {
+        "click": ".ac-actionbar button[aria-pressed]"
+      },
+      {
+        "eval": "(async () => { for (let i = 0; i < 48; i += 1) { await new Promise((r) => setTimeout(r, 250)); if ((document.querySelector('.ac-actionbar')?.innerText || '').includes('Stop allowing')) return true; } return false; })()"
+      },
+      {
+        "expectText": "Stop allowing"
+      },
+      {
+        "click": ".ac-actionbar button[aria-pressed]"
+      },
+      {
+        "eval": "(async () => { for (let i = 0; i < 48; i += 1) { await new Promise((r) => setTimeout(r, 250)); if ((document.querySelector('.ac-actionbar')?.innerText || '').includes('Allow all 15 min')) return true; } return false; })()"
+      },
+      {
+        "expectText": "Allow all 15 min"
+      }
+    ]
+  },
+  {
+    "name": "09-alerts",
+    "path": "/",
+    "wait": 5000,
+    "steps": [
+      {
+        "eval": "(async () => { const read = () => Number(document.querySelector('.cc-bell-count')?.textContent || -1); let last = read(); if (last < 0) return false; for (let i = 0; i < 12; i += 1) { await new Promise((r) => setTimeout(r, 1500)); const now = read(); if (now >= 0 && now === last) return true; last = now; } return true; })()"
+      },
+      {
+        "eval": "(() => { const bell = document.querySelector('.cc-bell-count'); if (!bell) return false; window.__smokeBell = Number(bell.textContent); return true; })()"
+      },
+      {
+        "eval": "(async () => { const salt = Math.random().toString(36).slice(2, 8); const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; const v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }); const body = { kind: 'network', id: uuid, environment_id: '{{default}}', sandbox_id: '{{desktop01}}', ts: new Date().toISOString(), direction: 'outbound', protocol: 'tls', source: '10.0.0.2', destination: 'smoke-deny-1-' + salt + '.example.org', port: 443, decision: 'deny', channel: 'proxy', enforcement: 'enforced' }; const answer = await fetch('/api/v1/telemetry/ingest', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': window.__nestboxCsrf || '', 'x-nestbox-environment': '{{default}}' }, body: JSON.stringify(body) }); return answer.status === 202 || answer.status === 200; })()"
+      },
+      {
+        "wait": 15000
+      },
+      {
+        "eval": "(() => { const bell = document.querySelector('.cc-bell-count'); return !!bell && Number(bell.textContent) >= window.__smokeBell + 1; })()"
+      },
+      {
+        "eval": "(() => { const cards = document.querySelectorAll('.alert-stack .alert-card'); window.__smokeCards = cards.length; return cards.length > 0; })()"
+      },
+      {
+        "click": ".alert-stack .alert-hide"
+      },
+      {
+        "wait": 800
+      },
+      {
+        "eval": "(() => { const bell = document.querySelector('.cc-bell-count'); return !!bell && Number(bell.textContent) >= window.__smokeBell + 1; })()"
+      },
+      {
+        "click": ".cc-bell-more"
+      },
+      {
+        "wait": 400
+      },
+      {
+        "eval": "(() => { const item = [...document.querySelectorAll('.cc-bell-menu button')].find((button) => button.textContent.includes('Mute pop-ups for 1 hour')); if (!item) return false; item.click(); return true; })()"
+      },
+      {
+        "wait": 600
+      },
+      {
+        "eval": "(async () => { const salt = Math.random().toString(36).slice(2, 8); const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; const v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }); const body = { kind: 'network', id: uuid, environment_id: '{{default}}', sandbox_id: '{{desktop01}}', ts: new Date().toISOString(), direction: 'outbound', protocol: 'tls', source: '10.0.0.2', destination: 'smoke-deny-2-' + salt + '.example.org', port: 443, decision: 'deny', channel: 'proxy', enforcement: 'enforced' }; const answer = await fetch('/api/v1/telemetry/ingest', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': window.__nestboxCsrf || '', 'x-nestbox-environment': '{{default}}' }, body: JSON.stringify(body) }); return answer.status === 202 || answer.status === 200; })()"
+      },
+      {
+        "wait": 15000
+      },
+      {
+        "eval": "(() => { const bell = document.querySelector('.cc-bell-count'); const cards = document.querySelectorAll('.alert-stack .alert-card').length; return cards === 0 && !!bell && Number(bell.textContent) >= window.__smokeBell + 2; })()"
+      }
+    ]
+  },
+  {
+    "name": "10-policy-wizard",
+    "path": "/policies?wizard=1",
+    "wait": 4000,
+    "steps": [
+      {
+        "expectSelector": ".wizard"
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 700
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 700
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 700
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 700
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 4000
+      },
+      {
+        "expectText": "network_policies"
+      }
+    ]
+  },
+  {
+    "name": "11-mounts",
+    "path": "/sandboxes/{{desktop01}}?tab=mounts",
+    "wait": 4000,
+    "steps": [
+      {
+        "expectSelector": ".mount-editor"
+      },
+      {
+        "eval": "(() => { return !!document.querySelector('.mount-table') || document.body.innerText.includes('Nothing is mounted'); })()"
+      }
+    ]
+  },
+  {
+    "name": "12-models",
+    "path": "/models",
+    "wait": 5000,
+    "steps": [
+      {
+        "expectSelector": ".model-grid"
+      },
+      {
+        "click": ".cc-page-actions button.primary"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "expectSelector": ".model-pick"
+      },
+      {
+        "eval": "(() => { const input = document.querySelector('.bulk-deploy input[type=\"search\"]'); if (!input) return false; input.focus(); return true; })()"
+      },
+      {
+        "type": "tinyllama"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "click": ".model-pick li:first-child input[type=\"radio\"]"
+      },
+      {
+        "wait": 500
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "click": ".node-picker input[type=\"checkbox\"]"
+      },
+      {
+        "wait": 500
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 800
+      },
+      {
+        "click": ".wizard-footer button.primary"
+      },
+      {
+        "wait": 2500
+      },
+      {
+        "expectText": "This will make the following calls"
+      }
+    ]
+  },
+  {
+    "name": "13-clusters",
+    "path": "/clusters",
+    "wait": 4000,
+    "steps": [
+      {
+        "expectSelector": ".clusters-page"
+      },
+      {
+        "click": ".clusters-page .cc-page-actions button.primary"
+      },
+      {
+        "wait": 1000
+      },
+      {
+        "expectSelector": ".nb-dialog[aria-label=\"New cluster\"]"
+      },
+      {
+        "key": "Escape"
+      },
+      {
+        "wait": 800
+      },
+      {
+        "eval": "!document.querySelector('.nb-dialog')"
+      }
+    ]
+  },
+  {
+    "name": "14-traffic",
+    "path": "/traffic",
+    "wait": 5000,
+    "steps": [
+      {
+        "expectSelector": ".traffic-page"
+      },
+      {
+        "eval": "(() => { window.__smokeRows = document.querySelectorAll('.traffic-main table.traffic tbody tr').length; return true; })()"
+      },
+      {
+        "click": ".traffic-filter:nth-of-type(1) .nb-seg:nth-of-type(3)"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "eval": "(() => { const group = document.querySelectorAll('.traffic-filter')[0]; const chip = [...group.querySelectorAll('.nb-seg')].find((entry) => entry.textContent.trim().startsWith('DNS')); const rows = document.querySelectorAll('.traffic-main table.traffic tbody tr').length; return !!chip && chip.getAttribute('aria-checked') === 'true' && rows < window.__smokeRows; })()"
+      },
+      {
+        "eval": "[...document.querySelectorAll('.cc-page-actions button')].some((button) => button.textContent.trim() === 'Pop out')"
+      }
+    ]
+  },
+  {
+    "name": "15-logs",
+    "path": "/logs",
+    "wait": 5000,
+    "steps": [
+      {
+        "eval": "(() => { const button = [...document.querySelectorAll('.cc-page-actions button')].find((entry) => entry.textContent.includes('Add pane')); if (!button) return false; button.click(); return true; })()"
+      },
+      {
+        "wait": 1500
+      },
+      {
+        "expectSelector": ".log-pane"
+      },
+      {
+        "eval": "(() => { const select = document.querySelector('.log-pane select[aria-label=\"Log source\"]'); if (!select) return false; select.value = 'sandbox:{{desktop01}}'; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()"
+      },
+      {
+        "wait": 10000
+      },
+      {
+        "expectSelector": ".logview .logline"
+      }
+    ]
+  },
+  {
+    "name": "16-users",
+    "path": "/users",
+    "wait": 5000,
+    "steps": [
+      {
+        "expectText": "admin@nestbox.local"
+      },
+      {
+        "click": ".tabs .tab:nth-of-type(2)"
+      },
+      {
+        "wait": 2500
+      },
+      {
+        "expectSelector": ".users-permissions"
+      }
+    ]
+  },
+  {
+    "name": "17-docs",
+    "path": "/docs/deploy-on-many-nodes",
+    "wait": 4000,
+    "steps": [
+      {
+        "expectSelector": ".docs-article h1"
+      },
+      {
+        "expectText": "Deploy one model on twenty nodes"
+      },
+      {
+        "eval": "(() => { history.pushState({}, '', '/box/{{desktop01}}'); window.dispatchEvent(new PopStateEvent('popstate')); return true; })()"
+      },
+      {
+        "wait": 5000
+      },
+      {
+        "click": ".wb-strip .icon-button[aria-label=\"Help\"]"
+      },
+      {
+        "wait": 2000
+      },
+      {
+        "expectSelector": ".drawer"
+      }
+    ]
+  },
+  {
+    "name": "18-data-center",
+    "path": "/",
+    "wait": 6000,
+    "steps": [
+      {
+        "eval": "(() => { document.querySelectorAll('.tree-row[aria-expanded=\"false\"] .tree-twisty').forEach((twisty) => twisty.click()); return true; })()"
+      },
+      {
+        "wait": 1000
+      },
+      {
+        "expectSelector": ".tree-row[data-kind=\"node\"]"
+      },
+      {
+        "eval": "(() => { const select = document.querySelector('.cc-context-bar select'); if (!select) return false; const option = [...select.options].find((entry) => entry.textContent.trim() === 'Berlin'); if (!option) return false; select.value = option.value; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()"
+      },
+      {
+        "wait": 12000
+      },
+      {
+        "expectNoText": "desktop-01"
+      },
+      {
+        "eval": "(() => document.body.innerText.includes('No nodes yet') || document.body.innerText.includes('no nodes'))()"
+      },
+      {
+        "eval": "(() => { const select = document.querySelector('.cc-context-bar select'); if (!select) return false; const option = [...select.options].find((entry) => entry.textContent.trim() === 'default'); if (!option) return false; select.value = option.value; select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()"
+      },
+      {
+        "wait": 12000
+      },
+      {
+        "eval": "(() => { document.querySelectorAll('.tree-row[aria-expanded=\"false\"] .tree-twisty').forEach((twisty) => twisty.click()); return true; })()"
+      },
+      {
+        "wait": 2000
+      },
+      {
+        "eval": "document.querySelectorAll('.tree-row[data-kind=\"sandbox\"]').length >= 6"
+      },
+      {
+        "expectText": "desktop-01"
+      }
+    ]
+  },
+  {
+    "name": "19-popout-logs",
+    "path": "/pop/logs/{{desktop01}}?environment={{default}}",
+    "wait": 9000,
+    "steps": [
+      {
+        "expectSelector": ".logs-popout"
+      },
+      {
+        "expectSelector": ".logview .logline"
+      }
+    ]
+  },
+  {
+    "name": "20-member",
+    "path": "/my",
+    "wait": 6000,
+    "login": "member",
+    "steps": [
+      {
+        "expectSelector": ".wb-box"
+      },
+      {
+        "eval": "document.querySelectorAll('.wb-box').length === 1"
+      },
+      {
+        "expectText": "desktop-01"
+      }
+    ]
+  }
+]
