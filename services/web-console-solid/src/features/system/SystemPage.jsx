@@ -20,6 +20,8 @@ import StatusBadge from '../../components/StatusBadge.jsx';
 import { formatBytes } from '../../components/Meter.jsx';
 import * as system from '../../api/system.js';
 import * as cluster from '../../api/cluster.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const MiB = 1024 * 1024;
 const HELP = {
@@ -118,17 +120,14 @@ export default function SystemPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>System containers</h1>
-          <p class="muted">
-            The components the console and the sandboxes run on. Sandboxes are listed on their own page;
-            this is the platform beneath them, so a gateway or a supervisor is edited here and not by
-            hand on the node.
-          </p>
-        </div>
-        <button class="secondary" onClick={load}>Refresh</button>
-      </header>
+      <PageHeader
+        title="System containers"
+        subtitle={<>The components the console and the sandboxes run on. Sandboxes are listed on their own page; this is the platform beneath them, so a gateway or a supervisor is edited here and not by hand on the node.</>}
+        actions={<>
+          <button class="secondary" onClick={load}>Refresh</button>
+          <HelpTip anchor="nodes" />
+        </>}
+      />
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>
 

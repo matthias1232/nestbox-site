@@ -11,6 +11,8 @@ import Empty from '../../components/Empty.jsx';
 import RecipeDetail from './RecipeDetail.jsx';
 import { useRecipes } from './useRecipes.js';
 import '../../styles/recipes-persist.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 export default function RecipesPage() {
   const state = useRecipes();
@@ -25,20 +27,16 @@ export default function RecipesPage() {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Recipes</h1>
-          <p class="muted">
-            {state.items().length} recipes · an image is addressed by the hash of the recipe
-            that made it
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Recipes"
+        subtitle={<>{state.items().length} recipes · an image is addressed by the hash of the recipe that made it</>}
+        actions={<>
           <button class="secondary" onClick={() => state.load()} disabled={state.loading()}>
             {state.loading() ? 'Refreshing…' : 'Refresh'}
           </button>
-        </div>
-      </header>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={!state.selected()}>
         <Show when={state.error()}><p class="error">{state.error()}</p></Show>

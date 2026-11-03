@@ -3,6 +3,8 @@
 import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 import * as api from '../../api/hosting.js';
 import * as tenancy from '../../api/tenancy.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const money = (milli) => `${(milli / 1000).toFixed(3)}`;
 
@@ -91,16 +93,13 @@ export default function HostingPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Rented machines</h1>
-          <p class="muted">
-            Rent a server for a while, move your work onto it, move it back, and hand the machine
-            back. A machine is deleted when its time is up or it has sat empty, and never while data
-            is still on it.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        title="Rented machines"
+        subtitle={<>Rent a server for a while, move your work onto it, move it back, and hand the machine back. A machine is deleted when its time is up or it has sat empty, and never while data is still on it.</>}
+        actions={<>
+          <HelpTip anchor="nodes" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>

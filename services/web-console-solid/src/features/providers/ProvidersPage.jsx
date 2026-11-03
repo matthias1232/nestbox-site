@@ -18,6 +18,9 @@ import * as vault from '../../api/secrets.js';
 import * as models from '../../api/models.js';
 import * as proxies from '../../api/proxies.js';
 import '../../styles/providers-status.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
+import '../../styles/setup.css';
 
 // What an operator can register by hand. `local_openai_compatible` is absent on
 // purpose: that kind is created by an install, never typed into the form.
@@ -354,21 +357,17 @@ export default function ProvidersPage() {
 
   return (
     <section class="page prov-page">
-      <header class="page-head">
-        <div>
-          <h1>Providers</h1>
-          <p class="muted">
-            {items().length} endpoints · the first OpenAI-compatible profile is used
-            for new agent sandboxes
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Providers"
+        subtitle={<>{items().length} endpoints · the first OpenAI-compatible profile is used for new agent sandboxes</>}
+        actions={<>
           <button class="secondary" onClick={probeAll} disabled={testingAll()}>
             {testingAll() ? 'Testing every key…' : 'Test all keys'}
           </button>
           <button class="secondary" onClick={load}>Refresh</button>
-        </div>
-      </header>
+          <HelpTip anchor="deploy-a-model" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>

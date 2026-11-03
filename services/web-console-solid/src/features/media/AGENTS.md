@@ -24,3 +24,5 @@ sandbox's own choice, which may only narrow what the environment allows.
    environment default changes what every sandbox inherits.
 4. Rendering itself is not offered here: it is an agent tool. This screen decides
    what that tool may use.
+
+Restyle (F25): `MediaPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

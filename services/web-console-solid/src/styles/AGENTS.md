@@ -47,3 +47,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 - `mounts.css` — mount editor chips, path lists (F15); imported by `features/sandboxes/MountEditor.jsx`.
 - `traffic.css` — Live traffic page: filter bar, red lane, side panel, sticky table header (F17); imported by `features/traffic/TrafficPage.jsx`.
 | `console.css` | toolbar and body of `components/ConsoleFrame.jsx` |
+- `setup.css` — `.page-grid` and `.two-col` layout helpers for the setup pages (F25); imported by `features/providers/ProvidersPage.jsx`.

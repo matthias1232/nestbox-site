@@ -10,6 +10,8 @@
 import { For, Show, createMemo, createSignal, onMount } from 'solid-js';
 import * as cudax from '../../api/cudax.js';
 import * as nodesApi from '../../api/nodes.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 export default function CudaXPage() {
   const [components, setComponents] = createSignal([]);
@@ -90,15 +92,13 @@ export default function CudaXPage() {
 
   return (
     <section class="page">
-      <div class="page-head">
-        <div>
-          <h2>CUDA-X</h2>
-          <p class="muted">
-            Components you can install on a node. Warnings describe what the hardware will not
-            support; they never replace your decision.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="CUDA-X"
+        subtitle={<>Components you can install on a node. Warnings describe what the hardware will not support; they never replace your decision.</>}
+        actions={<>
+          <HelpTip anchor="nodes" />
+        </>}
+      />
 
       <div class="toolbar">
         <label class="field">

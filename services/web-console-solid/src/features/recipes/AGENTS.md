@@ -43,3 +43,5 @@ Styles live in `src/styles/recipes-persist.css`, imported by the page.
 
 `App.jsx` is not part of this package: the integrator adds the route and the
 `features/AGENTS.md` row. The page exports a default component with no props.
+
+Restyle (F25): `RecipesPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

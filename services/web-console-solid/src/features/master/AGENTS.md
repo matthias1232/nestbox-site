@@ -52,3 +52,5 @@ import MasterControlPage from './features/master/MasterControlPage.jsx';
   <MasterControlPage role={session.identity()?.role} />
 </Show>
 ```
+
+Restyle (F25): `MasterControlPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

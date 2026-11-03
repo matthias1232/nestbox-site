@@ -12,6 +12,8 @@ import { For, Show, createSignal, onMount } from 'solid-js';
 
 import * as api from '../../api/proxies.js';
 import StatusBadge from '../../components/StatusBadge.jsx';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const blank = {
   name: '',
@@ -114,17 +116,13 @@ export default function ProxiesPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Exit proxies</h1>
-          <p class="muted">
-            Where traffic leaves the node. A sandbox chooses one in its Policies tab; a
-            provider profile chooses one in Providers. An exit is used when the sandbox's
-            egress mode is <b>Direct</b>; in the proxied modes the node's own egress proxy
-            is the exit, because that is where policy is enforced.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        title="Exit proxies"
+        subtitle={<>Where traffic leaves the node. A sandbox chooses one in its Policies tab; a provider profile chooses one in Providers. An exit is used when the sandbox's egress mode is <b>Direct</b>; in the proxied modes the node's own egress proxy is the exit, because that is where policy is enforced.</>}
+        actions={<>
+          <HelpTip anchor="egress-modes" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>

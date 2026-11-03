@@ -8,6 +8,8 @@
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { usePrivacy } from './usePrivacy.js';
 import * as sandboxApi from '../../api/sandboxes.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 // Noise-level severity to a colour that means the same thing as elsewhere in the
 // console; an unknown value stays neutral instead of looking healthy.
@@ -96,14 +98,13 @@ export default function PrivacyPage(props) {
 
   return (
     <div class="page">
-      <header class="page-head">
-        <h2>Content privacy</h2>
-        <p class="muted">
-          What is inspected on its way into a sandbox and on its way out to a cloud
-          provider. A finding is recorded masked; the original text is never stored, and
-          the console cannot show it back to you.
-        </p>
-      </header>
+      <PageHeader
+        title="Content privacy"
+        subtitle={<>What is inspected on its way into a sandbox and on its way out to a cloud provider. A finding is recorded masked; the original text is never stored, and the console cannot show it back to you.</>}
+        actions={<>
+          <HelpTip anchor="policies" />
+        </>}
+      />
 
       <PrivacyDlpSection />
 

@@ -6,6 +6,8 @@
 
 import { For, Show, createMemo, createSignal, onMount } from 'solid-js';
 import * as packs from '../../api/packs.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 export default function SkillsPage() {
   const [items, setItems] = createSignal([]);
@@ -25,7 +27,7 @@ export default function SkillsPage() {
   });
 
   return <section class="page">
-    <header class="page-head"><div><h1>Skills</h1><p class="muted">Controlled capabilities agents can receive through a reproducible recipe. A skill never receives a provider secret; it uses the sandbox’s assigned provider reference.</p></div><button class="secondary" onClick={load}>Refresh</button></header>
+    <PageHeader title="Skills" subtitle={<>Controlled capabilities agents can receive through a reproducible recipe. A skill never receives a provider secret; it uses the sandbox’s assigned provider reference.</>} actions={<><button class="secondary" onClick={load}>Refresh</button><HelpTip anchor="getting-started" /></>} />
     <p class="notice">To assign a skill today, select it in <b>Build image</b> or a recipe, then create/recreate the sandbox. Direct live injection is intentionally not offered because it would make the running image unauditable.</p>
     <Show when={error()}><p class="error">{error()}</p></Show><Show when={notice()}><p class="notice">{notice()}</p></Show>
     <label class="field"><span>Find a skill</span><input value={search()} placeholder="browser, git, CUDA …" onInput={(e) => setSearch(e.currentTarget.value)} /><small class="muted">Searches the server-owned skill catalogue; no client-side capabilities are invented.</small></label>

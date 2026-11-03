@@ -9,6 +9,8 @@ import { For, Show, createEffect, createSignal, onMount } from 'solid-js';
 import { useMedia } from './useMedia.js';
 import * as sandboxApi from '../../api/sandboxes.js';
 import StatusBadge from '../../components/StatusBadge.jsx';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 function emptyTarget() {
   return { provider_id: '', model: '' };
@@ -97,14 +99,13 @@ export default function MediaPage(props) {
 
   return (
     <div class="page">
-      <header class="page-head">
-        <h2>Media rendering</h2>
-        <p class="muted">
-          Which model answers an image, video or music request from an agent. The sandbox never
-          receives the provider credential: the control plane calls the provider and stores the
-          asset.
-        </p>
-      </header>
+      <PageHeader
+        title="Media rendering"
+        subtitle={<>Which model answers an image, video or music request from an agent. The sandbox never receives the provider credential: the control plane calls the provider and stores the asset.</>}
+        actions={<>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={media.error()}><p class="error">{media.error()}</p></Show>
       <Show when={media.notice()}><p class="notice">{media.notice()}</p></Show>

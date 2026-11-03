@@ -11,3 +11,5 @@ Two rules the screen keeps: a missing price is `n/a`, and what an API key cost i
 never added to what a signed-in account (Claude, Codex) would cost at list price.
 The numbers come from `GET /accounting/usage`, filled by the egress proxy reading
 model answers (inspecting modes) and by the accounting proxy.
+
+Restyle (F25): `UsagePage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

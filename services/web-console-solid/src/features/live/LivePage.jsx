@@ -11,6 +11,8 @@ import Segmented from '../../components/Segmented.jsx';
 import { useLiveAgents } from './useLiveAgents.js';
 import { formatCost, formatCount } from './format.js';
 import './live.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const CONNECTION = {
   connecting: { tone: 'warn', label: 'connecting' },
@@ -33,17 +35,14 @@ export default function LivePage() {
 
   return (
     <section class="page live-page">
-      <header class="page-head">
-        <div>
-          <h1>Agent situation</h1>
-          <p class="muted">
-            What every agent is doing now, and what it did in the last five minutes.
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Agent situation"
+        subtitle={<>What every agent is doing now, and what it did in the last five minutes.</>}
+        actions={<>
           <span class={`badge ${connection().tone}`}>{connection().label}</span>
-        </div>
-      </header>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={live.connection() === 'lost'}>
         <div class="warn-note live-banner" role="status">
@@ -53,6 +52,13 @@ export default function LivePage() {
           </span>
           <button class="tiny" onClick={live.retry}>Retry now</button>
         </div>
+      </Show>
+
+      <Show when={live.snapshotError() && live.agents().length === 0 && !live.loading()}>
+        <Empty
+          title="Agent situation needs the live agents route"
+          hint="The control API did not answer the live agents snapshot, so this page has nothing to draw. It fills in as soon as the route exists; see the project status for the open question."
+        />
       </Show>
 
       <Show when={live.snapshotError()}>

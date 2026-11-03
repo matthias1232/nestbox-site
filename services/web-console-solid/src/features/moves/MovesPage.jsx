@@ -4,6 +4,8 @@ import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 import * as api from '../../api/moves.js';
 import * as nodeApi from '../../api/nodes.js';
 import * as sandboxApi from '../../api/sandboxes.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const STEPS = ['check', 'image', 'snapshot', 'stop', 'delta', 'restore', 'cutover', 'recreate', 'verify', 'done'];
 
@@ -65,16 +67,13 @@ export default function MovesPage() {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Moves</h1>
-          <p class="muted">
-            Move a sandbox with its folders and the agent's login to another node, work there, and
-            move it back. Only what changed travels on the way back. The old node keeps its files as
-            a cold copy.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        title="Moves"
+        subtitle={<>Move a sandbox with its folders and the agent's login to another node, work there, and move it back. Only what changed travels on the way back. The old node keeps its files as a cold copy.</>}
+        actions={<>
+          <HelpTip anchor="moves" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
 

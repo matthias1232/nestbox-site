@@ -15,3 +15,5 @@ which one is enabled.
 
 The API is `/api/v1/proxies` (`src/api/proxies.js`); the service is
 `services/proxy_service.rs`.
+
+Restyle (F25): `ProxiesPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.
