@@ -245,8 +245,15 @@ export default function VncSidebar(props) {
               <div class="vnc-keys">
                 <For each={KEYS_GRID}>
                   {(name) => (
-                    <button type="button" class="tiny secondary" disabled={!props.connected} onClick={() => sendKey(name)}>
-                      {name.replace('ctrlAlt', 'Ctrl+Alt+')}
+                    <button
+                      type="button"
+                      class="tiny secondary mono"
+                      title={`Ctrl+Alt+${name.replace('ctrlAlt', '')}`}
+                      aria-label={`Send Ctrl+Alt+${name.replace('ctrlAlt', '')}`}
+                      disabled={!props.connected}
+                      onClick={() => sendKey(name)}
+                    >
+                      {name.replace('ctrlAlt', '')}
                     </button>
                   )}
                 </For>

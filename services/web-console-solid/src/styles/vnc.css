@@ -185,8 +185,16 @@
 
 .vnc-keys {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Twelve function keys, six per row of short labels: "F1", not "Ctrl+Alt+F1",
+   * which could not fit and painted over its neighbour (seen in the smoke run). */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 3px;
+}
+
+.vnc-keys button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .vnc-keys button {

@@ -71,7 +71,20 @@
 
 /* Tabs (V08): the active tab carries a 2px lime underline; an optional count is muted mono.
  * Selectors carry `button.` so they win over the legacy strip in app.css whatever the load order. */
-.tabs button.tab { border-bottom: 2px solid transparent; }
+.tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  /* Many tabs (Summary … Processes): the strip scrolls instead of cutting the
+   * last one off at the content edge (seen in the smoke run). */
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tabs button.tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
 .tabs button.tab.active { color: var(--fg); border-bottom: 2px solid var(--accent); }
 .tabs .tab-count { font: 400 0.72rem var(--mono); color: var(--fg-muted); }
 
