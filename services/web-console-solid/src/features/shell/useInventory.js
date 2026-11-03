@@ -2,7 +2,9 @@
 //
 // One poll serves every subscriber: the first `useInventory()` call starts a 10 s timer, the
 // last `onCleanup` stops it. Live events `sandbox`, `node`, `job` and `alert` trigger a refresh,
-// debounced to 500 ms. F05, F06 and F17 code against `{ root, error, refresh, view, setView }`.
+// debounced to 500 ms. A load is skipped while the last good answer for the same view is fresh,
+// so pages that mount together share one request; `refresh()` always loads.
+// F05, F06 and F17 code against `{ root, error, refresh, view, setView }`.
 import { createEffect, createSignal, on, onCleanup } from 'solid-js';
 import * as inventory from '../../api/inventory.js';
 import { useLive } from '../../state/live.jsx';
@@ -10,6 +12,9 @@ import { useUi } from '../../state/ui.jsx';
 
 const POLL_MS = 10000;
 const DEBOUNCE_MS = 500;
+// An answer this young is still the answer: the sidebar, the home page and the data-center page
+// mount within the same second, and each of them asked for the whole tree before.
+const FRESH_MS = 2000;
 const LIVE_EVENTS = ['sandbox', 'node', 'job', 'alert'];
 
 const [root, setRoot] = createSignal(null);
@@ -20,9 +25,13 @@ let subscribers = 0;
 let timer = null;
 let debounce = null;
 let sequence = 0;
+let answeredView = null;
+let answeredAt = 0;
 
-// Load the tree of `view`; a slower, older answer never overwrites a newer one.
-async function load(view) {
+// Load the tree of `view`; a slower, older answer never overwrites a newer one. Unless `force`
+// is set, a view that answered less than `FRESH_MS` ago is left alone.
+async function load(view, { force = false } = {}) {
+  if (!force && answeredView === view && answeredAt && Date.now() - answeredAt < FRESH_MS) return;
   sequence += 1;
   const mine = sequence;
   try {
@@ -30,6 +39,8 @@ async function load(view) {
     if (mine !== sequence) return;
     setRoot(answer?.root || null);
     setError(null);
+    answeredView = view;
+    answeredAt = Date.now();
   } catch (failure) {
     if (mine === sequence) setError(failure?.message || 'Could not load the inventory.');
   }
@@ -72,5 +83,5 @@ export function useInventory() {
     }
   });
 
-  return { root, error, refresh: () => load(view()), view, setView };
+  return { root, error, refresh: () => load(view(), { force: true }), view, setView };
 }

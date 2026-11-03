@@ -110,7 +110,8 @@ covers every card's `x + card.w` (tested), and the column titles own a `band` ab
 | `LogView.jsx` | A log, read the way an operator reads one: newest at the bottom, problems in colour, |
 | `LogView.test.js` | Node tests for `LogView`. |
 | `Meter.jsx` | A labelled horizontal bar. `value` and `max` are numbers in the same unit; |
-| `Poll.js` | Poll a loader while a component is mounted. `load` returns a promise; each |
+| `Poll.js` | Poll a loader while a component is mounted. `load` returns a promise; each answer goes to `onData`, a failure to `onError`. A hidden tab (`document.hidden`) stops the timer without touching the pause switch; on becoming visible one `tick()` runs at once and the interval resumes, and the `visibilitychange` listener is removed in `onCleanup`. `pollActive({ hidden, paused })` is the pure decision, so the behaviour is testable without a DOM. |
+| `poll.test.js` | Node tests for `pollActive`: hidden always quiet, paused quiet, visible and unpaused polls, coming back into view runs one tick; and the module keeps the listener removal. |
 | `TabBoundary.jsx` | A tab must never take the console down with it. |
 | `alertAnswers.test.js` | Node tests for `alertAnswers`. |
 | `countdown.test.js` | Node tests for `countdown`. |
