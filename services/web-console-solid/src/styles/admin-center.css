@@ -1,0 +1,27 @@
+/* Admin Center frame: action bar, summary tiles, grouped tabs. Tokens only (04-DESIGN-SYSTEM). */
+.admin-center { display: flex; flex-direction: column; gap: var(--space-3); }
+.ac-body { padding: 0 var(--space-5) var(--space-5); }
+.admin-center > .tabs, .admin-center > .error { margin-left: var(--space-5); margin-right: var(--space-5); }
+
+.ac-actionbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ac-actionbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ac-split { position: relative; display: inline-flex; }
+.ac-split-toggle { border-left: 0; padding-inline: var(--space-2); }
+.ac-menu {
+  position: absolute; top: 100%; left: 0; z-index: 20; min-width: 160px; margin: var(--space-1) 0 0; padding: var(--space-1);
+  list-style: none; background: var(--bg-raised); border: 1px solid var(--border-strong);
+}
+.ac-menu button { width: 100%; text-align: left; }
+.ac-menu button:hover { background: var(--bg-hover); }
+
+.ac-tab-actions { display: flex; justify-content: flex-end; margin-bottom: var(--space-3); }
+.ac-group { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.ac-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); }
+.ac-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-3); }
+.ac-gauges { display: flex; gap: var(--space-5); flex-wrap: wrap; }
+.ac-trends { display: flex; gap: var(--space-5); flex-wrap: wrap; margin-top: var(--space-3); color: var(--accent); }
+.ac-trends > div { display: flex; flex-direction: column; gap: var(--space-1); }
+.ac-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.ac-list li { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.ac-list li button { margin-left: auto; }

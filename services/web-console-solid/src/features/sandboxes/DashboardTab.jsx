@@ -5,22 +5,14 @@
 // its resources. Everything refreshes every five seconds while the tab is open.
 import { For, Show, createSignal } from 'solid-js';
 import * as deck from '../../api/deck.js';
-import Meter, { formatBytes } from '../../components/Meter.jsx';
+import { formatBytes } from '../../components/Meter.jsx';
+import Gauge from '../../components/Gauge.jsx';
+import Sparkline from '../../components/Sparkline.jsx';
 import HostLoad from '../../components/HostLoad.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import { usePolling } from '../../components/Poll.js';
 import ResourcesPanel from './ResourcesPanel.jsx';
 import '../../styles/deck.css';
-
-function Spark(props) {
-  const path = () => {
-    const values = props.values;
-    if (!values || values.length < 2) return '';
-    const max = Math.max(props.max || 0, ...values, 1);
-    return values.map((v, i) => `${i ? 'L' : 'M'}${(i / (values.length - 1)) * 300},${46 - (v / max) * 44}`).join(' ');
-  };
-  return <svg class="spark" viewBox="0 0 300 48" preserveAspectRatio="none"><path d={path()} /></svg>;
-}
 
 export default function DashboardTab(props) {
   const id = () => props.sandbox?.id;
@@ -75,17 +67,17 @@ export default function DashboardTab(props) {
 
         <div class="deck-card">
           <h3>CPU</h3>
-          <Meter label="Now" value={last()?.cpu_pct_avg ?? 0} max={Math.max(100, (spec().cpu_limit || 1) * 100)}
-            text={`${(last()?.cpu_pct_avg ?? 0).toFixed(1)}% · limit ${spec().cpu_limit ?? '—'} cores`} />
-          <Spark values={series().map((p) => p.cpu_pct_avg)} />
+          <Gauge label="Now" value={Math.round(last()?.cpu_pct_avg ?? 0)} max={Math.round(Math.max(100, (spec().cpu_limit || 1) * 100))} unit="%" />
+          <p class="muted small">{(last()?.cpu_pct_avg ?? 0).toFixed(1)}% · limit {spec().cpu_limit ?? '—'} cores</p>
+          <Sparkline label="CPU trend" width={300} height={48} points={series().map((p) => p.cpu_pct_avg)} />
           <Show when={series().length === 0}><p class="muted small">No samples yet. The runner reports every five seconds.</p></Show>
         </div>
 
         <div class="deck-card">
           <h3>Memory</h3>
-          <Meter label="Now" value={last()?.mem_bytes_avg ?? 0} max={last()?.mem_limit || 1}
-            text={`${formatBytes(last()?.mem_bytes_avg)} of ${formatBytes(last()?.mem_limit)}`} />
-          <Spark values={series().map((p) => p.mem_bytes_avg)} max={last()?.mem_limit} />
+          <Gauge label="Now" value={Math.round(((last()?.mem_bytes_avg ?? 0) / 1073741824) * 10) / 10} max={Math.round(((last()?.mem_limit || 0) / 1073741824) * 10) / 10} unit="GiB" />
+          <p class="muted small">{formatBytes(last()?.mem_bytes_avg)} of {formatBytes(last()?.mem_limit)}</p>
+          <Sparkline label="Memory trend" width={300} height={48} points={series().map((p) => p.mem_bytes_avg)} max={last()?.mem_limit} />
         </div>
 
         <div class="deck-card">
