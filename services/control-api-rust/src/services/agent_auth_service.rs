@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use uuid::Uuid;
 
@@ -414,6 +415,93 @@ fn respawned_while_waiting() -> &'static Mutex<HashMap<(Uuid, AgentKind), HashSe
     RESPAWNED.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// How long a failing restart stays quiet between two warnings.
+///
+/// The loop runs every five seconds, so an unreachable runner would otherwise
+/// write a warning twelve times a minute for as long as the sandbox lives — an
+/// appliance log that then fills the same disk this platform keeps running out
+/// of. One line every ten minutes still tells an operator that something is
+/// stuck, and the count below decides when to stop trying.
+const RESTART_WARN_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
+/// Failed attempts with `node.runtime_unavailable` that end a pending restart.
+///
+/// Twelve attempts is one minute of the loop's five-second pass: long enough to
+/// ride out a runner that is just restarting, short enough that a sandbox on a
+/// broken node stops being retried instead of being retried forever.
+const RESTART_GIVE_UP_AFTER: u32 = 12;
+
+/// What is known about one pending restart that keeps failing.
+#[derive(Debug, Clone, Copy, Default)]
+struct FailedRestart {
+    /// Attempts that failed with `node.runtime_unavailable` while waiting.
+    unavailable_attempts: u32,
+    /// When the last warning was written; `None` until the first one.
+    last_warned: Option<Instant>,
+}
+
+/// What one failed attempt means for the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailedAttempt {
+    /// The interval has not passed; say nothing this pass.
+    Quiet,
+    /// Say it now.
+    Warn,
+    /// Give up: clear the pending flag instead of trying again.
+    GiveUp,
+}
+
+/// Whether a warning about one waiting restart may be written at `now`.
+///
+/// Pure so the interval can be tested without waiting ten minutes.
+fn may_warn_failure(last_warned: Option<Instant>, now: Instant) -> bool {
+    match last_warned {
+        None => true,
+        Some(last) => now.saturating_duration_since(last) >= RESTART_WARN_INTERVAL,
+    }
+}
+
+/// Failed restarts already counted, keyed by sandbox and agent.
+///
+/// Like `respawned_while_waiting`, this is a cache: losing it to a restart of
+/// this process costs one more warning and one more minute of retries.
+fn failed_restarts() -> &'static Mutex<HashMap<(Uuid, AgentKind), FailedRestart>> {
+    static FAILED: OnceLock<Mutex<HashMap<(Uuid, AgentKind), FailedRestart>>> = OnceLock::new();
+    FAILED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Count one attempt that failed because the runtime is unavailable and decide
+/// what to say about it: nothing, one warning, or that the retries are over.
+fn record_runtime_unavailable(sandbox_id: Uuid, agent: AgentKind, now: Instant) -> FailedAttempt {
+    let mut guard = match failed_restarts().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let entry = guard.entry((sandbox_id, agent)).or_default();
+    entry.unavailable_attempts += 1;
+    if entry.unavailable_attempts >= RESTART_GIVE_UP_AFTER {
+        guard.remove(&(sandbox_id, agent));
+        return FailedAttempt::GiveUp;
+    }
+    if !may_warn_failure(entry.last_warned, now) {
+        return FailedAttempt::Quiet;
+    }
+    entry.last_warned = Some(now);
+    FailedAttempt::Warn
+}
+
+/// Forget the failures of one restart, because it is no longer pending.
+fn forget_failures(sandbox_id: Uuid, agent: AgentKind) {
+    match failed_restarts().lock() {
+        Ok(mut guard) => {
+            guard.remove(&(sandbox_id, agent));
+        }
+        Err(poisoned) => {
+            poisoned.into_inner().remove(&(sandbox_id, agent));
+        }
+    }
+}
+
 /// The sandbox of the caller's environment, read under row-level security.
 async fn load_sandbox(
     ctx: &ServiceContext,
@@ -591,7 +679,15 @@ async fn apply_restart(
     }
     if restart_servers {
         for process in &servers {
-            if !restart_process(ctx, &sandbox.name, &process.name).await {
+            let restarted =
+                agent_activity_service::restart_supervised(ctx, &sandbox.name, &process.name).await;
+            if let Err(error) = restarted {
+                tracing::warn!(
+                    sandbox = %sandbox.name,
+                    agent = process.name,
+                    code = error.code.0,
+                    "supervised agent not restarted"
+                );
                 complete = false;
             }
         }
@@ -601,6 +697,7 @@ async fn apply_restart(
     set_pending(ctx, sandbox.environment_id, sandbox.id, agent, waiting).await?;
     if !waiting {
         forget_respawned(sandbox.id, agent);
+        forget_failures(sandbox.id, agent);
     }
     Ok(())
 }
@@ -627,6 +724,7 @@ async fn finish_restart(
         // Nothing can be restarted in a stopped sandbox, and keeping the flag
         // would restart it the moment it comes up, which nobody asked for.
         forget_respawned(sandbox_id, agent);
+        forget_failures(sandbox_id, agent);
         return set_pending(ctx, environment_id, sandbox_id, agent, false).await;
     }
 
@@ -651,15 +749,53 @@ async fn finish_restart(
         return Ok(());
     }
     let mut complete = true;
+    let mut gave_up = false;
     for process in &servers {
-        if !restart_process(ctx, &sandbox.name, &process.name).await {
-            complete = false;
+        let restarted =
+            agent_activity_service::restart_supervised(ctx, &sandbox.name, &process.name).await;
+        let error = match restarted {
+            Ok(()) => continue,
+            Err(error) => error,
+        };
+        complete = false;
+        let outcome = if error.code.0 == "node.runtime_unavailable" {
+            record_runtime_unavailable(sandbox_id, agent, Instant::now())
+        } else {
+            FailedAttempt::Warn
+        };
+        match outcome {
+            FailedAttempt::Quiet => {}
+            FailedAttempt::Warn => tracing::warn!(
+                sandbox = %sandbox.name,
+                agent = process.name,
+                code = error.code.0,
+                "supervised agent not restarted"
+            ),
+            FailedAttempt::GiveUp => {
+                gave_up = true;
+                tracing::warn!(
+                    sandbox = %sandbox.name,
+                    agent = agent.as_str(),
+                    "gave up restarting {} in {}: runtime unavailable",
+                    agent.as_str(),
+                    sandbox.name
+                );
+            }
         }
+    }
+    if gave_up {
+        // A node that does not answer will not answer next pass either. Clearing
+        // the flag ends the retries; a later restart attempt sets it again.
+        forget_respawned(sandbox_id, agent);
+        forget_failures(sandbox_id, agent);
+        set_pending(ctx, environment_id, sandbox_id, agent, false).await?;
+        return Ok(());
     }
     if !complete {
         return Ok(());
     }
     forget_respawned(sandbox_id, agent);
+    forget_failures(sandbox_id, agent);
     set_pending(ctx, environment_id, sandbox_id, agent, false).await?;
     ctx.bus
         .publish(crate::domain::telemetry::LiveEvent::SandboxControlChanged {
@@ -726,22 +862,6 @@ async fn restart_pane(ctx: &ServiceContext, sandbox_name: &str, session: &AgentS
     }
 }
 
-/// Restart one supervised agent; `false` and a log line when it did not happen.
-async fn restart_process(ctx: &ServiceContext, sandbox_name: &str, name: &str) -> bool {
-    match agent_activity_service::restart_supervised(ctx, sandbox_name, name).await {
-        Ok(()) => true,
-        Err(error) => {
-            tracing::warn!(
-                sandbox = sandbox_name,
-                agent = name,
-                code = error.code.0,
-                "supervised agent not restarted"
-            );
-            false
-        }
-    }
-}
-
 /// Whether a server agent of this sandbox just talked to a model.
 async fn recent_traffic(ctx: &ServiceContext, environment_id: Uuid, sandbox_id: Uuid) -> bool {
     match agent_activity_service::recent_model_traffic(ctx, environment_id, sandbox_id).await {
@@ -799,4 +919,34 @@ fn push_openshell_policies(ctx: &ServiceContext) {
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failing_restart_is_logged_at_most_once_per_ten_minutes() {
+        let start = Instant::now();
+        assert!(may_warn_failure(None, start));
+        assert!(!may_warn_failure(Some(start), start + Duration::from_secs(5)));
+        assert!(!may_warn_failure(Some(start), start + Duration::from_secs(9 * 60)));
+        assert!(may_warn_failure(Some(start), start + RESTART_WARN_INTERVAL));
+    }
+
+    #[test]
+    fn twelve_unavailable_attempts_end_the_pending_restart() {
+        let sandbox_id = Uuid::new_v4();
+        let now = Instant::now();
+        for attempt in 1..RESTART_GIVE_UP_AFTER {
+            let outcome = record_runtime_unavailable(sandbox_id, AgentKind::Claude, now);
+            assert_ne!(outcome, FailedAttempt::GiveUp, "attempt {attempt} must not give up");
+        }
+        let twelfth = record_runtime_unavailable(sandbox_id, AgentKind::Claude, now);
+        assert_eq!(twelfth, FailedAttempt::GiveUp);
+        // The count is gone, so a later restart starts again at the first attempt.
+        let later = record_runtime_unavailable(sandbox_id, AgentKind::Claude, now);
+        assert_eq!(later, FailedAttempt::Warn);
+        forget_failures(sandbox_id, AgentKind::Claude);
+    }
 }

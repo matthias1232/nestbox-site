@@ -398,7 +398,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 |---|---|
 | `accounting_service.rs` | Request accounting: what a request used, what it cost, and what a window |
 | `agent_activity_service.rs` | What the agents in a sandbox are doing right now: their tmux panes, whether a |
-| `agent_auth_service.rs` | Switching an agent between the user's own subscription and the gateway |
+| `agent_auth_service.rs` | Switching an agent between the user's own subscription and the gateway; `run_pending_restarts` retries a waiting restart, warns at most once per 10 minutes per sandbox and agent, and clears the flag after 12 attempts with `node.runtime_unavailable` |
 | `agent_launch_service.rs` | The launcher inside a sandbox that starts each agent in its chosen sign-in |
 | `audit_service.rs` | Reading the audit trail. |
 | `backup_service.rs` | Backup and restore of persistent roots. |
