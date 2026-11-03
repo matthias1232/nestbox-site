@@ -416,7 +416,10 @@ async fn bulk_stop_records_one_result_per_target() {
     let first = sandbox(&pool, environment, node_id, &format!("cc-bulk-a-{suffix}"), None).await;
     let second = sandbox(&pool, environment, node_id, &format!("cc-bulk-b-{suffix}"), None).await;
 
-    let answer = bulk_service::sandboxes(&ctx, &admin(environment), vec![first, second], "stop", json!({}))
+    // SAFETY: the test sets the variable before it starts any thread that reads it.
+    unsafe { std::env::set_var("DATABASE_URL", "postgres://unused") };
+    let config = std::sync::Arc::new(nestbox_control_api::config::Config::from_env().expect("a config"));
+    let answer = bulk_service::sandboxes(&ctx, config, &admin(environment), vec![first, second], "stop", json!({}))
         .await
         .expect("a bulk job");
     assert_eq!(answer["total"], 2);
