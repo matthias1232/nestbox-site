@@ -1039,5 +1039,114 @@ class RouterTest(unittest.TestCase):
         self.assertEqual(row["privacy_action"], "allowed")
 
 
+def _member(install: str, weight: int = 1, healthy: bool = True, endpoint: str = "http://x") -> dict:
+    return {"install_id": install, "endpoint": endpoint, "weight": weight, "healthy": healthy}
+
+
+class ChooseMemberTest(unittest.TestCase):
+    def test_round_robin_follows_the_weights(self) -> None:
+        view = {"id": "c1", "strategy": "round_robin",
+                "members": [_member("a", 2), _member("b", 1)]}
+        counters: dict[str, int] = {}
+        picks = [proxy.choose_member(view, {}, counters)["install_id"] for _ in range(6)]
+        self.assertEqual(picks, ["a", "a", "b", "a", "a", "b"])
+
+    def test_round_robin_skips_unhealthy_members(self) -> None:
+        view = {"id": "c1", "strategy": "round_robin",
+                "members": [_member("a", healthy=False), _member("b")]}
+        counters: dict[str, int] = {}
+        picks = {proxy.choose_member(view, {}, counters)["install_id"] for _ in range(3)}
+        self.assertEqual(picks, {"b"})
+
+    def test_least_loaded_takes_the_fewest_in_flight(self) -> None:
+        view = {"id": "c1", "strategy": "least_loaded",
+                "members": [_member("a"), _member("b"), _member("c")]}
+        self.assertEqual(
+            proxy.choose_member(view, {"a": 3, "b": 1, "c": 2}, {})["install_id"], "b"
+        )
+
+    def test_failover_takes_the_first_healthy_member(self) -> None:
+        view = {"id": "c1", "strategy": "failover",
+                "members": [_member("a", healthy=False), _member("b"), _member("c")]}
+        self.assertEqual(proxy.choose_member(view, {}, {})["install_id"], "b")
+
+    def test_no_healthy_member_is_none(self) -> None:
+        view = {"id": "c1", "strategy": "failover", "members": [_member("a", healthy=False)]}
+        self.assertIsNone(proxy.choose_member(view, {}, {}))
+
+
+class ClusterViewTest(unittest.TestCase):
+    def setUp(self) -> None:
+        proxy._CLUSTERS.clear()
+
+    def test_a_view_is_cached_then_expires(self) -> None:
+        answer = {"strategy": "failover", "model_key": "m", "members": [_member("a")]}
+        with mock.patch.object(proxy, "control_get", return_value=answer) as get:
+            proxy.cluster_view("cx")
+            proxy.cluster_view("cx")
+            self.assertEqual(get.call_count, 1)
+            fetched, view = proxy._CLUSTERS["cx"]
+            proxy._CLUSTERS["cx"] = (fetched - proxy.CLUSTER_TTL - 1, view)
+            proxy.cluster_view("cx")
+            self.assertEqual(get.call_count, 2)
+
+    def test_an_error_returns_the_stale_view_or_none(self) -> None:
+        with mock.patch.object(proxy, "control_get", side_effect=proxy.ControlError("x")):
+            self.assertIsNone(proxy.cluster_view("cy"))
+        proxy._CLUSTERS["cy"] = (time.monotonic() - 100, {"id": "cy", "members": []})
+        with mock.patch.object(proxy, "control_get", side_effect=proxy.ControlError("x")):
+            self.assertEqual(proxy.cluster_view("cy")["id"], "cy")
+
+
+class _Echo(_Quiet):
+    def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+        length = int(self.headers.get("content-length") or 0)
+        self.rfile.read(length)
+        data = json.dumps({"model": "m", "who": self.server.name}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+class ClusterFailoverTest(unittest.TestCase):
+    def test_a_dead_first_member_falls_over_to_the_next(self) -> None:
+        proxy._CLUSTERS.clear()
+        proxy._UNHEALTHY.clear()
+        good = ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+        good.name = "good"
+        threading.Thread(target=good.serve_forever, daemon=True).start()
+        dead = ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+        dead_port = dead.server_address[1]
+        dead.server_close()  # nothing listens there any more
+        view = {"id": "cz", "strategy": "failover", "model_key": "m", "members": [
+            _member("dead", endpoint=f"http://127.0.0.1:{dead_port}"),
+            _member("good", endpoint=f"http://127.0.0.1:{good.server_address[1]}"),
+        ]}
+        rows: list[dict] = []
+        front = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Handler)
+        threading.Thread(target=front.serve_forever, daemon=True).start()
+        try:
+            with mock.patch.object(proxy, "control_get", return_value=view), \
+                 mock.patch.object(proxy, "control_post", side_effect=lambda c, p, row: rows.append(row) or {}), \
+                 mock.patch.object(proxy, "inspect_request",
+                                   side_effect=lambda c, b, d: proxy.Outcome("allowed", None, b)):
+                conn = http.client.HTTPConnection("127.0.0.1", front.server_address[1], timeout=10)
+                body = json.dumps({"model": "m"})
+                conn.request("POST", "/c/cz/v1/chat/completions", body=body,
+                             headers={"Content-Type": "application/json"})
+                response = conn.getresponse()
+                data = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(data["who"], "good")
+                self.assertEqual(response.getheader("x-nestbox-cluster-member"), "good")
+                self.assertGreater(proxy._UNHEALTHY[("cz", "dead")], time.monotonic())
+            self.assertEqual(rows[-1]["detail"]["install_id"], "good")
+        finally:
+            front.shutdown()
+            good.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

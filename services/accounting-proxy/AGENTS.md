@@ -72,6 +72,17 @@ and every model request gets `404 model_not_granted`.
   usual. `X-Nestbox-Upstream` is ignored on this path: the grant decides.
 - The routes document and its `authorization` values are never logged.
 
+**Model clusters.** `/c/<cluster_id>/<rest>` forwards to one healthy member of a
+cluster. `cluster_view` fetches `GET /api/v1/internal/accounting/clusters/<id>`
+(`{"id","strategy","model_key","members":[{"install_id","endpoint","weight","healthy"}]}`),
+cached 10 s with a stale fallback; none at all is `503 cluster.unavailable`.
+`choose_member` picks by strategy: `round_robin` (weighted, counter per cluster),
+`least_loaded` (fewest in-flight here), `failover` (first healthy). A connection
+error or timeout before any byte marks the member down for 30 s and the next is
+tried once. The answer carries `x-nestbox-cluster-member: <install_id>`; the
+accounting row's `detail` holds `{"cluster_id","install_id"}`. Content inspection
+runs as on every other path.
+
 The forwarded request carries the client's headers, minus hop-by-hop headers,
 `Host`, `Content-Length` (recomputed) and `X-Nestbox-Upstream` (ours, not the
 provider's). The path and query string are preserved. The body is the original
