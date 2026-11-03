@@ -4,7 +4,7 @@ import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
 import { emptyDataCenterNotice } from '../../state/environments.js';
 import { useUi } from '../../state/ui.jsx';
-import { menuFor } from '../../navigation.js';
+import { GROUPS, menuFor } from '../../navigation.js';
 import { navigate, paths } from '../../routing.js';
 import Segmented from '../../components/Segmented.jsx';
 import Tree from '../../components/Tree.jsx';
@@ -19,6 +19,9 @@ const VIEWS = [
 ];
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 420;
+// The two groups that answer "what is happening" and "what do I do today" start open; the rest
+// start closed, so the inventory tree keeps the height (V17).
+const OPEN_GROUPS = new Set(['overview', 'operate']);
 
 // The menu id a place belongs to, so its entry is highlighted.
 function activeId(place) {
@@ -84,7 +87,9 @@ export default function Sidebar(props) {
   const [filterText, setFilterText] = createSignal('');
   const [appliedFilter, setAppliedFilter] = createSignal('');
   const [expanded, setExpanded] = createSignal(new Set());
-  const [closedGroups, setClosedGroups] = createSignal(new Set());
+  const [closedGroups, setClosedGroups] = createSignal(
+    new Set(GROUPS.filter((group) => !OPEN_GROUPS.has(group.id)).map((group) => group.id)),
+  );
 
   let filterTimer = null;
   onCleanup(() => filterTimer && clearTimeout(filterTimer));

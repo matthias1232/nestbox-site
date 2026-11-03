@@ -126,11 +126,14 @@
 .cc-view-tabs .nb-seg { flex: 1 1 0; min-width: 0; height: 100%; margin: 0; padding: 0 var(--space-2); line-height: 1; overflow: hidden; text-overflow: ellipsis; }
 .cc-tree-filter { width: 100%; box-sizing: border-box; background: var(--bg-inset); color: var(--fg); border: 1px solid var(--border); padding: var(--space-1) var(--space-2); font: inherit; font-size: 0.8rem; }
 .cc-tree-filter:focus { border-color: var(--border-strong); }
-.cc-tree { flex: 1 1 auto; min-height: 120px; overflow: auto; border-bottom: 1px solid var(--border); }
+/* Tree and menu share the sidebar height (V17). The tree keeps at least 45 % of it; the menu
+ * gets its own scroll box with a cap, and since its groups start collapsed the normal case is
+ * only six headings, so the tree simply takes the rest. */
+.cc-tree { flex: 1 1 auto; min-height: 45%; overflow: auto; border-bottom: 1px solid var(--border); }
 .cc-tree-note { padding: var(--space-2) var(--space-3); margin: 0; }
-.cc-nav { flex: 0 0 auto; }
+.cc-nav { flex: 0 1 auto; min-height: 0; max-height: 40%; overflow: auto; overscroll-behavior: contain; }
 .cc-group-toggle { background: transparent; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
-.cc-sidebar.collapsed .cc-nav { padding: var(--space-2) 0; align-items: stretch; }
+.cc-sidebar.collapsed .cc-nav { padding: var(--space-2) 0; align-items: stretch; max-height: none; overflow: visible; }
 .cc-sidebar.collapsed .cc-nav button { text-align: center; padding: var(--space-2) 0; }
 .cc-nav-icon { font-size: 0.72rem; text-transform: uppercase; }
 .cc-badge-alert { margin-left: var(--space-2); padding: 0 var(--space-1); border: 1px solid var(--bad); color: var(--bad); font-size: 0.68rem; }
