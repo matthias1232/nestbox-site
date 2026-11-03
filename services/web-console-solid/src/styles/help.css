@@ -36,6 +36,8 @@
 .md table { border-collapse: collapse; width: 100%; }
 .md th, .md td { text-align: left; padding: 6px var(--space-2); border-bottom: 1px solid var(--border); vertical-align: top; }
 .md th { font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-muted); }
+.md td:first-child { white-space: nowrap; }
+.md table { table-layout: auto; }
 
 /* Drawer */
 .help-drawer { display: flex; flex-direction: column; gap: var(--space-3); }
