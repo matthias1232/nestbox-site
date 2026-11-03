@@ -64,7 +64,7 @@ Control Center placeholders (Wave 0; each renders a "coming in package" note unt
 contract C15): `icons.jsx` (F02; only `IconHome` yet), `IconButton`, `StatTile`, `Gauge`, `Sparkline`, `KeyHint`,
 `Toast`, `Tree`, `Wizard`, `HelpTip` (F02), `SelectTable` (F02: the selectable, sortable table of contract C15;
 named `SelectTable` because the existing `DataTable.jsx` is used by many pages and keeps its own props),
-`CommandPalette` (F04), `AlertPopup` (F13), `TopologyCanvas` (F16), `ConsoleFrame` (F20), `BulkBar` (F21).
+`CommandPalette` (F04), `AlertPopup` (F13), `ConsoleFrame` (F20), `BulkBar` (F21).
 `markdown.js` is the dependency-free renderer (F18).
 
 Control Center primitives (package F02; styles in `styles/primitives.css`):
@@ -85,3 +85,7 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
 F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
 - `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); `alertAnswers.js` holds the pure answer list and request bodies (tested).
+Topology (F16): `TopologyCanvas.jsx` is the layered SVG drawing with zoom, pan, traffic-window switch and legend;
+`TopologyPanel.jsx` is its side panel (facts, receives/sends lists, Open/Policies/Logs, Allow 15/30/60 on a refused
+destination); `Minimap.jsx` is the 160 px overview; `topologyLayout.js` is the pure layout, edge path, fit, zoom and the
+`fromCluster` / `fromStack` mappers (`node --test topologyLayout.test.js`). Styles: `styles/topology.css`.
