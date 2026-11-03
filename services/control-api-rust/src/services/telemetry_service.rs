@@ -404,6 +404,8 @@ pub async fn ingest_batch(
     for item in &prepared {
         ctx.bus.publish(LiveEvent::Telemetry(item.live.clone()));
     }
+    let live: Vec<TelemetryEvent> = prepared.iter().map(|item| item.live.clone()).collect();
+    crate::services::alert_service::publish_if_refused(ctx, batch.environment_id, &live).await;
 
     let stored = stored.map_err(|error| {
         tracing::error!(error = %error, "telemetry batch insert failed");
@@ -1614,6 +1616,8 @@ pub async fn pull_openshell_events(ctx: &ServiceContext) -> Result<u64, ApiError
             for item in &prepared {
                 ctx.bus.publish(LiveEvent::Telemetry(item.live.clone()));
             }
+            let live: Vec<TelemetryEvent> = prepared.iter().map(|item| item.live.clone()).collect();
+            crate::services::alert_service::publish_if_refused(ctx, environment_id, &live).await;
         }
         stored_total += stored as u64;
     }

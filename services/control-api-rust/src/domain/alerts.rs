@@ -1,6 +1,6 @@
 //! Alerts: refused destinations nobody answered yet (contract C9).
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
@@ -37,9 +37,28 @@ pub fn alert_id(sandbox: Uuid, host: &str, port: i32) -> String {
     digest.iter().take(20).map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// The length of a window word: `5m`, `15m`, `1h` or `24h`; anything else is `None`.
+pub fn window(spec: &str) -> Option<Duration> {
+    match spec {
+        "5m" => Some(Duration::minutes(5)),
+        "15m" => Some(Duration::minutes(15)),
+        "1h" => Some(Duration::hours(1)),
+        "24h" => Some(Duration::hours(24)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_four_window_words_parse() {
+        assert_eq!(window("15m"), Some(Duration::minutes(15)));
+        assert_eq!(window("24h"), Some(Duration::hours(24)));
+        assert!(window("2h").is_none());
+        assert!(window("").is_none());
+    }
 
     #[test]
     fn the_same_destination_gets_the_same_id() {
