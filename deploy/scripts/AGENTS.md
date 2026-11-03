@@ -24,7 +24,7 @@ unit test. Nothing here is imported by a service; each script is started by hand
 | `acceptance-workbox-control.py` | Acceptance for the workbox controls: agent sign-in modes, live egress mode, evaluation window, presence, model grants, tunnels, move preflight, control overview. Prints one German `CLEARAND` line per assertion. |
 | `backup-control-plane.sh` | Back up PostgreSQL and, separately, the key that opens every stored secret. |
 | `bootstrap-appliance.sh` | Run once as root on a fresh Ubuntu 24.04 appliance. |
-| `deploy-appliance.sh` | Apply the pushed branch to the dev appliance. |
+| `deploy-appliance.sh` | Apply the pushed branch to the dev appliance. Refuses to start below 15 GB free on the box and prunes builder cache older than a day afterwards. |
 | `make-egress-ca.sh` | Create the CA the egress proxy signs sandbox certificates with. |
 | `make-node-seed.sh` | Write a NoCloud seed ISO that makes a fresh cloud image join as a node. |
 | `make-proxmox-template.sh` | Prepare the Proxmox template rented nodes are cloned from. |
