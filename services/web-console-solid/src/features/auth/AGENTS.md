@@ -3,7 +3,10 @@
 ## Purpose
 
 The only screen reachable without a session. It collects an email and a
-password, and nothing else.
+password (or offers the identity-provider links), in the website's look: form column left,
+illustration or looping video right (`/illustrations/login.webp`, optional `login-loop.mp4`;
+both fall back quietly when missing; the video is skipped under reduced motion).
+Styles: `../../styles/login.css`, imported by `LoginPage.jsx`.
 
 ## Rules
 
