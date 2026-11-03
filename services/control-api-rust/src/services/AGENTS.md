@@ -375,4 +375,4 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `policy_preview_service.rs` | `preview compiled` (B10) |
 | `quick_control_service.rs` | `set` (B11) |
 | `permission_service.rs` | `list set remove` (B12) |
-| `tour_service.rs` | `mark_seen` (F18) |
+| `tour_service.rs` | `mark_seen` (validated name), `seen` (the caller's finished tours) |
