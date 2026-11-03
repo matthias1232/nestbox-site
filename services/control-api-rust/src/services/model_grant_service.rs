@@ -277,14 +277,20 @@ pub async fn effective_by_name(
 /// What the accounting proxy needs to route a sandbox's requests by model.
 ///
 /// The proxy reaches this over the appliance token, so the environment comes
-/// from the sandbox row the proxy named, exactly as the usage record path does.
+/// from the sandbox name it sent — `nb_sandbox_environment(name)` through
+/// [`crate::services::media_service::sandbox_environment`] — and the read then
+/// runs under that scope. An unknown name is a 404 and a name that exists in two
+/// data centers a 409: either way the request is refused rather than routed into
+/// a data center the proxy did not mean.
+///
 /// The credential is resolved here and travels in the answer, never into the
 /// database and never into a log line.
 pub async fn routes_for_accounting(
     ctx: &ServiceContext,
     sandbox_name: &str,
 ) -> Result<serde_json::Value, ApiError> {
-    let environment_id = crate::services::media_service::bridge_environment(ctx).await?;
+    let environment_id =
+        crate::services::media_service::sandbox_environment(ctx, sandbox_name).await?;
     let mut scope = TenantScope::begin(&ctx.pool, environment_id)
         .await
         .map_err(ApiError::from)?;

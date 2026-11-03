@@ -27,7 +27,7 @@ the codebase where SQL appears.
 
 | File | Aggregate |
 |---|---|
-| `mod.rs` | Re-exports and shared row helpers |
+| `mod.rs` | Re-exports and shared row helpers, and `is_missing_function`: whether an error is SQLSTATE 42883, the only case a caller may answer with a fallback for a schema that predates a function (review finding F11) |
 | `sandboxes.rs` | Sandbox list, read, insert, status change, delete; `set_telemetry_mute` and `telemetry_mute` (recording mutes, B11) |
 | `auth.rs` | Users, sessions, API tokens, scopes |
 | `policies.rs` | Policy documents, versions, network rules, drafts, the compiled rule-set hash, traffic windows (open, list, revoke, the environment's `max_window_minutes`) |
@@ -133,7 +133,7 @@ Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_
 | `backups.rs` | The catalogue of root backups. The archives are files on the node; this layer holds |
 | `control.rs` | The workbox's read models: every sandbox's controls at a glance (ADR 0053). |
 | `cudax.rs` | CUDA-X catalog and per-node installations. |
-| `media.rs` | Media settings per environment and per sandbox, and the render record. |
+| `media.rs` | Media settings per environment and per sandbox, the render record, and `sandbox_environments_by_name`: the data centers a sandbox name appears in, from `nb_sandbox_environment(name)` (migration 0088), which is how the accounting proxy finds a sandbox's tenant without a principal |
 | `metrics.rs` | Sandbox resource samples, their rollup, and the inventory snapshot. |
 | `model_metrics.rs` | Samples of what a served model reports about itself. |
 | `model_readiness.rs` | The readiness reads: which profile serves a granted model, and on which node. |

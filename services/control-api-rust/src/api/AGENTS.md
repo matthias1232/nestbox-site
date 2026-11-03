@@ -165,7 +165,7 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 
 | File | Purpose |
 |---|---|
-| `accounting.rs` | Accounting and the internal ingest the proxy calls; the record body keeps the proxy's `detail` object (cluster and member ids) instead of dropping it |
+| `accounting.rs` | Accounting and the internal ingest the proxy calls; the record body keeps the proxy's `detail` object (cluster and member ids) instead of dropping it, and the data center comes from the sandbox the proxy named (`nb_sandbox_environment`, migration 0088) rather than from the environment count |
 | `backups.rs` | Backups of persistent roots. |
 | `cudax.rs` | CUDA-X catalogue and per-node installation endpoints. |
 | `privacy.rs` | Content privacy (DLP): the policy, a single filter test, incidents, purge. |
