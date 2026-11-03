@@ -59,7 +59,7 @@ pub async fn nodes(scope: &mut TenantScope<'_>, q: &str, limit: i64) -> Result<V
     let environment_id = scope.environment_id();
     let rows = sqlx::query(
         r"SELECT n.id::text AS id, n.display_name AS name, n.status,
-                 concat_ws(' · ', n.kind, n.status, st.name) AS subtitle
+                 concat_ws(' · ', n.name, n.status, st.name) AS subtitle
             FROM nodes n
             LEFT JOIN sites st ON st.id = n.site_id
            WHERE n.environment_id = $1

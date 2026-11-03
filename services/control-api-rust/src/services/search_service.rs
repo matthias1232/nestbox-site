@@ -79,6 +79,11 @@ pub async fn search(
                     }
                 }
                 item.score = f64::from(score_with_id(&item.name, &item.id, q));
+                // A row the database matched on a second name (a node's key, not its display
+                // name) still answers the query; the subtitle carries that name.
+                if item.score <= 0.0 && item.subtitle.to_lowercase().contains(&q.to_lowercase()) {
+                    item.score = 0.4;
+                }
                 push(&mut hits, &mut seen, Some(item));
             }
         }

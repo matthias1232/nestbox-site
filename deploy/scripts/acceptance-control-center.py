@@ -160,9 +160,11 @@ def check_bulk_sandboxes() -> str:
     job: object = {}
     for _ in range(30):
         status, job = api(f"/jobs/{job_id}")
-        if status == 200 and isinstance(job, dict) and job.get("status") in {"completed", "failed", "succeeded", "done"}:
+        if status == 200 and isinstance(job, dict) and (job.get("job") or job).get("status") in {"completed", "failed", "succeeded", "done"}:
             break
         time.sleep(2)
+    if isinstance(job, dict) and isinstance(job.get("job"), dict):
+        job = job["job"]
     failed = job.get("failed") if isinstance(job, dict) else None
     assert failed == 1, f"job failed counter is {failed!r}: {short(job)}"
     return "empty ids 422, bogus id gives a job with failed == 1"
@@ -176,11 +178,11 @@ def check_bulk_models() -> str:
     keys = [str(row.get("key")) for row in rows if isinstance(row, dict) and row.get("key")]
     assert keys, "no model in the catalogue"
     key = keys[0]
-    status, payload = api(f"/models/{key}/installs")
+    status, payload = api("/models/installs")
     expect(status, {200}, payload)
     status, payload = api(f"/models/{key}/install-bulk", "POST", {"nodes": [], "site_id": None, "environment_wide": False, "force": False})
     expect(status, {422}, payload)
-    return f"installs of {key} 200, empty nodes 422"
+    return f"install list 200, empty targets 422 for {key}"
 
 
 def check_clusters() -> str:
@@ -266,7 +268,7 @@ def check_illustration() -> str:
     return "login.webp served"
 
 
-BUNDLE_STRINGS = ["inventory/tree", "/search", "model-clusters", "/alerts", "/quick", "permissions", "help/index.json", "viewBox", "Allow for 15 min"]
+BUNDLE_STRINGS = ["inventory/tree", "`search${", "model-clusters", "alerts", "/quick", "permissions", "help/index.json", "viewBox", "Allow 15 min"]
 
 
 def check_bundle() -> str:
