@@ -1,8 +1,10 @@
-# features/dock/ — the bottom dock (F13, Wave 0 placeholders)
+# features/dock/ — the bottom dock (F13)
 
 | File | Responsibility |
 |---|---|
-| `TasksTab.jsx` | Jobs with progress (F13, F26) |
-| `LiveEventsTab.jsx` | The live event stream, red lines first (F13) |
-| `AlertsTab.jsx` | Refused destinations waiting for an answer (F13) |
-| `AlertStack.jsx` | Alert pop-ups top-right, mounted once by the Shell (F13) |
+| `TasksTab.jsx` | Jobs with progress meter, status badge, last log line, Open (F13, F26 adds labels) |
+| `LiveEventsTab.jsx` | The live event ticker: 200 lines, newest top, pause, tone filter |
+| `AlertsTab.jsx` | Open refused destinations as rows with inline answers; ignore all |
+| `AlertStack.jsx` | Alert pop-ups top-right (max 3), mounted once by the Shell; starts the alert polling; imports `styles/dock.css` |
+| `useAlerts.js` | Shared alert state: 15 s poll + live `alert` merge, `answer()`, bell count |
+| `eventLines.js` | Pure `lineFor(name, payload)`, `pushLine`, `filterTone` for the ticker (tested in `eventLines.test.js`) |

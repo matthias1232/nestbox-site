@@ -31,3 +31,5 @@ uses it, not from `main.jsx`.
 - The graph and the table must survive a narrow viewport: horizontal scroll
   rather than a squeezed layout.
 | `dlp.css` | The content-check colour language, the shared table and the chat bubbles |
+
+- `dock.css` — dock tabs, alert cards and the alert stack (F13); imported by `features/dock/AlertStack.jsx`.
