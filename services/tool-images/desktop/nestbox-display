@@ -1,0 +1,937 @@
+#!/usr/bin/env python3
+"""Display layouts for the desktop of a Nestbox sandbox: N monitors, any size.
+
+The screen of a desktop sandbox is one VNC framebuffer. RandR 1.5 lets that
+framebuffer be carved into several logical monitors, each with its own size and
+position, and every window manager, panel and fullscreen window treats them as
+separate screens. `separate` carves one monitor per entry; `stretched` lays one
+monitor over all of them, so maximize and fullscreen fill the whole area.
+
+The layout is the same JSON the console and the control API use:
+
+    {
+      "mode": "separate",
+      "monitors": [
+        {"id": "m1", "name": "Monitor 1", "width": 1920, "height": 1080,
+         "x": 0, "y": 0, "primary": true},
+        {"id": "m2", "name": "Monitor 2", "width": 2560, "height": 1440,
+         "x": 1920, "y": 0}
+      ]
+    }
+
+Every command prints exactly one JSON line. A failure prints
+`{"error": "..."}` and exits 1, so a caller never has to parse prose.
+
+The applied layout is remembered in `$HOME/.config/nestbox-display.json`, which
+is the persistent agent home: it survives a reconnect, a restart and a recreate,
+and `nestbox-desktop` re-applies it before the desktop starts.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# The desktop pack starts Xvnc on :1; a caller inside the sandbox normally gets
+# DISPLAY from the supervisor, a `docker exec` caller does not.
+DISPLAY = os.getenv("DISPLAY") or ":1"
+
+# Limits from the plan, chosen for an 8 GB appliance: four 4K monitors already
+# fill the machine, eight is the most an operator can arrange by hand.
+MIN_SIDE = 320
+MAX_SIDE = 7680
+MAX_MONITORS = 8
+MAX_BOUNDING_WIDTH = 16384
+MAX_BOUNDING_HEIGHT = 8640
+MAX_AREA = 36_000_000
+
+# Every logical monitor this tool creates carries this prefix, so deleting the
+# ones from an earlier layout never touches a monitor someone else made.
+MONITOR_PREFIX = "NB-"
+STRETCHED_NAME = "NB-ALL"
+
+MODE_SEPARATE = "separate"
+MODE_STRETCHED = "stretched"
+
+
+class Failure(Exception):
+    """Something the caller can fix: bad arguments, a refused layout, no X."""
+
+
+# --------------------------------------------------------------------------
+# Pure helpers: no process, no display, unit-tested in test_nestbox_display.py
+# --------------------------------------------------------------------------
+
+
+def state_file() -> Path:
+    """Where the applied layout is remembered: `$HOME/.config/nestbox-display.json`.
+
+    `$HOME` is read at call time, not import time, so a test (or a caller with a
+    different home) sees the path it asked for.
+    """
+    home = os.getenv("HOME") or str(Path.home())
+    return Path(home) / ".config" / "nestbox-display.json"
+
+
+def parse_layout(text: str) -> dict:
+    """A layout from JSON text, reduced to the keys that make a layout.
+
+    `applied_at` and `applied_by` are bookkeeping, not layout: reading back the
+    state file and setting it again has to work, so they are dropped here.
+    Raises `ValueError` for text that is not a JSON object.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"the layout is not JSON: {exc.msg}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("the layout must be a JSON object")
+
+    monitors = data.get("monitors")
+    parsed: list = []
+    if isinstance(monitors, list):
+        for monitor in monitors:
+            if not isinstance(monitor, dict):
+                parsed.append(monitor)
+                continue
+            entry = {
+                "id": monitor.get("id"),
+                "name": monitor.get("name"),
+                "width": monitor.get("width"),
+                "height": monitor.get("height"),
+                "x": monitor.get("x"),
+                "y": monitor.get("y"),
+            }
+            if monitor.get("primary"):
+                entry["primary"] = True
+            parsed.append(entry)
+    else:
+        parsed = monitors
+    return {"mode": data.get("mode"), "monitors": parsed}
+
+
+def bounding_box(monitors: list) -> tuple[int, int, int, int]:
+    """The smallest rectangle around every monitor: `(x, y, width, height)`.
+
+    This is the framebuffer VNC transmits. Corners a layout does not cover (an
+    L shape) stay black.
+    """
+    left = min(monitor["x"] for monitor in monitors)
+    top = min(monitor["y"] for monitor in monitors)
+    right = max(monitor["x"] + monitor["width"] for monitor in monitors)
+    bottom = max(monitor["y"] + monitor["height"] for monitor in monitors)
+    return left, top, right - left, bottom - top
+
+
+def normalize_layout(layout: dict) -> dict:
+    """The same layout with names filled in and the top-left corner at (0, 0).
+
+    X draws from the framebuffer's own origin, so a layout that starts at
+    (1920, 0) would be cut off; shifting the whole arrangement keeps every
+    monitor's relation to its neighbours, which is what an operator arranged.
+    """
+    monitors = layout.get("monitors")
+    if not isinstance(monitors, list) or not monitors:
+        return layout
+    if not all(isinstance(monitor, dict) for monitor in monitors):
+        return layout
+
+    left = min(monitor.get("x", 0) for monitor in monitors)
+    top = min(monitor.get("y", 0) for monitor in monitors)
+    shifted = []
+    for index, monitor in enumerate(monitors):
+        entry = dict(monitor)
+        if isinstance(entry.get("x"), int):
+            entry["x"] -= left
+        if isinstance(entry.get("y"), int):
+            entry["y"] -= top
+        if not isinstance(entry.get("name"), str) or not entry["name"].strip():
+            entry["name"] = f"Monitor {index + 1}"
+        shifted.append(entry)
+    return {"mode": layout.get("mode"), "monitors": shifted}
+
+
+def validate(layout: dict) -> list[str]:
+    """Every reason this layout cannot be applied, in the order they are found.
+
+    An empty list means it can. The console, the control API and the MCP server
+    use the same rules and the same wording, so an operator sees one sentence
+    per problem wherever the layout was entered.
+    """
+    errors: list[str] = []
+    if not isinstance(layout, dict):
+        return ["the layout must be a JSON object"]
+
+    mode = layout.get("mode")
+    if mode not in (MODE_SEPARATE, MODE_STRETCHED):
+        errors.append('mode must be "separate" or "stretched"')
+
+    monitors = layout.get("monitors")
+    if not isinstance(monitors, list):
+        return errors + ["monitors must be a list"]
+    if not 1 <= len(monitors) <= MAX_MONITORS:
+        errors.append(f"a layout needs 1 to {MAX_MONITORS} monitors, not {len(monitors)}")
+
+    seen: set[str] = set()
+    primaries = 0
+    sizes_ok = True
+    for index, monitor in enumerate(monitors):
+        if not isinstance(monitor, dict):
+            errors.append(f"monitor {index + 1} must be an object")
+            sizes_ok = False
+            continue
+
+        identifier = monitor.get("id")
+        if not isinstance(identifier, str) or not identifier.strip():
+            errors.append(f"monitor {index + 1} needs an id")
+            label = f"monitor {index + 1}"
+        else:
+            label = identifier
+            if identifier in seen:
+                errors.append(f"monitor id {identifier} is used twice")
+            seen.add(identifier)
+
+        name = monitor.get("name")
+        if name is not None and not isinstance(name, str):
+            errors.append(f"{label}: name must be a string")
+
+        for field in ("width", "height"):
+            value = monitor.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or not MIN_SIDE <= value <= MAX_SIDE:
+                errors.append(f"{label}: {field} must be a whole number from {MIN_SIDE} to {MAX_SIDE}")
+                sizes_ok = False
+
+        for field in ("x", "y"):
+            value = monitor.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: {field} must be 0 or more")
+                sizes_ok = False
+
+        if monitor.get("primary"):
+            primaries += 1
+
+    if primaries > 1:
+        errors.append("only one monitor can be primary")
+
+    # Geometry needs every size and position to be valid; a half-checked layout
+    # would report overlaps between monitors that do not exist.
+    if sizes_ok and not errors:
+        errors.extend(_geometry_errors(monitors))
+    return errors
+
+
+def _geometry_errors(monitors: list) -> list[str]:
+    """Overlap, gaps, bounding box and area: what a display dialog refuses."""
+    errors: list[str] = []
+    for i, first in enumerate(monitors):
+        for second in monitors[i + 1 :]:
+            if _overlaps(first, second):
+                errors.append(f"monitors {first['id']} and {second['id']} overlap")
+    if errors:
+        return errors
+
+    if len(monitors) > 1:
+        for monitor in monitors:
+            if not any(_touches(monitor, other) for other in monitors if other is not monitor):
+                errors.append(
+                    f"monitor {monitor['id']} must touch another monitor at an edge"
+                )
+
+    _, _, width, height = bounding_box(monitors)
+    if width > MAX_BOUNDING_WIDTH or height > MAX_BOUNDING_HEIGHT:
+        errors.append(
+            f"the layout is {width} x {height}, above the "
+            f"{MAX_BOUNDING_WIDTH} x {MAX_BOUNDING_HEIGHT} limit"
+        )
+
+    area = sum(monitor["width"] * monitor["height"] for monitor in monitors)
+    if area > MAX_AREA:
+        errors.append(f"the monitors cover {area} pixels, above the {MAX_AREA} pixel limit")
+    return errors
+
+
+def _overlaps(first: dict, second: dict) -> bool:
+    """True when the two rectangles share any pixel."""
+    return (
+        first["x"] < second["x"] + second["width"]
+        and second["x"] < first["x"] + first["width"]
+        and first["y"] < second["y"] + second["height"]
+        and second["y"] < first["y"] + first["height"]
+    )
+
+
+def _touches(first: dict, second: dict) -> bool:
+    """True when a whole edge of one rectangle meets the other, like a tiling."""
+    vertical_overlap = min(first["y"] + first["height"], second["y"] + second["height"]) > max(
+        first["y"], second["y"]
+    )
+    horizontal_overlap = min(first["x"] + first["width"], second["x"] + second["width"]) > max(
+        first["x"], second["x"]
+    )
+    beside = vertical_overlap and (
+        first["x"] + first["width"] == second["x"] or second["x"] + second["width"] == first["x"]
+    )
+    above = horizontal_overlap and (
+        first["y"] + first["height"] == second["y"] or second["y"] + second["height"] == first["y"]
+    )
+    return bool(beside or above)
+
+
+def cvt_rb(width: int, height: int, refresh: float = 60.0) -> str:
+    """A CVT 1.1 reduced-blanking modeline, as `xrandr --newmode` takes it.
+
+    Reduced blanking is what a VNC framebuffer wants: 160 blank pixels per line
+    split 80/48/32, 460 µs of vertical blanking (at least three front porch, the
+    aspect ratio's sync width and six back porch lines) and a pixel clock in
+    0.25 MHz steps, rounded down. This is `cvt -r`'s arithmetic; the width is
+    used as it is rather than rounded to a character cell, because a monitor of
+    1366 pixels has to stay 1366 pixels wide.
+    """
+    h_total = width + 160
+    h_period_est = (1_000_000.0 / refresh - 460.0) / height
+    vertical_blank = max(
+        math.floor(460.0 / h_period_est) + 1,
+        int(3 + _v_sync_lines(width, height) + 6),
+    )
+    v_total = vertical_blank + height
+    clock = refresh * v_total * h_total / 1_000_000.0
+    # The floor gets an epsilon: 138.6528 / 0.25 is not always 554.6112 in
+    # binary floating point, and a 138.75 MHz mode would not fit the anchors.
+    clock = 0.25 * math.floor(clock / 0.25 + 1e-9)
+    h_sync = 32
+    return " ".join(
+        str(value)
+        for value in (
+            f"{clock:.2f}",
+            width,
+            width + 48,
+            width + 48 + h_sync,
+            h_total,
+            height,
+            height + 3,
+            height + 3 + _v_sync_lines(width, height),
+            v_total,
+            "+hsync",
+            "-vsync",
+        )
+    )
+
+
+def _v_sync_lines(width: int, height: int) -> int:
+    """The vertical sync width CVT assigns to this aspect ratio, in lines."""
+    for ratio, lines in ((4 / 3, 4), (16 / 9, 5), (16 / 10, 6), (5 / 4, 7), (15 / 9, 7)):
+        if width == 8 * math.floor(height * ratio / 8):
+            return lines
+    return 10
+
+
+def monitor_args(layout: dict, outputs: tuple[str, ...] = ("VNC-0",)) -> list[list[str]]:
+    """The `xrandr --setmonitor` calls that carve the framebuffer into monitors.
+
+    Each call is a complete argument list without the program name. A monitor is
+    named `NB-<n>` after its position in the list; the primary monitor owns the
+    real output, the others are virtual (`none`). When the X server offers one
+    real output per monitor, each monitor gets its own, which is what a
+    multi-head X server needs.
+    """
+    monitors = layout["monitors"]
+    real = tuple(output for output in outputs if output)
+
+    if layout["mode"] == MODE_STRETCHED:
+        _, _, width, height = bounding_box(monitors)
+        owned = ",".join(real) if real else "none"
+        return [["--setmonitor", STRETCHED_NAME, geometry(width, height, 0, 0), owned]]
+
+    primary = next((index for index, m in enumerate(monitors) if m.get("primary")), 0)
+    calls = []
+    for index, monitor in enumerate(monitors):
+        if len(real) >= len(monitors):
+            owned = real[index]
+        elif index == primary and real:
+            owned = real[0]
+        else:
+            owned = "none"
+        calls.append(
+            [
+                "--setmonitor",
+                f"{MONITOR_PREFIX}{index + 1}",
+                geometry(monitor["width"], monitor["height"], monitor["x"], monitor["y"]),
+                owned,
+            ]
+        )
+    return calls
+
+
+def geometry(width: int, height: int, x: int, y: int) -> str:
+    """A monitor geometry in the form `xrandr --setmonitor` takes: `W/0xH/0+X+Y`.
+
+    The millimetre size is 0: a VNC framebuffer has no physical size, and a
+    made-up one would only mislead a tool that computes DPI.
+    """
+    return f"{width}/0x{height}/0+{x}+{y}"
+
+
+def parse_xrandr(text: str) -> dict:
+    """Screen size, outputs and their modes from `xrandr --query` output.
+
+    Only what a layout needs is kept: the current framebuffer size, and for each
+    output whether it is connected with which mode sizes.
+    """
+    screen = None
+    outputs: list[dict] = []
+    for line in text.splitlines():
+        match = re.match(
+            r"^Screen \d+: minimum (\d+) x (\d+), current (\d+) x (\d+), maximum (\d+) x (\d+)",
+            line,
+        )
+        if match:
+            screen = {
+                "minimum": [int(match.group(1)), int(match.group(2))],
+                "current": [int(match.group(3)), int(match.group(4))],
+                "maximum": [int(match.group(5)), int(match.group(6))],
+            }
+            continue
+        match = re.match(
+            r"^(\S+) (connected|disconnected|unknown connection)(?: primary)?"
+            r"(?: (\d+)x(\d+)\+(-?\d+)\+(-?\d+))?",
+            line,
+        )
+        if match:
+            output = {
+                "name": match.group(1),
+                "connected": match.group(2) == "connected",
+                "width": int(match.group(3)) if match.group(3) else None,
+                "height": int(match.group(4)) if match.group(4) else None,
+                "x": int(match.group(5)) if match.group(5) else None,
+                "y": int(match.group(6)) if match.group(6) else None,
+                "modes": [],
+            }
+            outputs.append(output)
+            continue
+        match = re.match(r"^\s+(\S+)\s+[\d.]+[*+ ]*", line)
+        if match and outputs:
+            name = match.group(1)
+            size = re.search(r"(\d+)x(\d+)", name)
+            if size:
+                outputs[-1]["modes"].append(
+                    {
+                        "name": name,
+                        "width": int(size.group(1)),
+                        "height": int(size.group(2)),
+                    }
+                )
+    if screen is None:
+        raise Failure("xrandr did not report a screen")
+    return {"screen": screen, "outputs": outputs}
+
+
+def parse_monitors(text: str) -> list[dict]:
+    """The monitors from `xrandr --listmonitors` output.
+
+    A `+` in front of the name marks the primary monitor; the last field is the
+    output (or outputs) the monitor owns, empty for a virtual one.
+    """
+    monitors = []
+    for line in text.splitlines():
+        match = re.match(
+            r"^\s*\d+:\s+(\+?)(\S+)\s+(\d+)/\d+x(\d+)/\d+\+(-?\d+)\+(-?\d+)\s*(.*)$", line
+        )
+        if not match:
+            continue
+        monitors.append(
+            {
+                "name": match.group(2),
+                "primary": match.group(1) == "+",
+                "width": int(match.group(3)),
+                "height": int(match.group(4)),
+                "x": int(match.group(5)),
+                "y": int(match.group(6)),
+                "output": match.group(7).strip(),
+            }
+        )
+    return monitors
+
+
+def append_monitor(layout: dict, width: int, height: int, position: str = "right") -> dict:
+    """The layout with one more monitor, touching the right edge or the bottom.
+
+    `right` puts it at the top of the current box's right edge and `below` at the
+    left of its bottom edge, so it always touches a neighbour: a monitor with a
+    gap would not be part of the same screen.
+    """
+    if position not in ("right", "below"):
+        raise ValueError('position must be "right" or "below"')
+    monitors = [dict(monitor) for monitor in layout["monitors"]]
+    left, top, box_width, box_height = bounding_box(monitors)
+    if position == "right":
+        x, y = left + box_width, top
+    else:
+        x, y = left, top + box_height
+    number = _next_number(monitors)
+    monitors.append(
+        {
+            "id": f"m{number}",
+            "name": f"Monitor {number}",
+            "width": width,
+            "height": height,
+            "x": x,
+            "y": y,
+        }
+    )
+    return normalize_layout({"mode": layout["mode"], "monitors": monitors})
+
+
+def _next_number(monitors: list) -> int:
+    """The first number no monitor uses, so an id is never reused by accident."""
+    used = set()
+    for monitor in monitors:
+        match = re.match(r"^m(\d+)$", str(monitor.get("id", "")))
+        if match:
+            used.add(int(match.group(1)))
+    number = 1
+    while number in used:
+        number += 1
+    return number
+
+
+def find_monitor(layout: dict, reference: str) -> dict:
+    """The monitor an id, a name or a 1-based index points at.
+
+    An agent says `m2`, an operator says `2` or `Monitor 2`; all three have to
+    end at the same rectangle.
+    """
+    monitors = layout["monitors"]
+    for monitor in monitors:
+        if monitor["id"] == reference:
+            return monitor
+    for monitor in monitors:
+        if str(monitor.get("name", "")).lower() == reference.lower():
+            return monitor
+    if reference.isdigit():
+        index = int(reference) - 1
+        if 0 <= index < len(monitors):
+            return monitors[index]
+    raise Failure(f"no monitor {reference}")
+
+
+def strip_layout(layout: dict) -> dict:
+    """Only mode and monitors: what `set` and the state file carry."""
+    return {"mode": layout["mode"], "monitors": layout["monitors"]}
+
+
+def now() -> str:
+    """The current time in UTC, ISO 8601 with a `Z`, which every reader parses."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+# --------------------------------------------------------------------------
+# Talking to the X server
+# --------------------------------------------------------------------------
+
+
+def xrandr(arguments: list[str], check: bool = True) -> str:
+    """Run `xrandr` on the sandbox display and return its standard output."""
+    return run(["xrandr", *arguments], check=check)
+
+
+def run(command: list[str], check: bool = True) -> str:
+    """Run one command on the sandbox display, as an argument vector.
+
+    No shell is involved: an id or a window class comes from a caller, and a
+    shell would let it run a second command.
+    """
+    return _completed(command, check=check).stdout
+
+
+def _completed(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    """Run one command on the sandbox display and return what it answered."""
+    environment = dict(os.environ)
+    environment["DISPLAY"] = DISPLAY
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=environment,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise Failure(f"{command[0]} is not installed") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise Failure(f"{command[0]} did not answer within 15 s") from exc
+    if check and result.returncode != 0:
+        message = (result.stderr or result.stdout).strip() or f"exit {result.returncode}"
+        raise Failure(f"{command[0]}: {message}")
+    return result
+
+
+def read_layout() -> dict:
+    """The layout the X server currently has, plus when it was last applied.
+
+    RandR knows the monitors but not their names or which one is primary for the
+    operator, so the saved layout supplies those when it still matches the
+    geometry on screen.
+    """
+    screen = parse_xrandr(xrandr(["--query"]))
+    monitors = parse_monitors(xrandr(["--listmonitors"]))
+    if not monitors:
+        raise Failure("xrandr reports no monitor")
+
+    saved = load_state()
+    saved_monitors = saved.get("monitors") if saved else None
+    by_geometry = {}
+    if isinstance(saved_monitors, list):
+        for monitor in saved_monitors:
+            if isinstance(monitor, dict):
+                key = (monitor.get("width"), monitor.get("height"), monitor.get("x"), monitor.get("y"))
+                by_geometry[key] = monitor
+
+    layout_monitors = []
+    for index, monitor in enumerate(monitors):
+        saved_monitor = by_geometry.get(
+            (monitor["width"], monitor["height"], monitor["x"], monitor["y"])
+        )
+        entry = {
+            "id": (saved_monitor or {}).get("id") or f"m{index + 1}",
+            "name": (saved_monitor or {}).get("name") or f"Monitor {index + 1}",
+            "width": monitor["width"],
+            "height": monitor["height"],
+            "x": monitor["x"],
+            "y": monitor["y"],
+        }
+        if monitor["primary"] or (saved_monitor or {}).get("primary"):
+            entry["primary"] = True
+        layout_monitors.append(entry)
+
+    stretched = len(monitors) == 1 and monitors[0]["name"] == STRETCHED_NAME
+    layout = {
+        "mode": MODE_STRETCHED if stretched else MODE_SEPARATE,
+        "monitors": layout_monitors,
+        "framebuffer": list(screen["screen"]["current"]),
+        "applied_at": (saved or {}).get("applied_at"),
+        "applied_by": (saved or {}).get("applied_by"),
+    }
+    return layout
+
+
+def load_state() -> dict | None:
+    """The saved layout, or None when nothing was applied yet or it is unreadable."""
+    path = state_file()
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_state(layout: dict, actor: str) -> None:
+    """Remember the layout that is now on screen, atomically.
+
+    A half-written file would be applied at the next start, so the new content
+    goes to a temporary file in the same directory and is renamed into place.
+    """
+    path = state_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = strip_layout(layout)
+    state["applied_at"] = now()
+    state["applied_by"] = actor
+    temporary = path.with_name(path.name + ".tmp")
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2)
+        handle.write("\n")
+    os.replace(temporary, path)
+
+
+def apply_layout(layout: dict) -> dict:
+    """Make the X server match the layout: modes, framebuffer, then monitors.
+
+    The order matters. The output needs a mode of the framebuffer's size before
+    the framebuffer grows, and the old monitors have to go before new ones take
+    their place, or X refuses a monitor that overlaps a leftover one.
+    """
+    layout = normalize_layout(layout)
+    errors = validate(layout)
+    if errors:
+        raise Failure("; ".join(errors))
+
+    _, _, width, height = bounding_box(layout["monitors"])
+    screen = parse_xrandr(xrandr(["--query"]))
+    outputs = [output["name"] for output in screen["outputs"] if output["connected"]]
+    if not outputs:
+        raise Failure("the screen has no connected output")
+    if width > screen["screen"]["maximum"][0] or height > screen["screen"]["maximum"][1]:
+        raise Failure(
+            f"the layout is {width} x {height}, above the {screen['screen']['maximum'][0]}"
+            f" x {screen['screen']['maximum'][1]} this screen supports"
+        )
+
+    known = {}
+    # Only the modes of the output the framebuffer is set on: a mode another
+    # output has is not necessarily selectable on this one.
+    for output in screen["outputs"]:
+        if output["name"] != outputs[0]:
+            continue
+        for mode in output["modes"]:
+            known.setdefault((mode["width"], mode["height"]), mode["name"])
+
+    needed = {(width, height)}
+    needed.update((monitor["width"], monitor["height"]) for monitor in layout["monitors"])
+    for size in sorted(needed):
+        if size in known:
+            continue
+        name = f"NB-{size[0]}x{size[1]}"
+        xrandr(["--newmode", name, *cvt_rb(*size).split()])
+        for output in outputs:
+            xrandr(["--addmode", output, name])
+        known[size] = name
+
+    xrandr(
+        [
+            "--fb",
+            f"{width}x{height}",
+            "--output",
+            outputs[0],
+            "--mode",
+            known[(width, height)],
+            "--primary",
+        ]
+    )
+
+    for monitor in parse_monitors(xrandr(["--listmonitors"])):
+        if monitor["name"].startswith(MONITOR_PREFIX):
+            xrandr(["--delmonitor", monitor["name"]], check=False)
+
+    for call in monitor_args(layout, tuple(outputs)):
+        xrandr(call)
+
+    save_state(layout, os.getenv("NESTBOX_DISPLAY_ACTOR") or "unknown")
+    return read_layout()
+
+
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
+
+
+def command_get(arguments: list[str]) -> dict:
+    """`get` — the layout that is on screen now."""
+    if arguments:
+        raise Failure("get takes no arguments")
+    return read_layout()
+
+
+def command_set(arguments: list[str]) -> dict:
+    """`set '<json>'` — apply a whole layout, or read it from standard input."""
+    text = " ".join(arguments).strip() if arguments else sys.stdin.read()
+    if not text:
+        raise Failure("set needs a layout as its argument or on standard input")
+    try:
+        layout = parse_layout(text)
+    except ValueError as exc:
+        raise Failure(str(exc)) from exc
+    return apply_layout(layout)
+
+
+def command_add(arguments: list[str]) -> dict:
+    """`add <width>x<height> [right|below]` — one more monitor at the edge."""
+    size, position = _parse_add(arguments)
+    return apply_layout(append_monitor(read_layout(), size[0], size[1], position))
+
+
+def command_remove(arguments: list[str]) -> dict:
+    """`remove <id>` — drop a monitor; the last one stays."""
+    if len(arguments) != 1:
+        raise Failure("remove needs a monitor id")
+    layout = read_layout()
+    if len(layout["monitors"]) == 1:
+        raise Failure("a layout needs at least one monitor")
+    monitor = find_monitor(layout, arguments[0])
+    layout["monitors"] = [entry for entry in layout["monitors"] if entry is not monitor]
+    return apply_layout(strip_layout(layout))
+
+
+def command_resize(arguments: list[str]) -> dict:
+    """`resize <id> <width>x<height>` — change one monitor's size."""
+    if len(arguments) != 2:
+        raise Failure("resize needs a monitor id and a size like 1920x1080")
+    size = _parse_size(arguments[1])
+    layout = read_layout()
+    monitor = find_monitor(layout, arguments[0])
+    monitor["width"], monitor["height"] = size
+    return apply_layout(strip_layout(layout))
+
+
+def command_move(arguments: list[str]) -> dict:
+    """`move <id> <x> <y>` — put a monitor at a position; it must still touch."""
+    if len(arguments) != 3:
+        raise Failure("move needs a monitor id and an x and a y")
+    try:
+        x, y = int(arguments[1]), int(arguments[2])
+    except ValueError as exc:
+        raise Failure("x and y must be whole numbers") from exc
+    layout = read_layout()
+    monitor = find_monitor(layout, arguments[0])
+    monitor["x"], monitor["y"] = x, y
+    return apply_layout(strip_layout(layout))
+
+
+def command_mode(arguments: list[str]) -> dict:
+    """`mode separate|stretched` — separate screens or one stretched screen."""
+    if len(arguments) != 1 or arguments[0] not in (MODE_SEPARATE, MODE_STRETCHED):
+        raise Failure('mode needs "separate" or "stretched"')
+    layout = read_layout()
+    layout["mode"] = arguments[0]
+    return apply_layout(strip_layout(layout))
+
+
+def command_span(arguments: list[str]) -> dict:
+    """`span <window-class>` — one window over every monitor, un-maximized first.
+
+    A maximized window ignores a resize request in most window managers, so the
+    maximized state is removed before the geometry is set.
+    """
+    if len(arguments) != 1:
+        raise Failure("span needs a window class")
+    window = arguments[0]
+    layout = read_layout()
+    width, height = layout["framebuffer"]
+    wmctrl(["-x", "-r", window, "-b", "remove,maximized_vert,maximized_horz"])
+    wmctrl(["-x", "-r", window, "-e", f"0,0,0,{width},{height}"])
+    return {
+        "ok": True,
+        "window": window,
+        "geometry": {"x": 0, "y": 0, "width": width, "height": height},
+        "monitors": len(layout["monitors"]),
+    }
+
+
+def command_place(arguments: list[str]) -> dict:
+    """`place <window-class> <monitor-id> [maximize]` — move a window to a monitor."""
+    if len(arguments) not in (2, 3):
+        raise Failure("place needs a window class, a monitor id and optionally maximize")
+    window = arguments[0]
+    maximize = len(arguments) == 3 and arguments[2] == "maximize"
+    if len(arguments) == 3 and not maximize:
+        raise Failure('the third argument of place must be "maximize"')
+    layout = read_layout()
+    monitor = find_monitor(layout, arguments[1])
+    wmctrl(["-x", "-r", window, "-b", "remove,maximized_vert,maximized_horz"])
+    wmctrl(
+        [
+            "-x",
+            "-r",
+            window,
+            "-e",
+            f"0,{monitor['x']},{monitor['y']},{monitor['width']},{monitor['height']}",
+        ]
+    )
+    if maximize:
+        wmctrl(["-x", "-r", window, "-b", "add,maximized_vert,maximized_horz"])
+    return {
+        "ok": True,
+        "window": window,
+        "monitor": monitor["id"],
+        "geometry": {
+            "x": monitor["x"],
+            "y": monitor["y"],
+            "width": monitor["width"],
+            "height": monitor["height"],
+        },
+        "maximized": maximize,
+    }
+
+
+def wmctrl(arguments: list[str]) -> str:
+    """Run `wmctrl`, turning its "no window" answer into a readable failure."""
+    result = _completed(["wmctrl", *arguments], check=False)
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout).strip() or f"exit {result.returncode}"
+        if "No window" in message:
+            message = f"no window matches {arguments[2]}"
+        raise Failure(f"wmctrl: {message}")
+    return result.stdout
+
+
+def _parse_size(text: str) -> tuple[int, int]:
+    """A size like `1920x1080` as two numbers, with the limits checked."""
+    match = re.match(r"^(\d+)x(\d+)$", text.strip())
+    if not match:
+        raise Failure("a size reads like 1920x1080")
+    width, height = int(match.group(1)), int(match.group(2))
+    if not MIN_SIDE <= width <= MAX_SIDE or not MIN_SIDE <= height <= MAX_SIDE:
+        raise Failure(f"width and height must be from {MIN_SIDE} to {MAX_SIDE}")
+    return width, height
+
+
+def _parse_add(arguments: list[str]) -> tuple[tuple[int, int], str]:
+    """The size and the position of an `add` command."""
+    if len(arguments) not in (1, 2):
+        raise Failure("add needs a size like 1920x1080 and optionally right or below")
+    size = _parse_size(arguments[0])
+    position = arguments[1] if len(arguments) == 2 else "right"
+    if position not in ("right", "below"):
+        raise Failure('the position of add must be "right" or "below"')
+    return size, position
+
+
+COMMANDS = {
+    "get": command_get,
+    "set": command_set,
+    "add": command_add,
+    "remove": command_remove,
+    "resize": command_resize,
+    "move": command_move,
+    "mode": command_mode,
+    "span": command_span,
+    "place": command_place,
+}
+
+USAGE = """usage: nestbox-display <command> [arguments]
+
+  get
+  set '<layout json>'          (or the layout on standard input)
+  add <width>x<height> [right|below]
+  remove <id>
+  resize <id> <width>x<height>
+  move <id> <x> <y>
+  mode separate|stretched
+  span <window-class>
+  place <window-class> <monitor-id> [maximize]
+
+Every command prints one JSON line; a failure prints {"error": "..."} and
+exits 1. DISPLAY defaults to :1; the layout is saved in
+$HOME/.config/nestbox-display.json.
+"""
+
+
+def main(argv: list[str]) -> int:
+    """Dispatch one command and print its one JSON line."""
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(USAGE, end="")
+        return 0 if argv else 2
+    handler = COMMANDS.get(argv[0])
+    if handler is None:
+        print(json.dumps({"error": f"unknown command {argv[0]}"}))
+        return 1
+    try:
+        result = handler(argv[1:])
+    except Failure as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
+    except ValueError as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

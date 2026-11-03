@@ -54,6 +54,7 @@ const GENERATOR_VERSION: u32 = 7;
 /// Dockerfile, so a change to either must change the image's content hash.
 const DESKTOP_INSTALL: &str = include_str!("../../../tool-images/desktop/install.sh");
 const DESKTOP_START: &str = include_str!("../../../tool-images/desktop/nestbox-desktop");
+const DESKTOP_DISPLAY: &str = include_str!("../../../tool-images/desktop/nestbox-display");
 const DESKTOP_IDFIX: &str = include_str!("../../../tool-images/desktop/idfix.c");
 
 /// The supervisor program shipped inside every image the builder produces.
@@ -1866,6 +1867,10 @@ fn install_step(install: &PackInstall) -> Result<String, String> {
         PackInstall::Desktop => format!(
             "RUN echo {install} | base64 -d > /tmp/nestbox-desktop-install.sh \\\n && sh /tmp/nestbox-desktop-install.sh \\\n && rm /tmp/nestbox-desktop-install.sh\n\
              RUN echo {start} | base64 -d > /usr/local/bin/nestbox-desktop \\\n && chmod 0755 /usr/local/bin/nestbox-desktop\n\
+             # The display layout tool the desktop, the control API and the MCP\n\
+             # server all call: same layer rules, installed next to the start\n\
+             # script.\n\
+             RUN echo {display} | base64 -d > /usr/local/bin/nestbox-display \\\n && chmod 0755 /usr/local/bin/nestbox-display\n\
              # The X server compiles its keymap into this directory. It is root's\n\
              # by default, and the desktop does not run as root. Its own layer, so\n\
              # the cached install above stays valid.\n\
@@ -1876,6 +1881,7 @@ fn install_step(install: &PackInstall) -> Result<String, String> {
              RUN echo {idfix} | base64 -d > /tmp/idfix.c \\\n && apt-get update \\\n && apt-get install -y --no-install-recommends gcc libc6-dev \\\n && gcc -shared -fPIC -O2 -o /usr/local/lib/nestbox-idfix.so /tmp/idfix.c -ldl \\\n && apt-get purge -y gcc libc6-dev \\\n && rm -rf /var/lib/apt/lists/* /tmp/idfix.c\n",
             install = dockerfile_payload(DESKTOP_INSTALL),
             start = dockerfile_payload(DESKTOP_START),
+            display = dockerfile_payload(DESKTOP_DISPLAY),
             idfix = dockerfile_payload(DESKTOP_IDFIX),
         ),
         PackInstall::Npm(spec) => {
@@ -1953,6 +1959,7 @@ pub fn content_hash(
                         "kind": "desktop",
                         "install": DESKTOP_INSTALL,
                         "start": DESKTOP_START,
+                        "display": DESKTOP_DISPLAY,
                         "idfix": DESKTOP_IDFIX,
                     }),
                 },
@@ -2362,6 +2369,7 @@ mod tests {
         assert!(text.contains("chown -R nestbox"), "{text}");
         assert!(text.contains("nestbox-desktop-install.sh"), "{text}");
         assert!(text.contains("> /usr/local/bin/nestbox-desktop"), "{text}");
+        assert!(text.contains("> /usr/local/bin/nestbox-display"), "{text}");
         let plain = plan(PackageManager::Apt, &["vim"]);
         assert_ne!(
             content_hash(&desktop, &resources(), &[], SUPERVISOR_PROGRAM),
