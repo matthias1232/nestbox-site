@@ -29,7 +29,8 @@ Install on a model the API will refuse.
 
 1. `CapacityOverview` — CPU model and cores, system RAM, GPU memory or the
    unified pool, each memory bar scaled against the largest requirement in the
-   loaded catalog.
+   loaded catalog. Every line stays inside its own card and wraps: a machine
+   value is as long as the machine makes it (V19).
 2. Filter chips (all / fits / does not fit / runs without a GPU / needs unified
    memory) with live counts, plus family, publisher, runtime, and text search.
 3. The table: model and licence, size and format, minimum and recommended need,

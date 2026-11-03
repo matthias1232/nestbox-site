@@ -38,3 +38,15 @@
 .cluster-card:hover { border-color: var(--accent); }
 .requirements { display: flex; flex-direction: column; gap: var(--space-3); max-width: 640px; }
 @media (max-width: 720px) { .picker-site li { grid-template-columns: 1fr auto; } .picker-site li .muted { grid-column: 1 / -1; } }
+
+/* The capacity card keeps its content inside itself (V19). Its lines hold machine values —
+ * the CPU model as `/proc/cpuinfo` reports it, the host name, a GPU's name — and each card is
+ * one track of `repeat(auto-fit, minmax(230px, 1fr))`. That track has a 230 px floor and the
+ * cards carried neither `min-width: 0` nor a wrap rule, so a value with nothing to break at
+ * could not wrap: it grew its track past the card and ran over the card next to it, and the end
+ * of the line was no longer inside the card at all. The floor can no longer exceed the card, a
+ * card may shrink, and every line now breaks inside its own card. */
+.capacity-head > div, .capacity-grid article { min-width: 0; }
+.capacity-grid { grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
+.capacity-grid article b, .capacity-grid article small, .capacity-head p { overflow-wrap: anywhere; }
+.capacity-gpus .gpu-chip { max-width: 100%; overflow-wrap: anywhere; }

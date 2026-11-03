@@ -30,7 +30,7 @@ not gateways and sandboxes.
 | `TrafficTable.jsx` | A dense event table over normalised rows: sandbox, decision, channel, destination, request, reason; sticky header, decision tone word, `onAnswer(row, answer)` for refused rows |
 | `FitBadge.jsx` | Model fit verdict with its reason |
 | `ResourceBars.jsx` | "Have versus need" bars for VRAM, RAM, cores; draws server numbers |
-| `CapacityOverview.jsx` | The machine's own CPU, RAM, and GPU capacity, scaled against the catalog |
+| `CapacityOverview.jsx` | The machine's own CPU, RAM, and GPU capacity, scaled against the catalog. Its card keeps its own content: long machine values (the CPU model, a host name, a GPU name) wrap inside the card instead of running over the next one (V19; the rules live in `styles/models.css`) |
 | `ModelFitCell.jsx` | Badge, compact bars, and the shortfall in words |
 | `Tabs.jsx` | Accessible tab strip; the active tab carries the 2px lime underline, a tab may carry a numeric `count` drawn as muted mono after the label (V08) |
 | `Empty.jsx` | A consistent empty state |
