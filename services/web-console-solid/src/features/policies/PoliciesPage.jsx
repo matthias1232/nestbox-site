@@ -6,6 +6,7 @@ import Tabs from '../../components/Tabs.jsx';
 import * as api from '../../api/policies.js';
 import * as sandboxApi from '../../api/sandboxes.js';
 import PolicyForm from './PolicyForm.jsx';
+import PolicyWizard from './PolicyWizard.jsx';
 import SandboxPicker from './SandboxPicker.jsx';
 import '../../styles/sandbox-hierarchy.css';
 import { DnsRuleForm, NetworkRuleForm } from './RuleForms.jsx';
@@ -50,7 +51,15 @@ export default function PoliciesPage() {
   const [notice, setNotice] = createSignal(null);
   const [draft, setDraft] = createSignal({ name: '', scope: 'sandbox', template: '', spec: blankSpec() });
 
-  onMount(load);
+  // The policy wizard, when open: `{ policyId?, sandboxId? }`, otherwise null.
+  const [wizard, setWizard] = createSignal(null);
+
+  onMount(() => {
+    load();
+    // `?wizard=1&sandbox=<id>` opens the wizard straight away (one read of the query string).
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('wizard') === '1') setWizard({ sandboxId: query.get('sandbox') || null });
+  });
 
   async function load() {
     setError(null);
@@ -203,6 +212,9 @@ export default function PoliciesPage() {
   }
 
   return (
+    <Show when={!wizard()} fallback={
+      <PolicyWizard policyId={wizard().policyId} sandboxId={wizard().sandboxId} onClose={() => { setWizard(null); load(); }} />
+    }>
     <section class="page">
       <header class="page-head">
         <div>
@@ -212,7 +224,8 @@ export default function PoliciesPage() {
           </p>
         </div>
         <div class="controls">
-          <button class="primary" onClick={startCreate}>New policy</button>
+          <button class="primary" onClick={() => setWizard({})}>New policy (wizard)</button>
+          <button class="secondary" onClick={startCreate}>New policy</button>
           <button class="secondary" onClick={load}>Refresh</button>
         </div>
       </header>
@@ -265,7 +278,7 @@ export default function PoliciesPage() {
         <div class="split">
           <div class="table-scroll">
             <table>
-              <thead><tr><th>Name</th><th>Scope</th><th class="narrow">Kind</th><th class="narrow">Version</th><th>Updated</th></tr></thead>
+              <thead><tr><th>Name</th><th>Scope</th><th class="narrow">Kind</th><th class="narrow">Version</th><th>Updated</th><th /></tr></thead>
               <tbody>
                 <For each={shownPolicies()}>
                   {(policy) => (
@@ -283,6 +296,10 @@ export default function PoliciesPage() {
                       </td>
                       <td class="narrow mono">{policy.version}</td>
                       <td class="mono small">{policy.updated_at}</td>
+                      <td>
+                        <button class="tiny secondary" aria-label={`Edit ${policy.name} in wizard`}
+                          onClick={(event) => { event.stopPropagation(); setWizard({ policyId: policy.id }); }}>Edit in wizard</button>
+                      </td>
                     </tr>
                   )}
                 </For>
@@ -475,5 +492,6 @@ export default function PoliciesPage() {
         </Show>
       </Show>
     </section>
+    </Show>
   );
 }
