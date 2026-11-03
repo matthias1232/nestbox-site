@@ -101,7 +101,7 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 | `model_cluster.rs` | `ModelCluster`, `ClusterMember`, `ClusterStrategy` (`as_str`/`parse`) |
 | `search.rs` | `SearchKind`, `SearchHit`, `SearchParams` |
 | `alerts.rs` | `AlertView` and `alert_id` (stable digest of sandbox, host, port) |
-| `mounts.rs` | `MountSpec`, `EffectiveMounts` and `validate_mount_path` |
+| `mounts.rs` | `MountSpec`, `EffectiveMounts`, `MountDiff`, `diff` and `validate_mount_path` (no trailing slash, not under /proc /sys /dev /run/secrets) |
 | `permissions.rs` | `ScopeType` and `PermissionRow` |
 
 `job.rs` gained `ModelBulkInstall`, `NodeDrain` and `NodeQuickDeploy`; `telemetry.rs` gained `LiveEvent::Alert`.
