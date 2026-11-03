@@ -121,3 +121,23 @@ Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_
 `ui_tours_seen` is per user, so it takes the pool, not a tenant scope). Migration `0086_control_center.sql` adds
 `model_clusters`, `model_cluster_members`, `sandboxes.telemetry_mute_until`/`telemetry_mute_bodies_until` and `ui_tours_seen`.
 `model_clusters.rs` (B05): list/get/create/update/delete, `add_member` (upsert weight), `remove_member`, `members` (joins installs, nodes, provider profiles), `proxy_view` (takes a scope: the tables have RLS), `model_exists`, `install_model_key`.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `access.rs` | How an operator reaches a sandbox: SSH keys, published ports, sessions. |
+| `accounting.rs` | Accounting rows, price list, daily rollup, and retention settings |
+| `agent_auth.rs` | Rows of `sandbox_agent_auth`: the chosen sign-in mode per agent of a sandbox. |
+| `backups.rs` | The catalogue of root backups. The archives are files on the node; this layer holds |
+| `control.rs` | The workbox's read models: every sandbox's controls at a glance (ADR 0053). |
+| `cudax.rs` | CUDA-X catalog and per-node installations. |
+| `media.rs` | Media settings per environment and per sandbox, and the render record. |
+| `metrics.rs` | Sandbox resource samples, their rollup, and the inventory snapshot. |
+| `model_metrics.rs` | Samples of what a served model reports about itself. |
+| `model_readiness.rs` | The readiness reads: which profile serves a granted model, and on which node. |
+| `presence.rs` | Open sessions (`sandbox_sessions`) as presence: who is in which terminal tab |
+| `privacy.rs` | Privacy settings and incidents (`0056_privacy_layer.sql`). |
+| `proxies.rs` | The exit proxy catalogue. |
+| `vault.rs` | Stored secrets: ciphertext in, metadata out. The value never leaves this layer |

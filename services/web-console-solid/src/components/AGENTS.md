@@ -92,3 +92,19 @@ Topology (F16): `TopologyCanvas.jsx` is the layered SVG drawing with zoom, pan, 
 destination); `Minimap.jsx` is the 160 px overview; `topologyLayout.js` is the pure layout, edge path, fit, zoom and the
 `fromCluster` / `fromStack` mappers (`node --test topologyLayout.test.js`). Styles: `styles/topology.css`.
 | `ConsoleFrame.jsx`, `consoleFrame.js`, `consoleFrame.test.js` | one console per sandbox: Shell/Desktop/SSH split button, toolbar (font, copy, paste, fullscreen, Ctrl+Alt+Del, view-only, pop-out); pure `modes`, `pickMode`, `nextFont`, `sshLines` |
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `BulkBar.jsx` | The bar that appears above the dock while rows are selected (contract C15, package F21). |
+| `HostLoad.jsx` | The host's own load, live: CPU, memory, disk, load average, and how much the |
+| `LogView.jsx` | A log, read the way an operator reads one: newest at the bottom, problems in colour, |
+| `LogView.test.js` | Node tests for `LogView`. |
+| `Meter.jsx` | A labelled horizontal bar. `value` and `max` are numbers in the same unit; |
+| `Poll.js` | Poll a loader while a component is mounted. `load` returns a promise; each |
+| `TabBoundary.jsx` | A tab must never take the console down with it. |
+| `alertAnswers.test.js` | Node tests for `alertAnswers`. |
+| `countdown.test.js` | Node tests for `countdown`. |
+| `markdown.test.js` | Node tests for `markdown`. |

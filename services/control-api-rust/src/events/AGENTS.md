@@ -42,3 +42,10 @@ rather than a refactor of every caller.
 Add a variant to `domain::telemetry::LiveEvent` first. Every consumer matches on
 the enum, so the compiler will list the places that need a case — which is the
 reason to keep it an enum rather than an open string tag.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `mod.rs` | Module root: declares and re-exports the submodules. |

@@ -113,3 +113,17 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 | `permissions.rs` | `ScopeType`, `PermissionRow` and `allowed_role_for` (sandbox grants are always member, the organisation tree is read-only) |
 
 `job.rs` gained `ModelBulkInstall`, `NodeDrain` and `NodeQuickDeploy`; `telemetry.rs` gained `LiveEvent::Alert`.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `accounting.rs` | Accounting: what a request used, what it cost, and what a window shows. |
+| `cudax.rs` | CUDA-X components and their installation on a node. |
+| `environment.rs` | Organization, environment, cluster, and node. |
+| `mod.rs` | Module root: declares and re-exports the submodules. |
+| `provider.rs` | Provider profiles: the shape that makes local and cloud models the same |
+| `proxy.rs` | Exit proxies: where traffic leaves the node. |
+| `runtime.rs` | Observed state of a sandbox as the runtime adapter reports it. |
+| `ssh_access.rs` | Extra ways into a sandbox's SSH door: operator keys and temporary passwords. |

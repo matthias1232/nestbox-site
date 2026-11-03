@@ -10,3 +10,12 @@
 | `liveCore.js` | Pure: handler registry, reconnect delay, alert payload |
 
 Nothing here stores a token or a secret in `localStorage`.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `liveCore.test.js` | Node tests for `liveCore`. |
+| `shortcuts.test.js` | Node tests for `shortcuts`. |
+| `uiPrefs.test.js` | Node tests for `uiPrefs`. |

@@ -123,3 +123,16 @@ vector. An interactive terminal is a later transport, not a change to this one.
 Note: `TerminalTab` takes `fontSize` and `onReady({copy, paste, focus, fit, activeTab})`; `DesktopTab` takes `viewOnly` and `onReady({sendCtrlAltDel, fullscreen})`; both are driven by `components/ConsoleFrame.jsx`.
 F21: `SandboxListPage.jsx` checkboxes now write to `ui.selection` (kind `sandbox`); the old inline bulk buttons are gone, `BulkBar` (via `BulkHost`) replaces them.
 `MountEditor.jsx` (F15) is a placeholder created in Wave 0.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `RequestJourney.jsx` | "How a request travels": pick a real connection this sandbox made and watch the five steps |
+| `SessionsTab.jsx` | Who is signed in to this sandbox's agent, and who is connected to the sandbox. |
+| `SupervisorTab.jsx` | The supervisor of one sandbox: what it is, what it enforces, what it logged. |
+| `UsageTab.jsx` | What this sandbox's agents used: models, tokens, cache, cost. |
+| `chats.test.js` | Node tests for `chats`. |
+| `journey.js` | The five steps a connection takes, written for someone who has never seen the system. |
+| `journey.test.js` | Node tests for `journey`. |

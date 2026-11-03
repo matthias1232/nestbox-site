@@ -46,3 +46,17 @@ what makes the workflow meaningful (ADR 0011).
 | `ReviewStep.jsx`, `CompiledView.jsx` | Name, scope, compiled YAML, skipped rules, hot/cold badges, diff, and the calls Apply makes. |
 
 `PoliciesPage` opens the wizard from "New policy (wizard)", "Edit in wizard" and `?wizard=1&sandbox=<id>`.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `PoliciesPage.jsx` | Policies, network rules, and the draft queue. |
+| `PolicyForm.jsx` | A policy document as a form, rendered from `/policy-schema`. |
+| `RuleForms.jsx` | Forms for a network rule and a DNS rule. |
+| `SandboxPicker.jsx` | Choose which sandboxes something is applied to: some of them, or all. |
+| `policyForms.js` | Pure helpers for the policy forms: no JSX, no network. The server owns what is |
+| `policyForms.test.js` | Node tests for `policyForms`. |
+| `ruleHelp.js` | What each field of a rule means, what it accepts and an example, in one place. |
+| `ruleHelp.test.js` | Node tests for `ruleHelp`. |

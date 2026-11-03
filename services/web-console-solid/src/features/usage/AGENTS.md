@@ -13,3 +13,10 @@ The numbers come from `GET /accounting/usage`, filled by the egress proxy readin
 model answers (inspecting modes) and by the accounting proxy.
 
 Restyle (F25): `UsagePage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `format.test.js` | Node tests for `format`. |
