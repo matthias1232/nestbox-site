@@ -86,7 +86,7 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
 F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). Each row draws an `Icon` for its kind (X10). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
-- `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); `alertAnswers.js` holds the pure answer list and request bodies (tested).
+- `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); the card is V11: eyebrow `REFUSED · <age>` in `--bad`, one line `<sandbox> → <host>:<port> (<channel>, N×)`, frame `1px solid var(--bad)`, and the four answers `Allow 15 min` (primary) · `Allow now` · `Draft rule` · `Ignore`. `alertAnswers.js` holds the pure answer list (used by the table row) and request bodies (tested).
 Topology (F16): `TopologyCanvas.jsx` is the layered SVG drawing with zoom, pan, traffic-window switch and legend;
 each card draws an `Icon` per kind from `icons.jsx` inside a `translate(10, 10)` group (X10);
 `TopologyPanel.jsx` is its side panel (facts, receives/sends lists, Open/Policies/Logs, Allow 15/30/60 on a refused

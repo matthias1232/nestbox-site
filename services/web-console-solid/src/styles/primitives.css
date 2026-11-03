@@ -75,6 +75,14 @@
 .tabs button.tab.active { color: var(--fg); border-bottom: 2px solid var(--accent); }
 .tabs .tab-count { font: 400 0.72rem var(--mono); color: var(--fg-muted); }
 
+/* Alert card (V11): a refusal draws its own frame in --bad; the eyebrow names the refusal and
+ * the age, the line names sandbox, destination, channel and count. The frame and text colours
+ * are set here because dock.css paints every `.alert-card` as an ordinary raised card. */
+.alert-stack .alert-card { border: 1px solid var(--bad); }
+.alert-card .alert-eyebrow { color: var(--bad); }
+.alert-card .alert-line { margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--space-1); font-size: 0.85rem; }
+.alert-card .alert-line a { color: var(--fg); }
+
 /* SelectTable */
 .select-table-wrap { overflow: auto; border: 1px solid var(--border); }
 .select-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }

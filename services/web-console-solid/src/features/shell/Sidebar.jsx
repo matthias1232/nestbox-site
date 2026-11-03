@@ -141,7 +141,7 @@ export default function Sidebar(props) {
     setClosedGroups(next);
   }
 
-  // A badge per tree node: refused destinations in red with a word, allow-all as a lime dot.
+  // A badge per tree node: refused destinations in red with a word, allow-all as a lime ALL badge.
   function renderBadge(node) {
     const alerts = typeof node.alerts === 'number' ? node.alerts : node.counts?.alerts || 0;
     const allowAll = node.allow_all === true || (node.counts?.allow_all || 0) > 0;
@@ -151,7 +151,7 @@ export default function Sidebar(props) {
           <span class="cc-badge-alert mono" title={`${alerts} alert${alerts === 1 ? '' : 's'}`}>{alerts} alert{alerts === 1 ? '' : 's'}</span>
         </Show>
         <Show when={allowAll}>
-          <span class="cc-badge-open" title="Allow-all is on" role="img" aria-label="Allow-all is on" />
+          <span class="cc-badge-open mono" title="Allow-all is on" role="img" aria-label="Allow-all is on">ALL</span>
         </Show>
       </>
     );
