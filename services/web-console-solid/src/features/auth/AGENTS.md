@@ -11,6 +11,7 @@ Styles: `../../styles/login.css`, imported by `LoginPage.jsx`.
 ## Rules
 
 - The password field is never mirrored into state; it is read at submit.
+- The show/hide toggle uses the shared `IconEye` / `IconEyeOff` from `components/icons.jsx` (X10), not a private glyph.
 - A failure shows the server's message, which is deliberately uniform so it does
   not reveal whether the account exists.
 - On success the CSRF token is held in memory by the session provider only.

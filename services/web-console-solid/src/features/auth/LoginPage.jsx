@@ -9,19 +9,9 @@
 
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
+import { IconEye, IconEyeOff } from '../../components/icons.jsx';
 import * as api from '../../api/tenancy.js';
 import '../../styles/login.css';
-
-// Show/hide glyph for the password toggle (private: the shared eye icons are not built yet).
-function EyeGlyph(props) {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-      <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
-      <circle cx="8" cy="8" r="2" />
-      {props.off && <path d="M2.5 13.5 13.5 2.5" />}
-    </svg>
-  );
-}
 
 export default function LoginPage() {
   const session = useSession();
@@ -104,7 +94,9 @@ export default function LoginPage() {
                 <button type="button" class="ghost tiny" onClick={() => setReveal(!reveal())}
                         aria-label={reveal() ? 'Hide password' : 'Show password'}
                         aria-pressed={reveal()}>
-                  <EyeGlyph off={reveal()} />
+                  <Show when={reveal()} fallback={<IconEye />}>
+                    <IconEyeOff />
+                  </Show>
                 </button>
               </span>
             </label>

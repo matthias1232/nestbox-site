@@ -7,6 +7,7 @@ import { menuFor } from '../../navigation.js';
 import { navigate, paths } from '../../routing.js';
 import Segmented from '../../components/Segmented.jsx';
 import Tree from '../../components/Tree.jsx';
+import { Icon } from '../../components/icons.jsx';
 import { useInventory } from './useInventory.js';
 import { ancestorIds, expandableIds, filterTree, pathFor } from './treeFilter.js';
 
@@ -37,10 +38,43 @@ function selectedOf(place) {
   return ['dc', 'site', 'node', 'admin', 'box', 'model', 'cluster'].includes(place.kind) ? place.id : null;
 }
 
-// The first two letters of a menu label, the collapsed sidebar's stand-in for an icon.
-function initials(label) {
-  return label.replace(/[^A-Za-z]/g, '').slice(0, 2);
-}
+// The icon per menu route (`components/icons.jsx`), drawn when the sidebar is collapsed.
+// An unknown route falls back to Settings, so a new menu entry never renders an empty button.
+const MENU_ICONS = {
+  home: 'Home',
+  live: 'Network',
+  traffic: 'Traffic',
+  logs: 'Logs',
+  alerts: 'Bell',
+  my: 'Sandbox',
+  sandboxes: 'Sandbox',
+  models: 'Model',
+  clusters: 'Cluster',
+  moves: 'Move',
+  persistent: 'Disk',
+  operations: 'Clock',
+  tenants: 'DataCenter',
+  nodes: 'Node',
+  hosting: 'Network',
+  images: 'Disk',
+  providers: 'Lock',
+  mcp: 'Network',
+  media: 'Play',
+  skills: 'Policy',
+  cudax: 'Gpu',
+  builder: 'Recreate',
+  recipes: 'Copy',
+  proxies: 'Network',
+  policies: 'Policy',
+  privacy: 'EyeOff',
+  master: 'Unlock',
+  usage: 'Memory',
+  users: 'User',
+  system: 'Settings',
+  cluster: 'Cluster',
+  docs: 'Help',
+  shortcuts: 'Help',
+};
 
 export default function Sidebar(props) {
   const session = useSession();
@@ -213,7 +247,7 @@ export default function Sidebar(props) {
                       onClick={() => open(item)}
                     >
                       <Show when={props.collapsed} fallback={item.label}>
-                        <span class="cc-nav-icon mono" aria-hidden="true">{initials(item.label)}</span>
+                        <span class="cc-nav-icon" aria-hidden="true"><Icon name={MENU_ICONS[item.id] || 'Settings'} /></span>
                       </Show>
                     </button>
                   )}

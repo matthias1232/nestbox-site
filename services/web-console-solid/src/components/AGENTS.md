@@ -63,7 +63,7 @@ They hold no rules: the caller decides, the component draws. Their shared styles
 | `QuickAllow.jsx` | Four buttons that allow one denied destination for 15 min, 1 h, 24 h or permanently |
 
 Control Center placeholders (Wave 0; each renders a "coming in package" note until its package builds it, props in
-contract C15): `icons.jsx` (F02; only `IconHome` yet), `IconButton`, `StatTile`, `Gauge`, `Sparkline`, `KeyHint`,
+contract C15): `icons.jsx` (F02, the complete icon set), `IconButton`, `StatTile`, `Gauge`, `Sparkline`, `KeyHint`,
 `Toast`, `Tree`, `Wizard`, `HelpTip` (F02), `SelectTable` (F02: the selectable, sortable table of contract C15;
 named `SelectTable` because the existing `DataTable.jsx` is used by many pages and keeps its own props),
 `CommandPalette` (F04), `AlertPopup` (F13), `ConsoleFrame` (F20), `BulkBar` (F21).
@@ -73,7 +73,7 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 
 | File | Responsibility |
 |---|---|
-| `icons.jsx` | Every inline SVG icon (`IconNode`, ...) plus `Icon({ name })` |
+| `icons.jsx` | Every inline SVG icon (`IconNode`, ...) plus `Icon({ name })`; the one source for the sidebar menu, the palette kind glyph, the topology card glyph and the login eye (X10 — no private stand-ins in a feature) |
 | `IconButton.jsx` | A 28x28 icon-only button with tooltip and accessible name |
 | `StatTile.jsx` | Eyebrow label, big mono figure, unit and trend; a button when clickable |
 | `Gauge.jsx` / `gauge.js` | 270 degree SVG arc and its arc maths |
@@ -85,9 +85,10 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `Wizard.jsx` | Step list, body and Back / Next / Finish footer |
 | `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
-F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
+F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). Each row draws an `Icon` for its kind (X10). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
 - `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); `alertAnswers.js` holds the pure answer list and request bodies (tested).
 Topology (F16): `TopologyCanvas.jsx` is the layered SVG drawing with zoom, pan, traffic-window switch and legend;
+each card draws an `Icon` per kind from `icons.jsx` inside a `translate(10, 10)` group (X10);
 `TopologyPanel.jsx` is its side panel (facts, receives/sends lists, Open/Policies/Logs, Allow 15/30/60 on a refused
 destination); `Minimap.jsx` is the 160 px overview; `topologyLayout.js` is the pure layout, edge path, fit, zoom and the
 `fromCluster` / `fromStack` mappers (`node --test topologyLayout.test.js`). Styles: `styles/topology.css`.

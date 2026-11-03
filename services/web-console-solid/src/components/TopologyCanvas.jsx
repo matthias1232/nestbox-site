@@ -10,25 +10,25 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import Segmented from './Segmented.jsx';
 import Minimap from './Minimap.jsx';
 import TopologyPanel from './TopologyPanel.jsx';
+import { Icon } from './icons.jsx';
 import { DEFAULTS, edgePath, fit, layout, thickness, toneOf, zoomAt } from './topologyLayout.js';
 import '../styles/topology.css';
 
-// A 16x16 stroke glyph per kind; unknown kinds get a plain square.
-const GLYPH = {
-  organization: 'M2 13V4l6-2 6 2v9M5 13V7h6v6',
-  data_center: 'M2 4h12v3H2zM2 9h12v3H2zM4.5 5.5h1M4.5 10.5h1',
-  site: 'M2 13h12M4 13V6l4-3 4 3v7',
-  node: 'M3 3h10v10H3zM6 6h4v4H6z',
-  gateway: 'M2 8h12M10 4l4 4-4 4',
-  supervisor: 'M8 2l5 2v4c0 3-2.5 5-5 6-2.5-1-5-3-5-6V4z',
-  sandbox: 'M3 5l5-3 5 3v6l-5 3-5-3zM3 5l5 3 5-3M8 8v6',
-  egress: 'M2 8h9M8 4l4 4-4 4M14 3v10',
-  destination: 'M8 2a6 6 0 100 12A6 6 0 008 2zM2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12',
-  model: 'M8 2l5 3v6l-5 3-5-3V5zM8 8v6M3 5l5 3 5-3',
-  cluster: 'M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z',
-  user: 'M8 8a3 3 0 100-6 3 3 0 000 6zM3 14c0-3 2-4.5 5-4.5s5 1.5 5 4.5',
+// The icon per card kind (`components/icons.jsx`); unknown kinds get Settings.
+const KIND_ICONS = {
+  organization: 'Home',
+  data_center: 'DataCenter',
+  site: 'Site',
+  node: 'Node',
+  gateway: 'Network',
+  supervisor: 'Policy',
+  sandbox: 'Sandbox',
+  egress: 'Traffic',
+  destination: 'Network',
+  model: 'Model',
+  cluster: 'Cluster',
+  user: 'User',
 };
-const GLYPH_FALLBACK = 'M3 3h10v10H3z';
 
 // Cut a label so it fits a card.
 function cut(text, max) {
@@ -187,9 +187,9 @@ export default function TopologyCanvas(props) {
                     onKeyDown={(event) => cardKey(event, item.node.id)}
                   >
                     <rect width={card.w} height={card.h} />
-                    <svg x="10" y="10" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
-                      <path d={GLYPH[item.node.kind] || GLYPH_FALLBACK} />
-                    </svg>
+                    <g transform="translate(10, 10)">
+                      <Icon name={KIND_ICONS[item.node.kind] || 'Settings'} />
+                    </g>
                     <text class="card-label" x="32" y="21">{cut(item.node.label, 18)}</text>
                     <text class="card-state" x="32" y="39">
                       {item.node.statusLabel || item.node.status || item.node.kind}

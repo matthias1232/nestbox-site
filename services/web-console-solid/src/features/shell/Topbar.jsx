@@ -3,6 +3,7 @@ import { Show, createSignal, onCleanup } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
 import { useUi } from '../../state/ui.jsx';
 import ContextBar from '../tenants/ContextBar.jsx';
+import KeyHint from '../../components/KeyHint.jsx';
 import { navigate, paths } from '../../routing.js';
 
 export default function Topbar(props) {
@@ -25,8 +26,6 @@ export default function Topbar(props) {
     document.removeEventListener('keydown', onDocKey);
   });
 
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
-
   return (
     <header class="cc-topbar">
       <button class="ghost cc-menu-button" aria-label="Open the menu" onClick={() => props.onMenu?.()}>
@@ -36,7 +35,7 @@ export default function Topbar(props) {
       <div class="cc-context" data-tour="context"><ContextBar /></div>
       <button class="cc-search" data-tour="search" aria-label="Search" onClick={() => ui.palette.open()}>
         <span>Search…</span>
-        <kbd class="cc-kbd mono">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+        <KeyHint keys="mod+k" />
       </button>
       <button
         class="ghost cc-bell"

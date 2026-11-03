@@ -6,6 +6,7 @@
 // itself; the host hands in the search function.
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js';
 import StatusBadge from './StatusBadge.jsx';
+import { Icon } from './icons.jsx';
 import {
   KINDS,
   KIND_LABELS,
@@ -25,10 +26,10 @@ import '../styles/palette.css';
 const DEBOUNCE_MS = 200;
 const FOCUSABLE = 'button:not([disabled]), input, select, a[href], [tabindex]:not([tabindex="-1"])';
 
-// Two letters that stand for a kind where an icon would go; the word is also in the subtitle.
-const GLYPHS = {
-  sandbox: 'SB', node: 'ND', model: 'ML', cluster: 'CL', policy: 'PL', user: 'US',
-  site: 'ST', data_center: 'DC', job: 'JB', doc: 'DO', menu: 'MN',
+// The icon per result kind (`components/icons.jsx`); the word is also in the subtitle.
+const KIND_ICONS = {
+  sandbox: 'Sandbox', node: 'Node', model: 'Model', cluster: 'Cluster', policy: 'Policy', user: 'User',
+  site: 'Site', data_center: 'DataCenter', job: 'Clock', doc: 'Help', menu: 'Settings',
 };
 
 export default function CommandPalette(props) {
@@ -231,7 +232,7 @@ export default function CommandPalette(props) {
                           onMouseMove={() => setActive(flat().findIndex((row) => row.id === item.id))}
                           onClick={() => choose(item)}
                         >
-                          <span class="palette-glyph mono" aria-hidden="true">{GLYPHS[item.kind] || '··'}</span>
+                          <span class="palette-glyph" aria-hidden="true"><Icon name={KIND_ICONS[item.kind] || 'Settings'} /></span>
                           <span class="palette-name">{item.name}</span>
                           <span class="palette-sub muted small">
                             {KIND_LABELS[item.kind] || item.kind}
