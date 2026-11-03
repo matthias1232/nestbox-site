@@ -9,17 +9,10 @@
 // comes from the control summary (`control.presence`), so the Workbox has one
 // source for "who is here" instead of one poll per panel.
 
-import { Show, createSignal } from 'solid-js';
-import Tabs from '../../components/Tabs.jsx';
+import { Show } from 'solid-js';
+import ConsoleFrame from '../../components/ConsoleFrame.jsx';
 import PresenceDots from '../../components/PresenceDots.jsx';
-import TerminalTab from '../sandboxes/TerminalTab.jsx';
-import DesktopTab from '../sandboxes/DesktopTab.jsx';
 import '../../styles/workbox-sessions.css';
-
-const TABS = [
-  { id: 'terminals', label: 'Terminals' },
-  { id: 'desktop', label: 'Desktop' },
-];
 
 // Who is connected, in the shape `components/PresenceDots.jsx` reads. One dot
 // per open session, so two terminals of the same person are two dots.
@@ -62,7 +55,6 @@ function presenceLine(presence) {
 
 // The sessions of one sandbox: the shared terminals, and the desktop.
 export default function SessionsPanel(props) {
-  const [tab, setTab] = createSignal('terminals');
   const presence = () => props.control?.presence || [];
 
   return (
@@ -74,19 +66,7 @@ export default function SessionsPanel(props) {
         </Show>
         <span class="small">{presenceLine(presence())}</span>
       </div>
-      <Tabs tabs={TABS} active={tab()} onChange={setTab} />
-      <Show when={tab() === 'terminals'}>
-        <TerminalTab sandbox={props.sandbox} showAll />
-      </Show>
-      <Show when={tab() === 'desktop'}>
-        {/*
-          Offered for every sandbox: the sandbox object does not carry its recipe
-          agents, and the desktop stream itself answers with a sentence for a
-          sandbox that has none. Hiding it on a guess would hide it from the
-          sandboxes that do have one.
-        */}
-        <DesktopTab sandbox={props.sandbox} />
-      </Show>
+      <ConsoleFrame sandbox={props.sandbox} role={props.role} />
     </section>
   );
 }

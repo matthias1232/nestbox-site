@@ -16,7 +16,7 @@
 //    closing that did it, not a person deciding to;
 //  * ending a shell for everyone is its own explicit action, behind a question.
 
-import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -347,7 +347,7 @@ export default function TerminalTab(props) {
       term = new Terminal({
         cursorBlink: true,
         fontFamily: 'ui-monospace, Menlo, monospace',
-        fontSize: 13,
+        fontSize: props.fontSize || 13,
         theme: { background: '#000000' },
       });
       fit = new FitAddon();
@@ -406,6 +406,14 @@ export default function TerminalTab(props) {
         }
       });
       observer.observe(host);
+      // The console frame drives copy, paste, focus and fit from its toolbar.
+      props.onReady?.({
+        copy: () => { if (term?.hasSelection()) copyText(term.getSelection(), setCopyFallback); },
+        paste: (text) => { if (text) term?.paste(text); },
+        focus: () => term?.focus(),
+        fit: () => fit?.fit(),
+        activeTab: () => active(),
+      });
     } catch (failure) {
       setState('closed');
       setNote(`The terminal renderer could not start: ${failure?.message || failure}`);
@@ -417,6 +425,14 @@ export default function TerminalTab(props) {
     const timer = setInterval(() => refreshAll(), 10000);
     cleanups.push(() => clearInterval(timer));
     load();
+  });
+
+  // A font size from the console frame's toolbar applies at once.
+  createEffect(() => {
+    const size = props.fontSize;
+    if (!size || !term) return;
+    term.options.fontSize = size;
+    fit?.fit();
   });
 
   // Who is in which tab changes without this tab doing anything, so the strip

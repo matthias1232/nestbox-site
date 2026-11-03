@@ -53,3 +53,5 @@ terminal imports for its presence events so a page keeps one event stream.
 | `RequestStreamCard.jsx` | Which models this sandbox uses right now |
 | `WorkboxNotice.jsx` | What the end user is told about who may read the chats |
 | `LiveEventsPanel.jsx` | Proxy, OpenShell and MCP events of this sandbox |
+
+Note: `SessionsPanel.jsx` now renders `components/ConsoleFrame.jsx` under the presence line.
