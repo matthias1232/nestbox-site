@@ -55,6 +55,7 @@ const GENERATOR_VERSION: u32 = 7;
 const DESKTOP_INSTALL: &str = include_str!("../../../tool-images/desktop/install.sh");
 const DESKTOP_START: &str = include_str!("../../../tool-images/desktop/nestbox-desktop");
 const DESKTOP_DISPLAY: &str = include_str!("../../../tool-images/desktop/nestbox-display");
+const DESKTOP_MCP: &str = include_str!("../../../tool-images/desktop/nestbox-desktop-mcp");
 const DESKTOP_IDFIX: &str = include_str!("../../../tool-images/desktop/idfix.c");
 
 /// The supervisor program shipped inside every image the builder produces.
@@ -1871,6 +1872,10 @@ fn install_step(install: &PackInstall) -> Result<String, String> {
              # server all call: same layer rules, installed next to the start\n\
              # script.\n\
              RUN echo {display} | base64 -d > /usr/local/bin/nestbox-display \\\n && chmod 0755 /usr/local/bin/nestbox-display\n\
+             # Desktop control as an MCP server: the screen itself, every monitor,\n\
+             # next to the browser server from install.sh. stdio, so it is one\n\
+             # process inside the sandbox and nothing on the network.\n\
+             RUN echo {mcp} | base64 -d > /usr/local/bin/nestbox-desktop-mcp \\\n && chmod 0755 /usr/local/bin/nestbox-desktop-mcp\n\
              # The X server compiles its keymap into this directory. It is root's\n\
              # by default, and the desktop does not run as root. Its own layer, so\n\
              # the cached install above stays valid.\n\
@@ -1882,6 +1887,7 @@ fn install_step(install: &PackInstall) -> Result<String, String> {
             install = dockerfile_payload(DESKTOP_INSTALL),
             start = dockerfile_payload(DESKTOP_START),
             display = dockerfile_payload(DESKTOP_DISPLAY),
+            mcp = dockerfile_payload(DESKTOP_MCP),
             idfix = dockerfile_payload(DESKTOP_IDFIX),
         ),
         PackInstall::Npm(spec) => {
@@ -1960,6 +1966,7 @@ pub fn content_hash(
                         "install": DESKTOP_INSTALL,
                         "start": DESKTOP_START,
                         "display": DESKTOP_DISPLAY,
+                        "mcp": DESKTOP_MCP,
                         "idfix": DESKTOP_IDFIX,
                     }),
                 },
@@ -2370,6 +2377,7 @@ mod tests {
         assert!(text.contains("nestbox-desktop-install.sh"), "{text}");
         assert!(text.contains("> /usr/local/bin/nestbox-desktop"), "{text}");
         assert!(text.contains("> /usr/local/bin/nestbox-display"), "{text}");
+        assert!(text.contains("> /usr/local/bin/nestbox-desktop-mcp"), "{text}");
         let plain = plan(PackageManager::Apt, &["vim"]);
         assert_ne!(
             content_hash(&desktop, &resources(), &[], SUPERVISOR_PROGRAM),
