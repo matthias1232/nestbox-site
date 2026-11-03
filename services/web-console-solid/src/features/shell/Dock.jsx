@@ -1,11 +1,18 @@
 // The dock at the bottom: Tasks, Live events and Alerts. Collapsed to one 28 px bar by default;
 // the top edge resizes it (120-480 px). Under 720 px it is a bottom sheet behind a floating button.
+//
+// The bar itself answers "what is happening": the newest running task in muted mono and, on the
+// right in --bad, the newest refused destination that still waits for an answer (V06).
 import { Show, createSignal } from 'solid-js';
 import { useUi } from '../../state/ui.jsx';
 import { paths } from '../../routing.js';
 import TasksTab from '../dock/TasksTab.jsx';
 import LiveEventsTab from '../dock/LiveEventsTab.jsx';
 import AlertsTab from '../dock/AlertsTab.jsx';
+import { useAlerts } from '../dock/useAlerts.js';
+import { usePolling } from '../../components/Poll.js';
+import * as jobsApi from '../../api/jobs.js';
+import { labelFor, summaryLine } from '../jobs/jobLabels.js';
 
 const TABS = [
   { id: 'tasks', label: 'Tasks' },
@@ -23,8 +30,24 @@ function popOut(tab) {
 
 export default function Dock() {
   const ui = useUi();
+  const alerts = useAlerts();
   const [sheet, setSheet] = createSignal(false);
+  const [jobs, setJobs] = createSignal([]);
   const clamp = (value) => Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(value)));
+
+  // The bar keeps its own view of the jobs so it can say what runs without opening the tab.
+  // The list is newest first; the first running entry is the one worth naming.
+  usePolling(() => jobsApi.list(10), {
+    everyMs: 15000,
+    onData: (result) => setJobs(result.items || []),
+    onError: () => {},
+  });
+
+  // The one line on the left: the newest running task. The one on the right: the newest
+  // refused destination that nobody has answered yet (useAlerts reads the shared list).
+  const running = () => jobs().find((job) => job.status === 'running');
+  const newestAlert = () => alerts.open()[0];
+  const alertLine = (alert) => `● ${alert.sandbox_name || 'sandbox'} → ${alert.host}${alert.port ? `:${alert.port}` : ''} refused`;
 
   let drag = null;
   function onDown(event) {
@@ -75,32 +98,46 @@ export default function Dock() {
             onKeyDown={onHandleKey}
           />
         </Show>
-        <div class="cc-dock-bar" role="tablist" aria-label="Dock tabs">
-          {TABS.map((tab) => (
-            <button
-              role="tab"
-              aria-selected={ui.dock.tab() === tab.id}
-              onClick={() => { ui.dock.setTab(tab.id); ui.dock.setOpen(true); }}
-            >
-              {tab.label}
-              <Show when={tab.id === 'alerts' && ui.alerts.count() > 0}>
-                <span class="cc-bell-count hot mono">{ui.alerts.count()}</span>
-              </Show>
-            </button>
-          ))}
-          <Show when={canPop()}>
-            <button class="ghost cc-dock-pop" aria-label="Pop out this tab into its own window" onClick={() => popOut(ui.dock.tab())}>
-              Pop out
-            </button>
+        <div class="cc-dock-bar">
+          <div class="cc-dock-tabs" role="tablist" aria-label="Dock tabs">
+            {TABS.map((tab) => (
+              <button
+                role="tab"
+                aria-selected={ui.dock.tab() === tab.id}
+                onClick={() => { ui.dock.setTab(tab.id); ui.dock.setOpen(true); }}
+              >
+                {tab.label}
+                <Show when={tab.id === 'alerts' && ui.alerts.count() > 0}>
+                  <span class="cc-bell-count hot mono">{ui.alerts.count()}</span>
+                </Show>
+              </button>
+            ))}
+          </div>
+          <Show when={running()}>
+            <span class="cc-dock-running mono" title={labelFor(running().kind)}>
+              {labelFor(running().kind)} · {summaryLine(running())}
+            </span>
           </Show>
-          <button
-            class="ghost cc-dock-toggle"
-            aria-label={ui.dock.open() ? 'Collapse the dock' : 'Expand the dock'}
-            aria-expanded={ui.dock.open()}
-            onClick={() => { const next = !ui.dock.open(); ui.dock.setOpen(next); if (!next) setSheet(false); }}
-          >
-            {ui.dock.open() ? 'Collapse ▾' : 'Expand ▴'}
-          </button>
+          <div class="cc-dock-right">
+            <Show when={newestAlert()}>
+              <span class="cc-dock-alert mono" title={`${newestAlert().count || 1} refused, still unanswered`}>
+                {alertLine(newestAlert())}
+              </span>
+            </Show>
+            <Show when={canPop()}>
+              <button class="ghost cc-dock-pop" aria-label="Pop out this tab into its own window" onClick={() => popOut(ui.dock.tab())}>
+                Pop out
+              </button>
+            </Show>
+            <button
+              class="ghost cc-dock-toggle"
+              aria-label={ui.dock.open() ? 'Collapse the dock' : 'Expand the dock'}
+              aria-expanded={ui.dock.open()}
+              onClick={() => { const next = !ui.dock.open(); ui.dock.setOpen(next); if (!next) setSheet(false); }}
+            >
+              {ui.dock.open() ? 'Collapse ▾' : 'Expand ▴'}
+            </button>
+          </div>
         </div>
         <Show when={ui.dock.open()}>
           <div class="cc-dock-body" role="tabpanel" style={{ height: `${ui.dock.height()}px` }}>
