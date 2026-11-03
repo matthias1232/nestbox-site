@@ -260,6 +260,7 @@ pub const OPERATIONS: &[Operation] = &[
     op("GET", "/api/v1/permissions", "Who has which role in a scope", "users", "admin", false, StreamKind::None),
     op("PUT", "/api/v1/permissions", "Give a user a role in a scope", "users", "admin", true, StreamKind::None),
     op("DELETE", "/api/v1/permissions", "Take a user's role in a scope away", "users", "admin", true, StreamKind::None),
+    op("GET", "/api/v1/users/me/tours", "List the first-run tours the user has seen", "users", "viewer", true, StreamKind::None),
     op("PUT", "/api/v1/users/me/tours/{tour}", "Mark a first-run tour as seen", "users", "viewer", true, StreamKind::None),
     op("GET", "/api/v1/audit-events", "Recent audit events", "audit", "viewer", false, StreamKind::None),
     // Admin Center: resource history, processes, inventory

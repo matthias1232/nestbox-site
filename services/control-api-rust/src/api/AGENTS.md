@@ -154,4 +154,4 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 | `permissions.rs` | `GET/PUT/DELETE /permissions` (B12), contract C13 |
 | `tours.rs` | `PUT /users/me/tours/{tour}` (F18) |
 | `permissions.rs` | `GET/PUT/DELETE /permissions` (B12) |
-| `tours.rs` | `PUT /users/me/tours/{tour}`, `list_seen` for `GET /users/me/tours` (route not yet registered in `mod.rs`) |
+| `tours.rs` | `PUT /users/me/tours/{tour}`, `GET /users/me/tours` (`list_seen`) |

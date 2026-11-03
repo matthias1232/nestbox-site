@@ -668,6 +668,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/permissions",
             get(permissions::list).put(permissions::put).delete(permissions::delete),
         )
+        .route("/api/v1/users/me/tours", get(tours::list_seen))
         .route("/api/v1/users/me/tours/{tour}", put(tours::mark_seen))
         // Audit
         .route("/api/v1/audit-events", get(system::audit_events))
