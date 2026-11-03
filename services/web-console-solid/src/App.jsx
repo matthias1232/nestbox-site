@@ -4,7 +4,7 @@
 // `parsePath` returns to one page component and wraps it in the shell, except for the pop-out
 // windows, which own their whole window. Menu pages come from `features/shell/pages.js`.
 
-import { Match, Show, Suspense, Switch, createMemo, createSignal, onMount, onCleanup, lazy } from 'solid-js';
+import { Match, Show, Suspense, Switch, createEffect, createMemo, createSignal, onMount, onCleanup, lazy } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { useSession } from './state/session.jsx';
 import * as auth from './api/auth.js';
@@ -24,11 +24,18 @@ const DocsPage = lazy(() => import('./features/help/DocsPage.jsx'));
 const LogsPopout = lazy(() => import('./features/logs/LogsPopout.jsx'));
 const TrafficPopout = lazy(() => import('./features/traffic/TrafficPopout.jsx'));
 import Shell from './features/shell/Shell.jsx';
+import { useInventory } from './features/shell/useInventory.js';
+import { placeEnvironment } from './features/shell/placeEnvironment.js';
 import { PAGES } from './features/shell/pages.js';
 import { SHELLLESS, navigate, parsePath, paths } from './routing.js';
 import { adoptOpenerCsrf } from './api/client.js';
 
 const readPlace = () => parsePath(window.location.pathname, window.location.search);
+
+// The last data center a link moved the session to, as `kind:id:data center`. Module scope on
+// purpose: a switch remounts the page, and a guard inside the component would follow the same
+// place again on every mount, which turns the data-center picker into a fight (V15).
+let followed = null;
 
 export default function App() {
   const session = useSession();
@@ -79,8 +86,42 @@ export default function App() {
   // `/node/a` → `/node/b` loads b instead of showing a's data.
   function Page() {
     const current = createMemo(() => place());
+
+    // A link can name an entity of another data center (V15). The session's data center scopes
+    // every read, so `/box/<id>` of `default` answered "The requested resource does not exist"
+    // while the session sat in `Berlin`. The inventory tree is the only client-side map from an
+    // id to its data center, so wait for it and move the session once before the page renders.
+    const inventory = useInventory();
+    const elsewhere = createMemo(() => {
+      const p = current();
+      // Only a place that names a tree entity can live in another data center.
+      if (!p.id) return null;
+      const root = inventory.root();
+      if (!root) return null;
+      const environment = placeEnvironment(root, p);
+      if (!environment || environment === session.activeEnvironment()) return null;
+      return environment;
+    });
+    // No tree yet: the usual loading state, not a bare "does not exist" from the API. A tree
+    // that failed to load is not "missing" either; the page itself then says what is wrong.
+    const waiting = createMemo(() => Boolean(current().id) && !inventory.root() && !inventory.error());
+
+    createEffect(() => {
+      const environment = elsewhere();
+      if (!environment) return;
+      // One follow per address and target: switching remounts this page, so a guard that lives
+      // only in the component would follow the same link again and again.
+      const key = `${current().kind}:${current().id}:${environment}`;
+      if (followed === key) return;
+      followed = key;
+      session.switchEnvironment(environment);
+    });
+
     return (
       <Switch fallback={<HomePage />}>
+        <Match when={waiting() || elsewhere()}>
+          <p class="muted loading">Loading…</p>
+        </Match>
         <Match when={current().kind === 'dc'}>
           <Show when={current().id} keyed>
             {(id) => <DataCenterPage id={id} tab={current().tab} />}

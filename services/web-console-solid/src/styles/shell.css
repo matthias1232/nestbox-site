@@ -81,9 +81,12 @@
 .cc-topbar .ghost { background: transparent; border: 1px solid transparent; color: var(--fg-muted); cursor: pointer; padding: var(--space-1) var(--space-2); }
 .cc-topbar .ghost:hover { color: var(--fg); background: var(--bg-hover); }
 .cc-topbar button:focus-visible, .cc-topbar a:focus-visible, .cc-topbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Context picker reads as a breadcrumb: `PLATFORM ▸ Berlin`, the select borderless (V01). */
 .cc-context-bar { display: flex; align-items: center; gap: var(--space-2); font-size: 0.8rem; color: var(--fg-muted); }
-.cc-context-bar label { font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; }
-.cc-context-bar select { max-width: 260px; background: var(--bg-inset); color: var(--fg); border: 1px solid var(--border); padding: var(--space-1) var(--space-2); font: inherit; }
+.cc-context-bar .cc-context-org { color: var(--fg-muted); white-space: nowrap; }
+.cc-context-sep { color: var(--fg-faint); }
+.cc-context-bar select { max-width: 260px; border: 0; background: transparent; color: var(--fg); font-weight: 600; padding: 0 var(--space-1); cursor: pointer; }
+.cc-context-bar select option, .cc-context-bar select optgroup { background: var(--bg-raised); color: var(--fg); font-weight: 400; }
 .cc-search {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
   min-width: 220px; padding: var(--space-1) var(--space-3);

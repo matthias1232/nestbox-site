@@ -1,7 +1,8 @@
 /* Data center, site and node pages (F06). */
 .inv-page { display: flex; flex-direction: column; gap: var(--space-3); }
 .inv-tab { display: flex; flex-direction: column; gap: var(--space-4); }
-.inv-gauges { display: flex; flex-wrap: wrap; gap: var(--space-5); padding: var(--space-3) 0; }
+.inv-gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2); padding: var(--space-3) 0; }
+.inv-gauges .gauge { background: var(--bg-raised); border: 1px solid var(--border); padding: var(--space-2); }
 .inv-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); }
 .inv-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-4); }
 .inv-card { padding: var(--space-4); }
@@ -15,4 +16,4 @@
 .inv-group h2 { display: flex; align-items: center; gap: var(--space-2); font-size: 1.05rem; margin: 0 0 var(--space-2); }
 .inv-health { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .inv-health li { display: flex; align-items: center; gap: var(--space-2); }
-@media (max-width: 720px) { .inv-gauges { gap: var(--space-3); } }
+@media (max-width: 720px) { .inv-gauges { grid-template-columns: repeat(2, 1fr); gap: var(--space-3); } }

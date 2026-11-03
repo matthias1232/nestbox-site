@@ -7,8 +7,10 @@ Customers, data centers and sites (ADR 0044). One page, `TenantsPage.jsx`:
 * **Add a data center** in the caller's organisation;
 * the **sites** of the active data center, with *Add site* and *Remove* (an empty site only).
 
-`ContextBar.jsx` is the switcher at the top of the sidebar: organisation, data center. It reads
-the same tree, so it never offers a data center the caller cannot open.
+`ContextBar.jsx` is the switcher in the topbar: it reads like the mockup's breadcrumb
+(`PLATFORM ▸ Berlin`), with the organisation in the eyebrow face and the data center as a
+borderless select whose label "Data center" is the accessible name only (V01). It reads the
+same tree, so it never offers a data center the caller cannot open.
 
 Nothing here decides who may do what: the buttons are shown by role, and the API repeats the check.
 | `TenantsPage.jsx` | also embeds `PermissionsTab` (read-only) per organisation (F22) |

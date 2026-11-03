@@ -27,7 +27,9 @@
 
 /* Gauge */
 .gauge { display: inline-flex; flex-direction: column; align-items: center; margin: 0; gap: var(--space-1); }
-.gauge figcaption { display: flex; flex-direction: column; align-items: center; }
+.gauge figcaption { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.gauge-value { font: 600 0.8rem var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.gauge-label { font-size: 0.72rem; color: var(--fg-muted); }
 .gauge-track { fill: none; stroke: var(--border); stroke-width: 5; stroke-linecap: butt; }
 .gauge-fill { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: butt; }
 .gauge-fill.hot { stroke: var(--bad); }
