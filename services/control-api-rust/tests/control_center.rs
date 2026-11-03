@@ -554,6 +554,17 @@ async fn alerts_list_a_refused_destination_and_hide_an_answered_one() {
     assert_eq!(open[0].sandbox_id, sandbox_id);
     assert_eq!(open[0].count, 1);
 
+    // The tree's badge counts the same alerts as the list, not every refused event.
+    let tree = inventory_tree_service::tree(&ctx, &who, TreeView::Infrastructure)
+        .await
+        .expect("the tree");
+    let box_node = find(&tree.root, "sandbox", &sandbox_id.to_string()).expect("the sandbox in the tree");
+    assert_eq!(
+        box_node.extra.get("alerts").and_then(serde_json::Value::as_i64),
+        Some(1),
+        "the tree counts the open alert"
+    );
+
     // The window is created after the last refusal, which is what answers the alert.
     tokio::time::sleep(Duration::from_millis(150)).await;
     policy_service::open_window(&ctx, &who, Some(sandbox_id), Some(15), "bypass", "all", "alert test")
@@ -561,6 +572,16 @@ async fn alerts_list_a_refused_destination_and_hide_an_answered_one() {
         .expect("open a window");
     let answered = alert_service::list(&ctx, &who, 15, Some(sandbox_id)).await.expect("alerts");
     assert!(answered.is_empty(), "an answered alert is not listed");
+    let answered_tree = inventory_tree_service::tree(&ctx, &who, TreeView::Infrastructure)
+        .await
+        .expect("the tree");
+    let answered_box =
+        find(&answered_tree.root, "sandbox", &sandbox_id.to_string()).expect("the sandbox in the tree");
+    assert_eq!(
+        answered_box.extra.get("alerts").and_then(serde_json::Value::as_i64),
+        Some(0),
+        "an answered alert is not counted in the tree"
+    );
 }
 
 #[tokio::test]

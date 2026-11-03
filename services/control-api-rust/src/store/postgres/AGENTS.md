@@ -114,7 +114,7 @@ serves.
 | `privacy_exceptions.rs` | Rows of `privacy_exceptions` |
 
 Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_clusters.rs` (B05), `alerts.rs` (B08: `refused_grouped`),
-Control Center stores (Wave 0): `inventory.rs` (B01: `environment_rows`, `placement_rows` as one LEFT JOIN chain with a grouped 15-minute blocked count, `user_rows`, `install_rows`, `cluster_rows`), `search.rs` (B02), `model_clusters.rs` (B05), `alerts.rs` (B08),
+Control Center stores (Wave 0): `inventory.rs` (B01: `environment_rows`, `placement_rows` as one LEFT JOIN chain whose 15-minute alert count uses the alert list's own grouping and its two answered conditions, `user_rows`, `install_rows`, `cluster_rows`), `search.rs` (B02), `model_clusters.rs` (B05), `alerts.rs` (B08),
 `permissions.rs` (B12) return empty results until their package fills the queries; `tours.rs` is complete (the table
 Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_clusters.rs` (B05), `alerts.rs` (B08),
 `permissions.rs` (B12) lists and writes roles per data center, sandbox and organisation; `tours.rs` is complete (the table

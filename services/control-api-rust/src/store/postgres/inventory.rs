@@ -44,20 +44,55 @@ pub async fn environment_rows(
 /// Every site of the scope's data center with its nodes and sandboxes, one row per leaf.
 ///
 /// One `LEFT JOIN` chain, so a site without nodes and a node without sandboxes are rows of
-/// their own. Blocked connections of the last 15 minutes are counted once per sandbox in a
-/// grouped subquery, not once per row. Budgets are not read here (`ram_free` and `vram_free`
-/// are `None`): the service composes them from the node budget.
+/// their own. Refused destinations of the last 15 minutes are grouped exactly as the alert list
+/// groups them (`alerts::refused_grouped`) and only the unanswered groups are counted, so the
+/// badge in the tree agrees with the list and the dock. Budgets are not read here (`ram_free` and
+/// `vram_free` are `None`): the service composes them from the node budget.
 pub async fn placement_rows(scope: &mut TenantScope<'_>) -> Result<Vec<PlacementRow>, StoreError> {
     let rows = sqlx::query(
-        "WITH blocked AS (
-             SELECT sandbox_id, count(*)::bigint AS n
-               FROM telemetry_events
-              WHERE environment_id = $1
-                AND ts >= now() - interval '15 minutes'
-                AND kind IN ('network', 'dns')
-                AND sandbox_id IS NOT NULL
-                AND detail->>'decision' = 'deny'
-              GROUP BY sandbox_id
+        "WITH refused AS (
+             SELECT e.sandbox_id,
+                    lower(COALESCE(NULLIF(e.detail->>'host', ''),
+                                   NULLIF(e.detail->>'destination', ''),
+                                   NULLIF(e.detail->>'hostname', ''))) AS host,
+                    CASE WHEN COALESCE(e.detail->>'port', '') ~ '^[0-9]{1,5}$'
+                         THEN (e.detail->>'port')::integer ELSE 0 END AS port,
+                    COALESCE(NULLIF(e.detail->>'channel', ''), 'proxy') AS channel,
+                    e.ts
+               FROM telemetry_events e
+              WHERE e.environment_id = $1
+                AND e.ts >= now() - interval '15 minutes'
+                AND e.kind IN ('network', 'dns')
+                AND e.sandbox_id IS NOT NULL
+                AND COALESCE(e.detail->>'decision', '') = 'deny'
+         ),
+         grouped AS (
+             SELECT sandbox_id, host, port, channel, min(ts) AS first_at, max(ts) AS last_at
+               FROM refused
+              WHERE host IS NOT NULL
+              GROUP BY sandbox_id, host, port, channel
+         ),
+         blocked AS (
+             SELECT g.sandbox_id, count(*)::bigint AS n
+               FROM grouped g
+              WHERE NOT EXISTS (
+                    SELECT 1 FROM traffic_windows w
+                     WHERE w.environment_id = $1
+                       AND (w.sandbox_id = g.sandbox_id OR w.scope = 'environment')
+                       AND w.revoked_at IS NULL
+                       AND w.expires_at > now()
+                       AND w.channel IN ('all', g.channel)
+                       AND w.created_at > g.last_at)
+                AND NOT EXISTS (
+                    SELECT 1 FROM network_rules r
+                     WHERE r.environment_id = $1
+                       AND r.sandbox_id = g.sandbox_id
+                       AND r.action = 'allow'
+                       AND r.enabled
+                       AND lower(r.host) = g.host
+                       AND (r.port IS NULL OR r.port = g.port)
+                       AND r.created_at > g.first_at)
+              GROUP BY g.sandbox_id
          )
          SELECT si.id AS site_id, si.name AS site_name, si.kind AS site_kind,
                 n.id AS node_id, n.name AS node_name, n.status AS node_status,
