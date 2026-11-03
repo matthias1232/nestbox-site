@@ -60,29 +60,34 @@ function channelState(windows, channel) {
 // The summary `GET /sandboxes/{id}/control` answers with `sandbox_id`, `name`,
 // `status`, `node`, `egress` (`mode`, `revert_at`, `version`, …), `windows`
 // (`channel`, `mode`, `scope`, `reason`, `expires_at`), `allow_all`,
-// `allow_all_until`, `agents`, `presence`, `models`, `move` and `errors`. Those
-// are the only keys read here.
+// `allow_all_until`, `recording` (`mode`, `until`), `agents`, `presence`, `models`,
+// `move` and `errors`. Those are the only keys read here.
 //
-// It carries no recording state: the mutes live in `sandboxes.telemetry_mute_until`
-// and `sandboxes.telemetry_mute_bodies_until` and no route returns them, so the
-// strip says "full" until the API names a `recording` field.
+// An older API answers without `recording`; the strip then says "full", the level
+// the recorder has always had.
 export function stripState(summary) {
   const control = summary || {};
   const windows = openWindows(control);
   const wholeWindows = windows.filter((entry) => !entry.channel || entry.channel === 'all');
   const proxyOff = control.egress?.mode === 'off_allow_all';
   const on = Boolean(control.allow_all) || wholeWindows.length > 0 || proxyOff;
-  const recording = RECORDING_LEVELS.includes(control.recording) ? control.recording : 'full';
   return {
     allowAll: { on, until: on ? allowAllUntil(control) : null },
     mode: control.egress?.mode || 'forward_proxy',
-    recording,
+    recording: recordingMode(control.recording),
     channels: {
       dns: channelState(windows, 'dns'),
       internet: channelState(windows, 'proxy'),
       mcp: channelState(windows, 'mcp'),
     },
   };
+}
+
+// The recording level of a summary: `recording.mode` as the API sends it, a bare level
+// string an older answer may carry, or `full` when neither is a known level.
+function recordingMode(recording) {
+  const level = typeof recording === 'string' ? recording : recording?.mode;
+  return RECORDING_LEVELS.includes(level) ? level : 'full';
 }
 
 // The words next to a control: the label of a choice, or the recording sentence.

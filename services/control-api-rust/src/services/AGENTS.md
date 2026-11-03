@@ -345,7 +345,7 @@ uses to find it.
 | `rule_bulk_service` | turning observation into rule drafts |
 | `node_connect_service` | joining a machine by address, tunnels, the egress lock |
 | `rule_bulk_service` | turning observation into rule drafts (one allow draft per denied or would-deny destination) |
-| `control_service` | the one summary the workbox and the admin list read |
+| `control_service` | the one summary the workbox and the admin list read; its `recording` reads both mute columns and derives `full` / `flows` / `off` with the end of the decisive mute (X14) |
 
 `agent_launch_service` installs the launcher with one `sh -c` per sandbox: the scripts arrive
 base64-encoded, so no shell quoting of the payload is needed, and every file is written beside its

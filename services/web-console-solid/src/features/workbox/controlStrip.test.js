@@ -35,6 +35,7 @@ const SUMMARY = {
     mode: 'bypass', channel: 'dns', reason: 'alert example.org', expires_at: later }],
   allow_all: true,
   allow_all_until: later,
+  recording: { mode: 'off', until: later },
   agents: [], presence: [], models: [], move: null, errors: {},
 };
 
@@ -74,12 +75,16 @@ test('proxy off counts as allow-all', () => {
   assert.equal(stripState({ egress: { mode: 'off_allow_all' } }).allowAll.on, true);
 });
 
-test('the summary carries no recording state, so the strip shows full', () => {
-  // The mutes live on the sandbox row; `/sandboxes/{id}/control` does not return them.
+test('the summary names the recording mode, and an answer without it reads full', () => {
+  // The control summary now carries `recording: { mode, until }` (X14).
+  assert.equal(stripState(SUMMARY).recording, 'off');
+  assert.equal(stripState({ recording: { mode: 'flows', until: later } }).recording, 'flows');
+  assert.equal(stripState({ recording: { mode: 'full', until: null } }).recording, 'full');
+  // An old API answers no recording state at all, and an unknown word is no level.
+  assert.equal(stripState({}).recording, 'full');
   assert.equal(stripState({ telemetry_mute_until: later }).recording, 'full');
-  assert.equal(stripState({ telemetry_mute_bodies_until: later }).recording, 'full');
-  assert.equal(stripState(SUMMARY).recording, 'full');
-  // A key the API may grow later is honoured rather than ignored.
+  assert.equal(stripState({ recording: { mode: 'nonsense' } }).recording, 'full');
+  // The bare level string a previous console version accepted still works.
   assert.equal(stripState({ recording: 'flows' }).recording, 'flows');
 });
 

@@ -24,6 +24,27 @@ fn allow_all_until(expiries: &[Option<DateTime<Utc>>]) -> Option<DateTime<Utc>> 
     expiries.iter().flatten().copied().max()
 }
 
+/// Which recording level a sandbox's two mutes mean at `now`, and when it ends.
+///
+/// The flow mute (`telemetry_mute_until`) wins: while it runs nothing is stored, so the
+/// level is `off`. Only the body mute (`telemetry_mute_bodies_until`) means `flows`: the
+/// flows are stored, bodies and chats are not. Both in the past or absent means `full`.
+/// The `until` is the end of the decisive mute, so the strip can say how long it lasts.
+fn recording_state(
+    now: DateTime<Utc>,
+    mute_until: Option<DateTime<Utc>>,
+    bodies_until: Option<DateTime<Utc>>,
+) -> (&'static str, Option<DateTime<Utc>>) {
+    let running = |end: Option<DateTime<Utc>>| end.filter(|value| *value > now);
+    if let Some(until) = running(mute_until) {
+        return ("off", Some(until));
+    }
+    if let Some(until) = running(bodies_until) {
+        return ("flows", Some(until));
+    }
+    ("full", None)
+}
+
 /// Everything the Workbox shows for one sandbox.
 pub async fn summary(
     ctx: &ServiceContext,
@@ -41,6 +62,11 @@ pub async fn summary(
     let node = crate::store::postgres::control::node_brief(&mut scope, sandbox.node_id)
         .await
         .map_err(ApiError::from)?;
+    // The recording mutes live on the sandbox row (B11), so read them in the same scope.
+    let (mute_until, mute_bodies_until) =
+        crate::store::postgres::sandboxes::telemetry_mute(&mut scope, sandbox_id)
+            .await
+            .map_err(ApiError::from)?;
     // Only the windows that cover this sandbox: its own and the environment's.
     let windows: Vec<serde_json::Value> = crate::store::postgres::policies::list_windows(&mut scope)
         .await
@@ -91,6 +117,8 @@ pub async fn summary(
         })
         .collect();
     let allow_all = egress.mode.allows_everything() || !windows.is_empty();
+    let (recording_mode, recording_until) =
+        recording_state(Utc::now(), mute_until, mute_bodies_until);
 
     Ok(serde_json::json!({
         "sandbox_id": sandbox.id,
@@ -105,6 +133,10 @@ pub async fn summary(
         "windows": windows,
         "allow_all": allow_all,
         "allow_all_until": if allow_all { allow_all_until(&expiries) } else { None },
+        "recording": {
+            "mode": recording_mode,
+            "until": recording_until,
+        },
         "agents": agents,
         "presence": presence,
         "models": models,
@@ -149,5 +181,38 @@ mod tests {
             allow_all_until(&[Some(now + Duration::minutes(5)), Some(latest)]),
             Some(latest)
         );
+    }
+
+    #[test]
+    fn a_running_flow_mute_is_off_and_names_its_end() {
+        let now = Utc::now();
+        let until = now + Duration::hours(24);
+        assert_eq!(
+            recording_state(now, Some(until), Some(until)),
+            ("off", Some(until))
+        );
+        // The flow mute alone is enough: nothing is stored, bodies or not.
+        assert_eq!(
+            recording_state(now, Some(until), None),
+            ("off", Some(until))
+        );
+    }
+
+    #[test]
+    fn only_the_body_mute_means_flows() {
+        let now = Utc::now();
+        let until = now + Duration::hours(1);
+        assert_eq!(
+            recording_state(now, None, Some(until)),
+            ("flows", Some(until))
+        );
+    }
+
+    #[test]
+    fn mutes_in_the_past_record_everything_again() {
+        let now = Utc::now();
+        let past = now - Duration::minutes(1);
+        assert_eq!(recording_state(now, Some(past), Some(past)), ("full", None));
+        assert_eq!(recording_state(now, None, None), ("full", None));
     }
 }
