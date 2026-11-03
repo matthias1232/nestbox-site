@@ -280,7 +280,7 @@ def check_bundle() -> str:
     text = ""
     queue = [s.decode() for s in scripts]
     seen: set[str] = set()
-    while queue and len(seen) < 60:
+    while queue and len(seen) < 300:
         path = queue.pop(0)
         if path in seen:
             continue
