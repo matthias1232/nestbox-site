@@ -84,10 +84,15 @@ if (process.env.LOGIN_EMAIL) {
   await s('Page.navigate', { url: `${origin}/favicon.ico` });
   await sleep(800);
   const answer = await s('Runtime.evaluate', {
-    expression: `fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:${JSON.stringify(process.env.LOGIN_EMAIL)},password:${JSON.stringify(process.env.LOGIN_PASSWORD)}})}).then(r=>r.status)`,
+    expression: `fetch('/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:${JSON.stringify(process.env.LOGIN_EMAIL)},password:${JSON.stringify(process.env.LOGIN_PASSWORD)}})}).then(r=>r.json().then(j=>r.status+':'+(j.csrf_token||'')))`,
     awaitPromise: true,
   });
-  console.log('LOGIN status', answer.result?.value);
+  const [loginStatus, csrf] = String(answer.result?.value || '').split(':');
+  console.log('LOGIN status', loginStatus);
+  if (process.env.MARK_TOUR && csrf) {
+    const tour = await s('Runtime.evaluate', { expression: `fetch('/api/v1/users/me/tours/shell-v1',{method:'PUT',headers:{'x-csrf-token':${JSON.stringify(csrf)}}}).then(r=>r.status)`, awaitPromise: true });
+    console.log('TOUR seen', tour.result?.value);
+  }
 }
 
 s('Page.navigate', { url });
