@@ -1,7 +1,19 @@
 # features/inventory/ — data center, site and node pages (F06)
 
+Pages reached from the sidebar tree. Each has a breadcrumb, a title with status, a sticky action
+bar and tabs; the active tab is `?tab=<id>` (Summary is the bare address). Members see Summary and
+Sandboxes only; the API refuses the rest regardless.
+
 | File | Responsibility |
 |---|---|
-| `DataCenterPage.jsx` | `/dc/<id>` (placeholder until F06) |
-| `SitePage.jsx` | `/site/<id>` (placeholder until F06) |
-| `NodePage.jsx` | `/node/<id>` (placeholder until F06) |
+| `DataCenterPage.jsx` | `/dc/<id>`: Summary (tiles, topology, health), Sites & nodes, Sandboxes, Models, Policies, Permissions, Usage; makes the data center the active environment when it is another reachable one |
+| `SitePage.jsx` | `/site/<id>`: Summary (node cards), Nodes, Sandboxes; exports `NodesTable` |
+| `NodePage.jsx` | `/node/<id>`: Probe, Drain, Egress lock, Delete, Deploy; tabs Summary, Sandboxes, Models, Images, Traffic, Logs |
+| `NodeSummaryTab.jsx` | Gauges (CPU, RAM, VRAM, disk), tiles, tunnel card and facts of a node |
+| `ScopedSandboxesTab.jsx` | Sandbox table with Open / Workbox; selection goes to `ui.selection` (bulk bar) |
+| `ScopedModelsTab.jsx` | Model installs of one node or the whole data center |
+| `useNodeSummary.js` | `useNodeSummary` (5 s poll of `nodeOps.summary`) and `useTabState` (tab from props/address, writes `?tab=`) |
+| `inventoryTabs.js` | Pure helpers: tab lists per kind and role, tab address, size and age formats, tree lookups |
+| `inventoryTabs.test.js` | Tests for the helpers above |
+
+Styles: `styles/inventory.css`.
