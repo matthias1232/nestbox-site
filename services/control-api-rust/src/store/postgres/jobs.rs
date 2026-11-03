@@ -279,6 +279,39 @@ pub async fn list_schedules(scope: &mut TenantScope<'_>) -> Result<Vec<Schedule>
     Ok(out)
 }
 
+/// Settle the jobs of the given kinds that a restart interrupted.
+///
+/// A job that runs in a detached task — a bulk action, a bulk model install, a
+/// drain, a quick deploy — has no owner that notices the process going away. A
+/// restart therefore leaves its row `pending` or `running` forever, and the dock
+/// names it as the newest running task for good.
+///
+/// The pool, not a [`TenantScope`], because the boot has no principal and the
+/// settle has to reach every data center. It stays narrow: only the kinds the
+/// caller names, only rows still in flight, and only this table. `pending` is
+/// this schema's "queued" (`jobs_status_valid`, migration 0006), the state a job
+/// is created in before its task calls `start`.
+pub async fn settle_interrupted(
+    pool: &sqlx::PgPool,
+    kinds: &[JobKind],
+    error: &str,
+) -> Result<u64, StoreError> {
+    if kinds.is_empty() {
+        return Ok(0);
+    }
+    let kinds: Vec<String> = kinds.iter().map(|kind| kind.as_str().to_string()).collect();
+    let done = sqlx::query(
+        "UPDATE jobs
+            SET status = 'failed', error = $2, finished_at = now(), updated_at = now()
+          WHERE kind = ANY($1) AND status IN ('pending', 'running')",
+    )
+    .bind(&kinds)
+    .bind(error)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
+
 /// Record a schedule run.
 pub async fn mark_schedule_run(
     scope: &mut TenantScope<'_>,

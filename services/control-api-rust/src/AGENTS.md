@@ -74,7 +74,7 @@ Forbidden, and enforced by `tests/architecture.rs`:
 
 | File | Responsibility |
 |---|---|
-| `main.rs` | Process start: config, pool, migrate subcommand, serve |
+| `main.rs` | Process start: config, pool, migrate subcommand, serve; before the first request it settles what a restart interrupted (moves, builds, model installs, and the Control Center's own jobs) |
 | `lib.rs` | Crate surface: `build`, `app` |
 | `config.rs` | Environment to settings, secret files, redaction-safe logging |
 | `error.rs` | `ApiError` and the published error envelope |

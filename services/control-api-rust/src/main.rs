@@ -157,6 +157,18 @@ async fn main() {
         Err(error) => tracing::warn!(code = error.code.0, "could not settle interrupted installs"),
     }
 
+    // And the same for the Control Center's own jobs (bulk action, bulk model
+    // install, drain, quick deploy): they run in a detached task too, so a restart
+    // leaves them `running` and the dock keeps naming one that will never move.
+    match nestbox_control_api::services::job_service::settle_interrupted(&state.services).await {
+        Ok(0) => {}
+        Ok(settled) => tracing::info!(
+            settled,
+            "settled Control Center jobs interrupted by a restart"
+        ),
+        Err(error) => tracing::warn!(code = error.code.0, "could not settle interrupted jobs"),
+    }
+
     // The hub's registry entry follows the deployment: its address differs when the
     // sandboxes run on an OpenShell gateway. Idempotent, and only when it differs.
     let hub_url = nestbox_control_api::services::provider_service::mcp_hub_url();
