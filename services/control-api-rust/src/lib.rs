@@ -11,6 +11,7 @@ pub mod config;
 pub mod domain;
 pub mod error;
 pub mod events;
+pub mod hosting;
 pub mod openapi;
 pub mod runtime;
 pub mod security;

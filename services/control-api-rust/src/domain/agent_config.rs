@@ -89,7 +89,13 @@ fn claude_code(environment: &BTreeMap<String, String>, servers: &[McpServerConfi
     if let Some(url) = get(environment, "ANTHROPIC_BASE_URL") {
         env.insert("ANTHROPIC_BASE_URL".into(), json!(url));
     }
-    let model = get(environment, "ANTHROPIC_MODEL");
+    // A granted model wins over the profile's single default: once the sandbox may
+    // use a set of models, the one the console marked as default is what a new
+    // session should ask for, and the environment cannot know that on its own.
+    let model = match (get(environment, "NESTBOX_MODEL_DEFAULT"), get(environment, "ANTHROPIC_BASE_URL")) {
+        (Some(default), Some(_)) => Some(default),
+        _ => get(environment, "ANTHROPIC_MODEL"),
+    };
     if let Some(model) = model {
         env.insert("ANTHROPIC_MODEL".into(), json!(model));
         env.insert("ANTHROPIC_SMALL_FAST_MODEL".into(), json!(model));
@@ -195,29 +201,69 @@ fn claude_state(environment: &BTreeMap<String, String>, servers: &[McpServerConf
 }
 
 fn opencode(environment: &BTreeMap<String, String>, servers: &[McpServerConfig]) -> Vec<AgentFile> {
-    let (Some(base), Some(model)) = (get(environment, "OPENAI_BASE_URL"), get(environment, "OPENAI_MODEL").or_else(|| get(environment, "ANTHROPIC_MODEL"))) else {
-        return Vec::new();
+    // The models the sandbox may use, as the router knows them (contract C6). An
+    // empty list keeps the older single-model shape, so an environment that was
+    // written before grants existed still produces a working file.
+    let granted: Vec<String> = get(environment, "NESTBOX_MODEL_LIST")
+        .map(|list| {
+            list.split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let models: Vec<String> = if granted.is_empty() {
+        get(environment, "OPENAI_MODEL")
+            .or_else(|| get(environment, "ANTHROPIC_MODEL"))
+            .map(|model| vec![model.to_string()])
+            .unwrap_or_default()
+    } else {
+        granted
     };
-    let config = json!({
+    // `mcp`, `autoupdate` and `share` belong to every sign-in mode; only the
+    // provider below depends on it.
+    let mut config = json!({
         "$schema": "https://opencode.ai/config.json",
-        "model": format!("nestbox/{model}"),
-        "small_model": format!("nestbox/{model}"),
-        "provider": {
-            "nestbox": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "Model endpoint (via the egress proxy)",
-                "options": {
-                    "baseURL": base,
-                    // A reference, not the value: the key lives in the environment.
-                    "apiKey": "{env:OPENAI_API_KEY}",
-                },
-                "models": { model: { "name": model } },
-            }
-        },
         "autoupdate": false,
         "share": "disabled",
     });
-    let mut config = config;
+    match get(environment, "OPENAI_BASE_URL") {
+        // The user signs in with their own account: the file is still written,
+        // because it has to replace the one that pointed at the gateway, but
+        // without a provider, a model or a small model.
+        None => {}
+        // An endpoint without any model name would be an empty provider that
+        // shadows the agent's own defaults, so nothing is written (as before).
+        Some(_) if models.is_empty() => return Vec::new(),
+        Some(base) => {
+            // A granted model wins over the profile's single default: the console
+            // decided which one a new session should ask for.
+            let default = get(environment, "NESTBOX_MODEL_DEFAULT")
+                .filter(|name| models.iter().any(|candidate| candidate == name))
+                .map(str::to_string)
+                .or_else(|| models.first().cloned())
+                .unwrap_or_default();
+            let mut entries = serde_json::Map::new();
+            for name in &models {
+                entries.insert(name.clone(), json!({ "name": name }));
+            }
+            config["model"] = json!(format!("nestbox/{default}"));
+            config["small_model"] = json!(format!("nestbox/{default}"));
+            config["provider"] = json!({
+                "nestbox": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "Model endpoint (via the egress proxy)",
+                    "options": {
+                        "baseURL": base,
+                        // A reference, not the value: the key lives in the environment.
+                        "apiKey": "{env:OPENAI_API_KEY}",
+                    },
+                    "models": entries,
+                }
+            });
+        }
+    }
     let mut configured = serde_json::Map::new();
     if let Some(url) = get(environment, "NESTBOX_MCP_URL") {
         configured.insert(
@@ -290,6 +336,51 @@ pub fn gateway_environment(endpoint: &str, model: Option<&str>, key: &str) -> BT
     environment
 }
 
+/// Point the model base URLs of an agent environment at the accounting proxy.
+///
+/// The proxy needs two facts the request itself cannot carry through the egress
+/// proxy (which drops `X-Nestbox-*` headers): which sandbox asks, and where the
+/// request was meant to go. Both are put in the path, `/s/<sandbox>/u/<scheme>/
+/// <host>/…`, and the proxy strips them again before it forwards. A base URL that
+/// is not http(s) or that is already routed is left alone, so the call is safe to
+/// repeat.
+pub fn route_through_accounting(
+    environment: &mut BTreeMap<String, String>,
+    proxy_url: &str,
+    sandbox_name: &str,
+) {
+    let proxy = proxy_url.trim().trim_end_matches('/');
+    if proxy.is_empty() || sandbox_name.is_empty() {
+        return;
+    }
+    // With the model router, the model is chosen per request by the accounting
+    // proxy, so the base URLs name the sandbox and nothing else: no upstream host
+    // is baked into the agent's environment, which is what lets a grant change a
+    // model without a new container.
+    if get(environment, "NESTBOX_MODEL_ROUTER") == Some("1") {
+        for key in ["OPENAI_BASE_URL", "OPENAI_API_BASE"] {
+            if environment.contains_key(key) {
+                environment.insert(key.to_string(), format!("{proxy}/s/{sandbox_name}/r/v1"));
+            }
+        }
+        if environment.contains_key("ANTHROPIC_BASE_URL") {
+            environment.insert("ANTHROPIC_BASE_URL".to_string(), format!("{proxy}/s/{sandbox_name}/r"));
+        }
+        return;
+    }
+    for key in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "ANTHROPIC_BASE_URL"] {
+        let Some(current) = environment.get(key).cloned() else { continue };
+        if current.starts_with(proxy) {
+            continue;
+        }
+        let Some((scheme, rest)) = current.split_once("://") else { continue };
+        if scheme != "http" && scheme != "https" {
+            continue;
+        }
+        environment.insert(key.to_string(), format!("{proxy}/s/{sandbox_name}/u/{scheme}/{rest}"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +411,17 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&settings.content).expect("valid json");
         assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "opencode-go-combo");
         assert!(files.iter().any(|file| file.path == ".claude.json"));
+    }
+
+    #[test]
+    fn a_default_granted_model_wins_over_the_profile_model() {
+        let mut environment = env();
+        environment.insert("NESTBOX_MODEL_DEFAULT".into(), "big-model".into());
+        let files = files_for("claude-code", &environment);
+        let settings = files.iter().find(|file| file.path == ".claude/settings.json").expect("settings");
+        let parsed: serde_json::Value = serde_json::from_str(&settings.content).expect("valid json");
+        assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "big-model");
+        assert_eq!(parsed["env"]["ANTHROPIC_SMALL_FAST_MODEL"], "big-model");
     }
 
     #[test]
@@ -399,8 +501,74 @@ mod tests {
     }
 
     #[test]
-    fn a_pack_without_configuration_or_a_sandbox_without_an_endpoint_gets_no_files() {
+    fn a_pack_without_configuration_gets_no_files() {
         assert!(files_for("ubuntu-dev", &env()).is_empty());
-        assert!(files_for("opencode", &BTreeMap::new()).is_empty());
+    }
+
+    #[test]
+    fn opencode_without_an_endpoint_has_no_provider_but_keeps_the_rest() {
+        // Own login: the file must still replace the one that named the gateway,
+        // otherwise a re-apply would leave the user pointed at a credential the
+        // launcher just stripped.
+        let files = files_for("opencode", &BTreeMap::new());
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, ".config/opencode/opencode.json");
+        let parsed: serde_json::Value = serde_json::from_str(&files[0].content).expect("valid json");
+        assert!(parsed.get("provider").is_none());
+        assert!(parsed.get("model").is_none());
+        assert!(parsed.get("small_model").is_none());
+        assert_eq!(parsed["autoupdate"], false);
+        assert_eq!(parsed["share"], "disabled");
+    }
+
+    #[test]
+    fn opencode_lists_every_granted_model_and_takes_the_default_one() {
+        let mut environment = env();
+        environment.insert("NESTBOX_MODEL_LIST".into(), "a,b".into());
+        environment.insert("NESTBOX_MODEL_DEFAULT".into(), "b".into());
+        let files = files_for("opencode", &environment);
+        let parsed: serde_json::Value = serde_json::from_str(&files[0].content).expect("valid json");
+        assert_eq!(parsed["model"], "nestbox/b");
+        assert_eq!(parsed["small_model"], "nestbox/b");
+        assert!(parsed["provider"]["nestbox"]["models"].get("a").is_some());
+        assert!(parsed["provider"]["nestbox"]["models"].get("b").is_some());
+    }
+
+    #[test]
+    fn opencode_falls_back_to_the_first_granted_model() {
+        let mut environment = env();
+        environment.insert("NESTBOX_MODEL_LIST".into(), "a,b".into());
+        let parsed: serde_json::Value =
+            serde_json::from_str(&files_for("opencode", &environment)[0].content).expect("valid json");
+        assert_eq!(parsed["model"], "nestbox/a");
+    }
+
+    #[test]
+    fn in_router_mode_the_base_urls_name_the_sandbox_and_nothing_else() {
+        let mut environment = gateway_environment("http://10.90.92.30:20128/v1", Some("m"), "k");
+        environment.insert("NESTBOX_MODEL_ROUTER".into(), "1".into());
+        route_through_accounting(&mut environment, "http://accounting-proxy:8099/", "x");
+        assert_eq!(environment["OPENAI_BASE_URL"], "http://accounting-proxy:8099/s/x/r/v1");
+        assert_eq!(environment["OPENAI_API_BASE"], "http://accounting-proxy:8099/s/x/r/v1");
+        assert_eq!(environment["ANTHROPIC_BASE_URL"], "http://accounting-proxy:8099/s/x/r");
+        assert_eq!(environment["OPENAI_API_KEY"], "k", "the credential is untouched");
+    }
+
+    #[test]
+    fn model_base_urls_are_routed_through_the_accounting_proxy_by_path() {
+        let mut environment = gateway_environment("http://10.90.92.30:20128/v1", Some("m"), "k");
+        route_through_accounting(&mut environment, "http://host.openshell.internal:18099/", "claude-01");
+        assert_eq!(
+            environment["ANTHROPIC_BASE_URL"],
+            "http://host.openshell.internal:18099/s/claude-01/u/http/10.90.92.30:20128"
+        );
+        assert_eq!(
+            environment["OPENAI_BASE_URL"],
+            "http://host.openshell.internal:18099/s/claude-01/u/http/10.90.92.30:20128/v1"
+        );
+        assert_eq!(environment["OPENAI_API_KEY"], "k", "the credential is untouched");
+        let once = environment.clone();
+        route_through_accounting(&mut environment, "http://host.openshell.internal:18099", "claude-01");
+        assert_eq!(environment, once, "routing twice changes nothing");
     }
 }

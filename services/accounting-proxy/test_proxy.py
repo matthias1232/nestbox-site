@@ -24,6 +24,7 @@ import time
 import unittest
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 import server as proxy
 
@@ -126,6 +127,23 @@ class UpstreamHandler(_Quiet):
 class ControlHandler(_Quiet):
     """The control API stand-in: records calls, answers inspect from the text."""
 
+    def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+        self.server.calls.append(  # type: ignore[attr-defined]
+            {
+                "path": self.path,
+                "authorization": self.headers.get("authorization"),
+                "payload": {},
+            }
+        )
+        if self.path.startswith("/api/v1/internal/accounting/models/"):
+            answer = self.server.models  # type: ignore[attr-defined]
+            if answer is None:
+                self._status(500)
+                return
+            self._json(answer)
+            return
+        self._status(404)
+
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
         length = int(self.headers.get("content-length") or 0)
         raw = self.rfile.read(length) if length else b""
@@ -169,6 +187,7 @@ class Stub:
         self.server.daemon_threads = True
         self.server.requests = []  # type: ignore[attr-defined]
         self.server.calls = []  # type: ignore[attr-defined]
+        self.server.models = None  # type: ignore[attr-defined]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -655,6 +674,478 @@ def inspect_decision(content: str) -> dict:
         "transformed_content": content,
         "findings": [],
     }
+
+
+class SplitIdentityTests(unittest.TestCase):
+    """The sandbox rides in the path because the egress proxy drops headers."""
+
+    def test_a_sandbox_prefix_is_read_and_stripped(self):
+        self.assertEqual(
+            proxy.split_identity("/s/claude-01/v1/messages?beta=1"),
+            ("claude-01", None, "/v1/messages?beta=1", False),
+        )
+
+    def test_an_upstream_can_follow_the_sandbox(self):
+        self.assertEqual(
+            proxy.split_identity("/s/a/u/https/llm.example.com:443/v1/chat/completions"),
+            ("a", "https://llm.example.com:443", "/v1/chat/completions", False),
+        )
+
+    def test_a_router_prefix_is_read_and_stripped(self):
+        self.assertEqual(
+            proxy.split_identity("/s/box1/r/v1/chat/completions"),
+            ("box1", None, "/v1/chat/completions", True),
+        )
+
+    def test_the_router_marker_comes_right_after_the_sandbox(self):
+        self.assertEqual(
+            proxy.split_identity("/s/a/r/x/v1/messages"),
+            ("a", None, "/x/v1/messages", True),
+        )
+        self.assertEqual(
+            proxy.split_identity("/s/a/u/https/h.example.com/r/v1/models"),
+            ("a", "https://h.example.com", "/v1/models", True),
+        )
+
+    def test_a_malformed_prefix_is_no_prefix(self):
+        for raw in ("/v1/messages", "/s/", "/s/../v1", "/s/a b/v1", "/s//v1"):
+            self.assertIsNone(proxy.split_identity(raw), raw)
+
+    def test_a_bad_upstream_scheme_stays_in_the_path(self):
+        found = proxy.split_identity("/s/a/u/file/etc/passwd")
+        self.assertEqual(found, ("a", None, "/u/file/etc/passwd", False))
+
+
+def grants(base: str, default: str | None = "fast") -> dict:
+    """A routes document in the shape the control API answers with."""
+    return {
+        "default": default,
+        "models": [
+            {
+                "model_name": "fast",
+                "upstream_base": base,
+                "upstream_model": "qwen3:1.7b",
+                "authorization": "Bearer gateway-key",
+            },
+            {
+                "model_name": "smart",
+                "upstream_base": base,
+                "upstream_model": "smart",
+                "authorization": None,
+            },
+        ],
+    }
+
+
+class RouteChoiceTests(unittest.TestCase):
+    """A granted model decides the upstream, the model name and the credential."""
+
+    def test_a_granted_model_is_renamed_to_the_upstream_name(self):
+        entry, body = proxy.choose_route(grants("http://llm"), {"model": "fast"})
+        self.assertEqual(entry["model_name"], "fast")
+        self.assertEqual(body, {"model": "qwen3:1.7b"})
+
+    def test_a_name_the_upstream_knows_is_forwarded_unchanged(self):
+        given = {"model": "smart", "messages": []}
+        entry, body = proxy.choose_route(grants("http://llm"), given)
+        self.assertEqual(entry["model_name"], "smart")
+        self.assertIs(body, given)
+
+    def test_a_body_without_a_model_takes_the_default(self):
+        entry, _ = proxy.choose_route(grants("http://llm"), {"messages": []})
+        self.assertEqual(entry["model_name"], "fast")
+        self.assertEqual(proxy.requested_model(grants("http://llm"), {}), "fast")
+
+    def test_a_model_that_is_not_granted_has_no_route(self):
+        entry, _ = proxy.choose_route(grants("http://llm"), {"model": "gpt-9"})
+        self.assertIsNone(entry)
+
+    def test_an_empty_grant_list_routes_nothing(self):
+        empty = {"default": None, "models": []}
+        self.assertIsNone(proxy.choose_route(empty, {"model": "x"})[0])
+        self.assertIsNone(proxy.choose_route(empty, {})[0])
+
+    def test_the_error_names_the_model_and_the_reason(self):
+        answer = proxy.not_granted_error("gpt-9")
+        self.assertEqual(answer["error"]["type"], "model_not_granted")
+        self.assertIn("gpt-9", answer["error"]["message"])
+
+    def test_the_model_list_uses_the_granted_names(self):
+        answer = proxy.model_list(grants("http://llm"))
+        self.assertEqual(answer["object"], "list")
+        self.assertEqual([entry["id"] for entry in answer["data"]], ["fast", "smart"])
+        self.assertEqual(answer["data"][0]["owned_by"], "nestbox")
+
+    def test_a_grant_without_a_usable_upstream_is_refused(self):
+        for base in ("", "file:///etc", "not-a-url"):
+            with self.assertRaises(proxy.UpstreamUnavailable):
+                proxy.route_base({"upstream_base": base})
+
+    def test_a_grant_without_an_authorization_keeps_the_callers(self):
+        self.assertIsNone(proxy.route_authorization({"authorization": None}))
+        self.assertEqual(
+            proxy.route_authorization({"authorization": "Bearer k"}), "Bearer k"
+        )
+
+
+class RoutesCacheTests(unittest.TestCase):
+    """The router asks the control API at most once per ten seconds per sandbox."""
+
+    def setUp(self) -> None:
+        proxy._ROUTES.clear()
+
+    def tearDown(self) -> None:
+        proxy._ROUTES.clear()
+
+    def test_two_calls_fetch_once(self):
+        with mock.patch.object(
+            proxy, "control_get", return_value=grants("http://llm")
+        ) as get:
+            first = proxy.routes_for("box1")
+            second = proxy.routes_for("box1")
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(first["default"], "fast")
+        self.assertEqual(second, first)
+
+    def test_the_control_api_is_asked_for_this_sandbox(self):
+        with mock.patch.object(
+            proxy, "control_get", return_value=grants("http://llm")
+        ) as get:
+            proxy.routes_for("box-42")
+        self.assertTrue(get.call_args[0][1].endswith("/models/box-42"))
+
+    def test_a_stale_answer_is_used_when_the_control_api_fails(self):
+        proxy._ROUTES["box1"] = (
+            time.monotonic() - proxy.ROUTES_TTL - 1.0,
+            grants("http://llm"),
+        )
+        with mock.patch.object(
+            proxy, "control_get", side_effect=proxy.ControlError("down")
+        ):
+            with mock.patch("builtins.print") as printed:
+                routes = proxy.routes_for("box1")
+        self.assertEqual(routes["default"], "fast")
+        self.assertTrue(
+            any("routes for box1 unavailable, using cached" in str(call)
+                for call in printed.call_args_list),
+            printed.call_args_list,
+        )
+
+    def test_no_grant_and_no_control_api_is_an_empty_list(self):
+        with mock.patch.object(
+            proxy, "control_get", side_effect=proxy.ControlError("down")
+        ):
+            routes = proxy.routes_for("box-new")
+        self.assertEqual(routes, {"default": None, "models": []})
+
+
+class RouterTest(unittest.TestCase):
+    """`/s/<sandbox>/r/…` routes by the granted model, not by the path family."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.upstream = Stub(UpstreamHandler)
+        cls.control = Stub(ControlHandler)
+        cls.control.server.inspect_status = 200  # type: ignore[attr-defined]
+        cls.control.server.inspect = inspect_decision  # type: ignore[attr-defined]
+
+        cls.saved_config = proxy.CONFIG
+        proxy.CONFIG = cls.config()
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Handler)
+        cls.server.daemon_threads = True
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def config(cls) -> proxy.Config:
+        return proxy.Config(
+            anthropic_upstream=cls.upstream.base,
+            openai_upstream=cls.upstream.base,
+            default_upstream="",
+            control_api=cls.control.base,
+            accounting_token=ACCOUNTING_TOKEN,
+            sandbox=SANDBOX,
+            agent_instance=AGENT,
+            privacy_fail_closed=False,
+            port=0,
+            upstream_timeout=10.0,
+            control_timeout=5.0,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.shutdown()
+        cls.server.server_close()
+        proxy.CONFIG = cls.saved_config
+        cls.upstream.stop()
+        cls.control.stop()
+
+    def setUp(self) -> None:
+        self.upstream.requests.clear()
+        self.control.calls.clear()
+        self.control.server.models = None  # type: ignore[attr-defined]
+        proxy._ROUTES.clear()
+
+    # -- helpers ------------------------------------------------------------
+
+    def post(
+        self,
+        path: str,
+        payload: object,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        body = json.dumps(payload).encode()
+        sent = {"Content-Type": "application/json"}
+        sent.update(headers or {})
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        connection.request("POST", path, body=body, headers=sent)
+        response = connection.getresponse()
+        data = response.read()
+        result = (response.status, dict(response.getheaders()), data)
+        connection.close()
+        return result
+
+    def get(self, path: str) -> tuple[int, bytes]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        connection.request("GET", path)
+        response = connection.getresponse()
+        data = response.read()
+        connection.close()
+        return response.status, data
+
+    def wait_row(self, **matches: object) -> dict:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            for call in self.control.calls:
+                if call["path"] != "/api/v1/internal/accounting/record":
+                    continue
+                row = call["payload"]
+                if all(row.get(key) == value for key, value in matches.items()):
+                    return row
+            time.sleep(0.01)
+        self.fail(f"no accounting row matched {matches}")
+
+    def granted(self):
+        """The sandbox's grants, pointing at the upstream stand-in."""
+        return mock.patch.object(
+            proxy, "routes_for", return_value=grants(self.upstream.base)
+        )
+
+    # -- the model list -----------------------------------------------------
+
+    def test_the_model_list_names_the_granted_models(self) -> None:
+        with self.granted():
+            status, body = self.get("/s/box1/r/v1/models")
+        self.assertEqual(status, 200)
+        answer = json.loads(body)
+        self.assertEqual(answer["object"], "list")
+        self.assertEqual([entry["id"] for entry in answer["data"]], ["fast", "smart"])
+        self.assertEqual(self.upstream.requests, [], "the list is answered here")
+
+    # -- routing ------------------------------------------------------------
+
+    def test_the_grants_are_fetched_with_the_node_token_and_cached(self) -> None:
+        self.control.server.models = grants(self.upstream.base)  # type: ignore[attr-defined]
+        for _ in range(2):
+            status, body = self.get("/s/box1/r/v1/models")
+            self.assertEqual(status, 200)
+            self.assertEqual(
+                [entry["id"] for entry in json.loads(body)["data"]], ["fast", "smart"]
+            )
+        fetches = [
+            call
+            for call in self.control.calls
+            if call["path"].startswith("/api/v1/internal/accounting/models/")
+        ]
+        self.assertEqual(len(fetches), 1, "the second call is served from the cache")
+        self.assertEqual(fetches[0]["path"], "/api/v1/internal/accounting/models/box1")
+        self.assertEqual(fetches[0]["authorization"], f"Bearer {ACCOUNTING_TOKEN}")
+
+    def test_a_control_api_without_grants_lists_nothing(self) -> None:
+        status, body = self.get("/s/box1/r/v1/models")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"object": "list", "data": []})
+
+    def test_a_granted_model_is_routed_with_its_own_key(self) -> None:
+        with self.granted():
+            status, _, _ = self.post(
+                "/s/box1/r/v1/chat/completions",
+                {"model": "fast", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"Authorization": "Bearer sandbox-own"},
+            )
+        self.assertEqual(status, 200)
+        seen = self.upstream.requests[0]
+        self.assertEqual(seen["path"], "/v1/chat/completions")
+        self.assertEqual(json.loads(seen["body"])["model"], "qwen3:1.7b")
+        self.assertEqual(seen["headers"]["authorization"], "Bearer gateway-key")
+
+    def test_the_callers_credential_stays_when_the_grant_has_none(self) -> None:
+        with self.granted():
+            self.post(
+                "/s/box1/r/v1/chat/completions",
+                {"model": "smart", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"Authorization": "Bearer sandbox-own"},
+            )
+        self.assertEqual(
+            self.upstream.requests[0]["headers"]["authorization"], "Bearer sandbox-own"
+        )
+
+    def test_the_default_model_is_used_when_the_body_names_none(self) -> None:
+        with self.granted():
+            self.post(
+                "/s/box1/r/v1/chat/completions",
+                {"messages": [{"role": "user", "content": "hi"}]},
+            )
+        self.assertEqual(
+            json.loads(self.upstream.requests[0]["body"])["model"], "qwen3:1.7b"
+        )
+
+    def test_the_upstream_header_cannot_override_a_grant(self) -> None:
+        with self.granted():
+            status, _, _ = self.post(
+                "/s/box1/r/v1/chat/completions",
+                {"model": "smart", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"X-Nestbox-Upstream": self.control.base},
+            )
+        self.assertEqual(status, 200, "the grant wins, the header is ignored")
+        self.assertEqual(len(self.upstream.requests), 1)
+
+    def test_an_ungranted_model_is_a_404_and_is_not_forwarded(self) -> None:
+        with self.granted():
+            status, _, body = self.post(
+                "/s/box1/r/v1/chat/completions",
+                {"model": "gpt-9", "messages": [{"role": "user", "content": "hi"}]},
+            )
+        self.assertEqual(status, 404)
+        answer = json.loads(body)["error"]
+        self.assertEqual(answer["type"], "model_not_granted")
+        self.assertIn("gpt-9", answer["message"])
+        self.assertEqual(self.upstream.requests, [])
+
+    # -- accounting ---------------------------------------------------------
+
+    def test_a_routed_request_still_gets_an_accounting_row(self) -> None:
+        with self.granted():
+            self.post(
+                "/s/box1/r/v1/chat/completions",
+                {"model": "fast", "messages": [{"role": "user", "content": "hi"}]},
+            )
+        row = self.wait_row(endpoint="/v1/chat/completions")
+        self.assertEqual(row["sandbox"], "box1", "the path names the sandbox")
+        self.assertEqual(row["provider"], "openai")
+        self.assertEqual(row["model"], "qwen3:1.7b")
+        self.assertEqual(row["usage"]["prompt_tokens"], 11)
+        self.assertEqual(row["privacy_action"], "allowed")
+
+
+def _member(install: str, weight: int = 1, healthy: bool = True, endpoint: str = "http://x") -> dict:
+    return {"install_id": install, "endpoint": endpoint, "weight": weight, "healthy": healthy}
+
+
+class ChooseMemberTest(unittest.TestCase):
+    def test_round_robin_follows_the_weights(self) -> None:
+        view = {"id": "c1", "strategy": "round_robin",
+                "members": [_member("a", 2), _member("b", 1)]}
+        counters: dict[str, int] = {}
+        picks = [proxy.choose_member(view, {}, counters)["install_id"] for _ in range(6)]
+        self.assertEqual(picks, ["a", "a", "b", "a", "a", "b"])
+
+    def test_round_robin_skips_unhealthy_members(self) -> None:
+        view = {"id": "c1", "strategy": "round_robin",
+                "members": [_member("a", healthy=False), _member("b")]}
+        counters: dict[str, int] = {}
+        picks = {proxy.choose_member(view, {}, counters)["install_id"] for _ in range(3)}
+        self.assertEqual(picks, {"b"})
+
+    def test_least_loaded_takes_the_fewest_in_flight(self) -> None:
+        view = {"id": "c1", "strategy": "least_loaded",
+                "members": [_member("a"), _member("b"), _member("c")]}
+        self.assertEqual(
+            proxy.choose_member(view, {"a": 3, "b": 1, "c": 2}, {})["install_id"], "b"
+        )
+
+    def test_failover_takes_the_first_healthy_member(self) -> None:
+        view = {"id": "c1", "strategy": "failover",
+                "members": [_member("a", healthy=False), _member("b"), _member("c")]}
+        self.assertEqual(proxy.choose_member(view, {}, {})["install_id"], "b")
+
+    def test_no_healthy_member_is_none(self) -> None:
+        view = {"id": "c1", "strategy": "failover", "members": [_member("a", healthy=False)]}
+        self.assertIsNone(proxy.choose_member(view, {}, {}))
+
+
+class ClusterViewTest(unittest.TestCase):
+    def setUp(self) -> None:
+        proxy._CLUSTERS.clear()
+
+    def test_a_view_is_cached_then_expires(self) -> None:
+        answer = {"strategy": "failover", "model_key": "m", "members": [_member("a")]}
+        with mock.patch.object(proxy, "control_get", return_value=answer) as get:
+            proxy.cluster_view("cx")
+            proxy.cluster_view("cx")
+            self.assertEqual(get.call_count, 1)
+            fetched, view = proxy._CLUSTERS["cx"]
+            proxy._CLUSTERS["cx"] = (fetched - proxy.CLUSTER_TTL - 1, view)
+            proxy.cluster_view("cx")
+            self.assertEqual(get.call_count, 2)
+
+    def test_an_error_returns_the_stale_view_or_none(self) -> None:
+        with mock.patch.object(proxy, "control_get", side_effect=proxy.ControlError("x")):
+            self.assertIsNone(proxy.cluster_view("cy"))
+        proxy._CLUSTERS["cy"] = (time.monotonic() - 100, {"id": "cy", "members": []})
+        with mock.patch.object(proxy, "control_get", side_effect=proxy.ControlError("x")):
+            self.assertEqual(proxy.cluster_view("cy")["id"], "cy")
+
+
+class _Echo(_Quiet):
+    def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+        length = int(self.headers.get("content-length") or 0)
+        self.rfile.read(length)
+        data = json.dumps({"model": "m", "who": self.server.name}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+class ClusterFailoverTest(unittest.TestCase):
+    def test_a_dead_first_member_falls_over_to_the_next(self) -> None:
+        proxy._CLUSTERS.clear()
+        proxy._UNHEALTHY.clear()
+        good = ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+        good.name = "good"
+        threading.Thread(target=good.serve_forever, daemon=True).start()
+        dead = ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+        dead_port = dead.server_address[1]
+        dead.server_close()  # nothing listens there any more
+        view = {"id": "cz", "strategy": "failover", "model_key": "m", "members": [
+            _member("dead", endpoint=f"http://127.0.0.1:{dead_port}"),
+            _member("good", endpoint=f"http://127.0.0.1:{good.server_address[1]}"),
+        ]}
+        rows: list[dict] = []
+        front = ThreadingHTTPServer(("127.0.0.1", 0), proxy.Handler)
+        threading.Thread(target=front.serve_forever, daemon=True).start()
+        try:
+            with mock.patch.object(proxy, "control_get", return_value=view), \
+                 mock.patch.object(proxy, "control_post", side_effect=lambda c, p, row: rows.append(row) or {}), \
+                 mock.patch.object(proxy, "inspect_request",
+                                   side_effect=lambda c, b, d: proxy.Outcome("allowed", None, b)):
+                conn = http.client.HTTPConnection("127.0.0.1", front.server_address[1], timeout=10)
+                body = json.dumps({"model": "m"})
+                conn.request("POST", "/c/cz/v1/chat/completions", body=body,
+                             headers={"Content-Type": "application/json"})
+                response = conn.getresponse()
+                data = json.loads(response.read())
+                self.assertEqual(response.status, 200)
+                self.assertEqual(data["who"], "good")
+                self.assertEqual(response.getheader("x-nestbox-cluster-member"), "good")
+                self.assertGreater(proxy._UNHEALTHY[("cz", "dead")], time.monotonic())
+            self.assertEqual(rows[-1]["detail"]["install_id"], "good")
+        finally:
+            front.shutdown()
+            good.shutdown()
 
 
 if __name__ == "__main__":

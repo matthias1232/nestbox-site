@@ -36,14 +36,14 @@ Grouped by tab, all under the frozen `/api/v1/` prefix (ADR 0015):
 | Stacks | `PUT /sandboxes/{id}/stack` (a member joins a lead or leaves; one level deep); a tool or gateway created without a lead joins the node's only agent (ADR 0032) |
 | Stack diagram | `GET /sandboxes/{id}/stack-topology` (operator to internet, live state, a log per piece), `GET /system/components`, `GET /system/components/{service}/logs` |
 | Dashboard | `GET /sandboxes/{id}/metrics`, `GET /sandboxes/{id}/processes`, `GET /sandboxes/{id}/policies/effective` |
-| Traffic | `GET /sandboxes/{id}/traffic`, `GET /sandboxes/{id}/traffic/{event_id}/body`, SSE on `/telemetry/stream` |
+| Traffic | `GET /traffic` (every sandbox of the environment), `GET /traffic/decisions` (denied destinations, grouped), `GET /sandboxes/{id}/traffic`, `GET /sandboxes/{id}/traffic/{event_id}/body`, SSE on `/telemetry/stream` |
 | Media | `GET/PUT /media/settings`, `GET/PUT /sandboxes/{id}/media`, `GET /sandboxes/{id}/media/renders`, `GET /media/renders/{id}/asset/{name}`, `POST /internal/media/render` (media token), `GET /internal/media/info`, `GET /internal/media/renders/{id}/asset` |
 | MCP | `GET/POST /mcp/servers`, `GET/PUT/DELETE /mcp/servers/{key}`, `GET/POST /sandboxes/{id}/mcp/servers`, `DELETE /sandboxes/{id}/mcp/servers/{key}`, `POST /sandboxes/{id}/mcp/servers/{key}/discover`, `GET /sandboxes/{id}/mcp/calls` |
 | Terminal | `GET /sandboxes/{id}/terminal` (WebSocket, `x-stream: ws`) |
 | Access | `GET /sandboxes/{id}/ssh-key`, `GET /sandboxes/{id}/ssh-key/download`, `POST /sandboxes/{id}/ssh-key/rotate`, `GET/POST /sandboxes/{id}/ports`, `DELETE /sandboxes/{id}/ports/{forward_id}`, `GET /sandboxes/{id}/sessions` |
 | Map | `GET /sandboxes/{id}/map`, `GET /topology` with live edges |
 | Inventory | `GET /sandboxes/{id}/inventory`, `POST /sandboxes/{id}/inventory/refresh` |
-| Policies | `GET/POST /policies`, `GET /policies/global`, `GET/PUT/DELETE /policies/{id}`, `GET /policies/{id}/diff`, `GET/POST /network-rules`, `DELETE /network-rules/{id}`, `GET/POST /dns-rules`, `DELETE /dns-rules/{id}`, `GET/PUT /sandboxes/{id}/egress-mode`, `GET /sandboxes/{id}/policy`, `PUT/DELETE /sandboxes/{id}/policy`, `GET/POST /policy-templates`, `POST /policy-templates/{id}/instantiate`, `GET /policy-schema` |
+| Policies | `GET/POST /policies`, `GET /policies/global`, `GET/PUT/DELETE /policies/{id}`, `GET /policies/{id}/diff`, `GET /policies/{id}/versions`, `GET/POST /traffic-windows`, `DELETE /traffic-windows/{id}`, `GET/POST /network-rules`, `DELETE /network-rules/{id}`, `GET/POST /dns-rules`, `DELETE /dns-rules/{id}`, `GET/PUT /sandboxes/{id}/egress-mode`, `GET /sandboxes/{id}/policy`, `PUT/DELETE /sandboxes/{id}/policy`, `GET/POST /policy-templates`, `POST /policy-templates/{id}/instantiate`, `GET /policy-schema` |
 | Node ingest | `POST /internal/policy/check`, `POST /internal/telemetry/batch`, `POST /internal/metrics/ingest` |
 
 The three `/internal/` endpoints are authenticated by a **node token**, not a

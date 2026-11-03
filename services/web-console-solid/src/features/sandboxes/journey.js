@@ -47,7 +47,7 @@ export function journeySteps(event) {
       title: allowed || audit ? `${target} is reached${event.status ? ` (answered ${event.status})` : ''}` : `${target} is never contacted`,
       says: allowed || audit
         ? 'Only now does the supervisor open the real connection and relay the traffic. Credentials are added here when policy allows, so the agent never holds them.'
-        : 'The program gets a refusal. If this should have worked, turn the event into a rule with “Allow this…” and review it before it takes effect.',
+        : 'The program gets a refusal. If this should have worked, press “Allow” on the request in the Traffic tab; the rule is created and active in one step.',
     },
   ];
 }

@@ -9,7 +9,7 @@ use crate::error::StoreError;
 
 const PROFILE_COLUMNS: &str = "id, environment_id, name, kind, endpoint, model, secret_ref, \
      credential_expiry, labels, version, created_at, updated_at, status, node_id, \
-     model_install_id, last_probed_at";
+     model_install_id, last_probed_at, proxy_id";
 
 fn row_to_profile(row: &sqlx::postgres::PgRow) -> Result<ProviderProfile, StoreError> {
     let kind_raw: String = row.try_get("kind")?;
@@ -35,6 +35,7 @@ fn row_to_profile(row: &sqlx::postgres::PgRow) -> Result<ProviderProfile, StoreE
         node_id: row.try_get("node_id")?,
         model_install_id: row.try_get("model_install_id")?,
         last_probed_at: row.try_get("last_probed_at")?,
+        proxy_id: row.try_get("proxy_id")?,
     })
 }
 
@@ -160,6 +161,35 @@ pub async fn set_status(
     .bind(scope.environment_id())
     .bind(id)
     .bind(status.as_str())
+    .execute(scope.connection())
+    .await?
+    .rows_affected();
+    if affected == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+/// Point an install's profile at the address its server is really published on.
+///
+/// The profile is written when the install starts, before any container exists,
+/// and on a joined node the port is chosen only when the server starts. This is
+/// the correction step: until it runs, the row holds a placeholder, and every
+/// sandbox that selects the profile would be pointed at an address nobody
+/// answers on. Only the endpoint moves; the status stays what the probe found.
+pub async fn set_endpoint(
+    scope: &mut TenantScope<'_>,
+    id: Uuid,
+    endpoint: &str,
+) -> Result<(), StoreError> {
+    let affected = sqlx::query(
+        "UPDATE provider_profiles
+            SET endpoint = $3, version = version + 1, updated_at = now()
+          WHERE environment_id = $1 AND id = $2",
+    )
+    .bind(scope.environment_id())
+    .bind(id)
+    .bind(endpoint)
     .execute(scope.connection())
     .await?
     .rows_affected();

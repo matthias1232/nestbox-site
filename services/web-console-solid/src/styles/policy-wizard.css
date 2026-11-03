@@ -1,0 +1,21 @@
+/* Policy wizard (F14): steps, suggestion lists, mode cards and the compiled preview. */
+.pw-step { display: flex; flex-direction: column; gap: var(--space-3); }
+.pw-step h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.pw-step h3 { margin: var(--space-3) 0 0; font-size: 0.9rem; }
+.pw-add { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; }
+.pw-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--fg-muted); min-width: 140px; }
+.pw-suggest { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.pw-suggest li { display: flex; gap: var(--space-3); align-items: center; padding: var(--space-1) var(--space-2); background: var(--bg-raised); border: 1px solid var(--border); }
+.pw-suggest li .tiny:first-of-type { margin-left: auto; }
+.pw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2); }
+.pw-card { display: flex; flex-direction: column; gap: var(--space-1); text-align: left; padding: var(--space-3); background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg); }
+.pw-card:hover { background: var(--bg-hover); }
+.pw-card.active { border-color: var(--accent); background: var(--accent-dim); }
+.pw-card:focus-visible { outline: 2px solid var(--accent); }
+.pw-window { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; }
+.pw-yaml { margin: 0; padding: var(--space-3); max-height: 340px; overflow: auto; background: var(--bg-inset); border: 1px solid var(--border); font-size: 12px; line-height: 1.45; white-space: pre; }
+.pw-diff .add { color: var(--ok); }
+.pw-diff .del { color: var(--bad); }
+.pw-errors { color: var(--bad); }
+.pw-plan { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-1); }
+@media (prefers-reduced-motion: reduce) { .pw-card { transition: none; } }

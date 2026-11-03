@@ -45,6 +45,55 @@ pub struct Config {
     /// is configurable so an idle-close can be watched in a test instead of
     /// waiting half an hour.
     pub terminal_idle_seconds: i64,
+    /// `saas` lets a new person register through an identity provider; `selfhosted`
+    /// only lets invited people in (ADR 0046).
+    pub deploy_mode: DeployMode,
+    /// The address browsers use for this installation, for the redirect URI of a sign-in.
+    pub public_url: String,
+    /// The identity providers an operator configured. Empty means password sign-in only.
+    pub oidc: Vec<OidcProviderConfig>,
+    /// How nodes on other machines reach this control plane (ADR 0047).
+    pub overlay: OverlayConfig,
+}
+
+/// The WireGuard overlay the control plane is the hub of.
+#[derive(Debug, Clone)]
+pub struct OverlayConfig {
+    /// Where the hub container and the API exchange files: `hub.pub` (read) and
+    /// `peers.conf` (written). Empty disables joining.
+    pub dir: PathBuf,
+    /// `host:port` a node dials to reach the hub from outside, for example `203.0.113.7:51821`.
+    pub endpoint: String,
+    /// The hub's address inside the overlay.
+    pub hub_ip: String,
+    /// `host:port` of the image registry as nodes see it, over the overlay.
+    pub registry: String,
+    /// The control plane's address as nodes see it, over the overlay.
+    pub control_url: String,
+}
+
+/// How this installation treats people it does not know yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeployMode {
+    /// A first sign-in through an identity provider starts an onboarding.
+    Saas,
+    /// Nobody registers; an administrator invites.
+    SelfHosted,
+}
+
+/// One identity provider, as configured.
+#[derive(Debug, Clone)]
+pub struct OidcProviderConfig {
+    /// The short name used in URLs and in `user_identities.provider`.
+    pub id: String,
+    pub label: String,
+    /// `oidc` for any OpenID Connect issuer, `github` for GitHub's OAuth flavour.
+    pub kind: String,
+    /// The issuer whose `/.well-known/openid-configuration` names the endpoints.
+    pub issuer: String,
+    pub client_id: String,
+    /// Never logged and never returned.
+    pub client_secret: String,
 }
 
 impl Config {
@@ -84,6 +133,24 @@ impl Config {
             body_limit_bytes: env_i64("NESTBOX_BODY_LIMIT_BYTES", 1_048_576) as usize,
             rate_limit_per_minute: env_i64("NESTBOX_RATE_LIMIT_PER_MINUTE", 600) as u32,
             terminal_idle_seconds: env_i64("NESTBOX_TERMINAL_IDLE_SECONDS", 30 * 60),
+            deploy_mode: if std::env::var("NESTBOX_MODE").is_ok_and(|v| v.trim().eq_ignore_ascii_case("saas")) {
+                DeployMode::Saas
+            } else {
+                DeployMode::SelfHosted
+            },
+            public_url: std::env::var("NESTBOX_PUBLIC_URL")
+                .unwrap_or_default()
+                .trim_end_matches('/')
+                .to_string(),
+            oidc: read_oidc_providers(),
+            overlay: OverlayConfig {
+                dir: std::env::var("NESTBOX_OVERLAY_DIR").map(PathBuf::from).unwrap_or_default(),
+                endpoint: std::env::var("NESTBOX_OVERLAY_ENDPOINT").unwrap_or_default(),
+                hub_ip: std::env::var("NESTBOX_OVERLAY_HUB_IP").unwrap_or_else(|_| "10.77.0.1".into()),
+                registry: std::env::var("NESTBOX_REGISTRY").unwrap_or_else(|_| "10.77.0.1:5000".into()),
+                control_url: std::env::var("NESTBOX_OVERLAY_CONTROL_URL")
+                    .unwrap_or_else(|_| "http://10.77.0.1:8000".into()),
+            },
         })
     }
 
@@ -106,6 +173,41 @@ impl Config {
             }
         )
     }
+}
+
+/// The identity providers named in `NESTBOX_OIDC_PROVIDERS` (comma separated).
+///
+/// Each name `x` reads `NESTBOX_OIDC_X_CLIENT_ID` and `NESTBOX_OIDC_X_CLIENT_SECRET` (or the
+/// `_FILE` form). `google`, `microsoft` and `github` know their issuer; any other name needs
+/// `NESTBOX_OIDC_X_ISSUER`. A provider with a missing credential is skipped with a log line,
+/// not half-configured.
+fn read_oidc_providers() -> Vec<OidcProviderConfig> {
+    let names = std::env::var("NESTBOX_OIDC_PROVIDERS").unwrap_or_default();
+    let mut out = Vec::new();
+    for name in names.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        let key = name.to_ascii_uppercase().replace('-', "_");
+        let var = |suffix: &str| read_with_file(&format!("NESTBOX_OIDC_{key}_{suffix}"));
+        let (Some(client_id), Some(client_secret)) = (var("CLIENT_ID"), var("CLIENT_SECRET")) else {
+            tracing::warn!(provider = name, "identity provider skipped: client id or secret is missing");
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        let (kind, issuer, label) = match lower.as_str() {
+            "google" => ("oidc", "https://accounts.google.com".to_string(), "Google".to_string()),
+            "microsoft" => ("oidc", "https://login.microsoftonline.com/common/v2.0".to_string(), "Microsoft".to_string()),
+            "github" => ("github", "https://github.com".to_string(), "GitHub".to_string()),
+            _ => {
+                let Some(issuer) = var("ISSUER") else {
+                    tracing::warn!(provider = name, "identity provider skipped: NESTBOX_OIDC_{key}_ISSUER is missing");
+                    continue;
+                };
+                let label = var("LABEL").unwrap_or_else(|| name.to_string());
+                ("oidc", issuer.trim_end_matches('/').to_string(), label)
+            }
+        };
+        out.push(OidcProviderConfig { id: lower, label, kind: kind.into(), issuer, client_id, client_secret });
+    }
+    out
 }
 
 /// Read a value from `NAME` or, preferentially, from the file named by

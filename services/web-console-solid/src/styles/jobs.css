@@ -1,0 +1,18 @@
+/* Tasks page and moves page. Colours only from tokens. */
+.jobs-filters { display: inline-flex; gap: var(--space-1); }
+.job-drawer { display: flex; flex-direction: column; gap: var(--space-3); }
+.job-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
+.job-facts dt { color: var(--fg-muted); font-size: 0.75rem; }
+.job-facts dd { margin: 0; }
+.job-retry { display: flex; justify-content: flex-end; }
+.job-drawer .logview { max-height: 260px; }
+
+.move-strip { display: inline-flex; gap: 2px; align-items: center; }
+.move-strip i { width: 10px; height: 10px; border: 1px solid var(--border-strong); background: var(--bg-inset); display: inline-block; }
+.move-strip i.done { background: var(--ok); border-color: var(--ok); }
+.move-strip i.running { background: var(--warn); border-color: var(--warn); }
+.move-strip i.failed { background: var(--bad); border-color: var(--bad); }
+.move-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.move-steps li { display: grid; grid-template-columns: 1.4em 1fr; gap: var(--space-2); }
+.move-picker { display: grid; gap: var(--space-3); }
+.move-picker select { width: 100%; }

@@ -18,7 +18,6 @@ use crate::domain::telemetry::{
     Decision, Direction, DnsEvent, EventKind, LiveEvent, NetworkEvent, TelemetryEvent,
 };
 use crate::error::{ApiError, ErrorCode};
-use crate::security::{secrets, session};
 use crate::store::postgres::telemetry as store;
 use crate::store::postgres::traffic_bodies;
 use crate::store::TenantScope;
@@ -53,6 +52,10 @@ pub struct ProxyBatch {
     pub dns: Vec<ProxyDnsEntry>,
 }
 
+/// What is stored in place of a body that could not be masked. A reader sees
+/// that something was withheld, and no value is kept.
+const WITHHELD_BODY: &str = "[body withheld: masking failed]";
+
 /// One access-log line, as Envoy writes it, plus the captured bodies.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProxyTrafficEntry {
@@ -85,6 +88,11 @@ pub struct ProxyTrafficEntry {
     pub request_id: Option<String>,
     /// `allow`, `deny`, or `audit`. Anything else is read as a deny.
     pub decision: Option<String>,
+    /// The rules' verdict when the request was let through anyway: `1` or
+    /// `true` when the destination would have been denied. Envoy writes it as
+    /// text, so it is read as a string and normalised below.
+    #[serde(default)]
+    pub would_deny: Option<String>,
     pub reason: Option<String>,
     pub rule_id: Option<Uuid>,
     pub mcp_session_id: Option<String>,
@@ -95,6 +103,36 @@ pub struct ProxyTrafficEntry {
     /// Base64, as Envoy's JSON access-log field carries it.
     pub request_body: Option<String>,
     pub response_body: Option<String>,
+    /// Token counters the proxy read off a model answer, as compact JSON
+    /// (`i`, `o`, `cr`, `cw`, `cw1`, `rs`). Absent for anything else.
+    #[serde(default)]
+    pub usage: Option<String>,
+    /// How many `cache_control` markers the request carried.
+    #[serde(default)]
+    pub cache_markers: Option<String>,
+    /// `key` or `account`: how the call was authenticated. Never the credential.
+    #[serde(default)]
+    pub llm_auth: Option<String>,
+    /// The address the request reached, as the broker observed it.
+    #[serde(default)]
+    pub upstream_ip: Option<String>,
+    /// The address a refused request would have reached.
+    #[serde(default)]
+    pub upstream_ip_would: Option<String>,
+    /// What Envoy reports as the upstream of a tunnel.
+    #[serde(default)]
+    pub upstream_host: Option<String>,
+    /// Which provider the router actually used, when it says.
+    #[serde(default)]
+    pub router_provider: Option<String>,
+    /// Which model the router actually used, when it says.
+    #[serde(default)]
+    pub router_model: Option<String>,
+    /// What the content check did with this request, as the broker reported it:
+    /// `blocked`, `replaced`, `pseudonymized`, `unavailable`, `too_large`. Absent
+    /// when the check does not apply (a tunnel, a non-JSON body, an exempt host).
+    #[serde(default)]
+    pub dlp: Option<String>,
 }
 
 /// One DNS answer, from the node's resolver.
@@ -141,31 +179,50 @@ pub async fn ingest(ctx: &ServiceContext, event: TelemetryEvent) -> Result<Uuid,
 
     let detail = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
 
-    let stored = store::insert(
-        &ctx.pool,
-        store::NewEvent {
-            environment_id,
-            sandbox_id,
-            gateway_id: None,
-            kind,
-            source: Some("gateway"),
-            ts,
-            detail,
-        },
-    )
-    .await;
+    // A sandbox whose recording is off stores no content. A refusal is not
+    // content: a denied connection is the fact an operator has to answer, so it
+    // is kept without its bodies (ADR 0066, addendum). The live stream still
+    // runs either way.
+    let muted = match sandbox_id {
+        Some(sandbox_id) => mute_states(ctx, environment_id, &[sandbox_id])
+            .await
+            .get(&sandbox_id)
+            .is_some_and(|state| state.all),
+        None => false,
+    };
+    let store_event = !muted || refusal_kept(kind, &detail);
 
-    let id = match stored {
-        Ok(id) => id,
-        Err(error) => {
-            tracing::error!(error = %error, "telemetry insert failed; publishing anyway");
-            Uuid::new_v4()
+    let id = if !store_event {
+        Uuid::new_v4()
+    } else {
+        let stored = store::insert(
+            &ctx.pool,
+            store::NewEvent {
+                environment_id,
+                sandbox_id,
+                gateway_id: None,
+                kind,
+                source: Some("gateway"),
+                ts,
+                detail,
+            },
+        )
+        .await;
+        match stored {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::error!(error = %error, "telemetry insert failed; publishing anyway");
+                Uuid::new_v4()
+            }
         }
     };
 
-    if let TelemetryEvent::Inference(inference) = &event {
-        if let Err(error) = store::insert_inference(&ctx.pool, inference).await {
-            tracing::warn!(error = %error, "inference row insert failed");
+    if !muted {
+        // An inference row is content: a mute still drops it.
+        if let TelemetryEvent::Inference(inference) = &event {
+            if let Err(error) = store::insert_inference(&ctx.pool, inference).await {
+                tracing::warn!(error = %error, "inference row insert failed");
+            }
         }
     }
 
@@ -228,37 +285,118 @@ pub async fn ingest_batch(
         ));
     }
 
+    // Recording mutes (B11), read once per batch. A muted sandbox's events are
+    // not stored (`all`) or stored without bodies, chats and tool calls (`bodies`);
+    // the live publish below is not affected. `all` has one exception: a refused
+    // network or DNS event is still stored as metadata, so alerts and the audit
+    // trail survive a mute (ADR 0066, addendum).
+    let sandbox_ids: Vec<Uuid> = prepared.iter().filter_map(|item| item.sandbox_id).collect();
+    let mutes = mute_states(ctx, batch.environment_id, &sandbox_ids).await;
+    let state_of = |item: &PreparedEvent| -> MuteState {
+        item.sandbox_id
+            .and_then(|id| mutes.get(&id).copied())
+            .unwrap_or_default()
+    };
+
     let events: Vec<store::BatchEvent<'_>> = prepared
         .iter()
-        .map(|item| store::BatchEvent {
-            id: item.id,
-            environment_id: batch.environment_id,
-            sandbox_id: item.sandbox_id,
-            gateway_id: None,
-            kind: item.kind,
-            source: Some("egress-proxy"),
-            ts: item.ts,
-            detail: item.detail.clone(),
+        .filter(|item| {
+            let state = state_of(item);
+            !state.all || refusal_kept(item.kind, &item.detail)
+        })
+        .map(|item| {
+            let muted = state_of(item).all;
+            store::BatchEvent {
+                id: item.id,
+                environment_id: batch.environment_id,
+                sandbox_id: item.sandbox_id,
+                gateway_id: None,
+                kind: item.kind,
+                source: Some("egress-proxy"),
+                ts: item.ts,
+                // A refusal kept through a mute is metadata: it is stored
+                // without the body that the mute drops, and does not claim one.
+                detail: if muted {
+                    without_bodies(&item.detail)
+                } else {
+                    item.detail.clone()
+                },
+            }
         })
         .collect();
 
+    // A captured body is the request as it *arrived*, which is before the content
+    // check rewrote it. Storing that would keep the value the policy promised not
+    // to keep, so the batch is scrubbed first — always, whatever the mode.
+    let mut scrubbed: Vec<Option<(String, String)>> = Vec::with_capacity(prepared.len());
+    for item in &prepared {
+        let state = state_of(item);
+        match &item.body {
+            None => scrubbed.push(None),
+            // A mute drops the bytes even for a refusal it otherwise keeps: the
+            // flow is governance, its body is content.
+            Some(_) if state.all || state.bodies => scrubbed.push(None),
+            Some(body) => {
+                let texts: Vec<String> = [body.request.as_ref(), body.response.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                // A body that cannot be masked is not stored at all. Keeping it
+                // as it arrived would hold the value the policy promised never to
+                // keep, and an unattributable body is not worth that.
+                let masked = match item.sandbox_id {
+                    None => texts.iter().map(|_| WITHHELD_BODY.to_string()).collect(),
+                    Some(sandbox_id) => {
+                        let items: Vec<(Uuid, String)> =
+                            texts.iter().map(|text| (sandbox_id, text.clone())).collect();
+                        crate::services::privacy_service::scrub_batch(
+                            ctx,
+                            batch.environment_id,
+                            &items,
+                        )
+                        .await
+                        .unwrap_or_else(|error| {
+                            tracing::warn!(?error, "cannot mask a captured body; withholding it");
+                            texts.iter().map(|_| WITHHELD_BODY.to_string()).collect()
+                        })
+                    }
+                };
+                let mut masked = masked.into_iter();
+                let request = body.request.as_ref().map(|_| masked.next().unwrap_or_default());
+                let response = body.response.as_ref().map(|_| masked.next().unwrap_or_default());
+                scrubbed.push(Some((request.unwrap_or_default(), response.unwrap_or_default())));
+            }
+        }
+    }
+
     let bodies: Vec<traffic_bodies::NewBody<'_>> = prepared
         .iter()
-        .filter_map(|item| item.body.as_ref().map(|body| (item, body)))
-        .map(|(item, body)| traffic_bodies::NewBody {
-            event_id: item.id,
-            sandbox_id: item.sandbox_id,
-            ts: item.ts,
-            request_body: body.request.as_deref(),
-            response_body: body.response.as_deref(),
-            request_bytes: body.request_bytes,
-            response_bytes: body.response_bytes,
-            truncated: body.truncated,
+        .zip(scrubbed.iter())
+        .filter_map(|(item, masked)| {
+            let body = item.body.as_ref()?;
+            let (request, response) = masked.as_ref()?;
+            Some(traffic_bodies::NewBody {
+                event_id: item.id,
+                sandbox_id: item.sandbox_id,
+                ts: item.ts,
+                request_body: body.request.as_ref().map(|_| request.as_str()),
+                response_body: body.response.as_ref().map(|_| response.as_str()),
+                request_bytes: body.request_bytes,
+                response_bytes: body.response_bytes,
+                truncated: body.truncated,
+            })
         })
         .collect();
 
     let calls: Vec<store::NewToolCall> = prepared
         .iter()
+        .filter(|item| {
+            // A tool call is content too: its arguments and result are dropped
+            // with the bodies, including for a refusal the event row keeps.
+            let state = state_of(item);
+            !state.all && !state.bodies
+        })
         .filter_map(|item| item.call.clone())
         .collect();
 
@@ -270,9 +408,59 @@ pub async fn ingest_batch(
     let body_rows = traffic_bodies::insert_batch(&ctx.pool, batch.environment_id, &bodies).await;
     let mcp_rows = store::insert_tool_calls(&ctx.pool, batch.environment_id, &calls).await;
 
+    // One row per model call: the chat views read this, not the captured bodies.
+    // The texts are the masked ones, so a turn can never hold a value.
+    let turns: Vec<crate::services::chat_service::TurnInput> = prepared
+        .iter()
+        .zip(scrubbed.iter())
+        .filter_map(|(item, masked)| {
+            let sandbox_id = item.sandbox_id?;
+            let detail = &item.detail;
+            let text = |key: &str| {
+                detail
+                    .get(key)
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            };
+            let (request, response) = masked.as_ref()?;
+            Some(crate::services::chat_service::TurnInput {
+                id: item.id,
+                sandbox_id: Some(sandbox_id),
+                ts: item.ts,
+                ended_at: None,
+                request_ref: text("request_id"),
+                method: text("method").unwrap_or_default(),
+                path: text("path").unwrap_or_default(),
+                host: text("host").unwrap_or_default(),
+                user_agent: text("user_agent"),
+                upstream_ip: text("upstream_ip"),
+                upstream_ip_would: text("upstream_ip_would"),
+                account_kind: text("account_kind"),
+                router_provider: text("router_provider"),
+                router_model: text("router_model"),
+                status: detail
+                    .get("status")
+                    .and_then(|value| value.as_i64())
+                    .map(|value| value as i32),
+                dlp: text("dlp"),
+                channel: text("channel"),
+                decision: text("decision"),
+                request_body: Some(request.clone()),
+                response_body: Some(response.clone()),
+            })
+        })
+        .collect();
+    if let Err(error) =
+        crate::services::chat_service::record_turns(ctx, batch.environment_id, &turns).await
+    {
+        tracing::warn!(?error, "cannot record chat turns");
+    }
+
     for item in &prepared {
         ctx.bus.publish(LiveEvent::Telemetry(item.live.clone()));
     }
+    let live: Vec<TelemetryEvent> = prepared.iter().map(|item| item.live.clone()).collect();
+    crate::services::alert_service::publish_if_refused(ctx, batch.environment_id, &live).await;
 
     let stored = stored.map_err(|error| {
         tracing::error!(error = %error, "telemetry batch insert failed");
@@ -286,6 +474,17 @@ pub async fn ingest_batch(
         tracing::error!(error = %error, "mcp tool call insert failed");
         ApiError::from(error)
     })?;
+
+    // Model usage the proxy read, into the accounting table. After the traffic is
+    // stored and best effort: a failure here is logged and must not turn into a
+    // refused batch (the proxy would retry it and the traffic is already in).
+    for (entry, item) in batch.traffic.iter().zip(prepared.iter()) {
+        if let Some(call) = observed_call(entry, item.id, batch.environment_id) {
+            if let Err(error) = crate::services::accounting_service::record_observed(ctx, call).await {
+                tracing::warn!(code = error.code.0, "could not record observed model usage");
+            }
+        }
+    }
 
     Ok(BatchOutcome {
         accepted: prepared.len(),
@@ -348,26 +547,10 @@ async fn authenticate_node(
         refused()
     })?;
 
-    let expected = secrets::resolve(locator, &ctx.secret_dir).map_err(|error| {
-        tracing::warn!(
-            node = %node.name,
-            reason = error.message(),
-            "telemetry batch refused: node token cannot be resolved"
-        );
-        refused()
-    })?;
-    let expected = expected.trim();
-    if expected.is_empty() {
-        tracing::warn!(node = %node.name, "telemetry batch refused: node token file is empty");
-        return Err(refused());
-    }
-
-    let equal = session::hashes_equal(
-        &session::hash_token(presented),
-        &session::hash_token(expected),
-    );
-    if !equal {
-        tracing::warn!(node = %node.name, "telemetry batch refused: node token mismatch");
+    // One rule for every node call: file locators (the appliance) and digest locators (a node
+    // that joined over the overlay) are verified in the same place, in constant time.
+    if let Err(error) = crate::security::node_token::verify(locator, &ctx.secret_dir, presented) {
+        tracing::warn!(node = %node.name, reason = ?error, "telemetry batch refused: node token");
         return Err(refused());
     }
 
@@ -413,6 +596,88 @@ async fn ensure_known_sandboxes(
         return Err(ApiError::forbidden("telemetry.write"));
     }
     Ok(())
+}
+
+/// What a sandbox's recording mutes say right now.
+#[derive(Debug, Clone, Copy, Default)]
+struct MuteState {
+    /// Nothing is stored (`telemetry_mute_until` is in the future).
+    all: bool,
+    /// Flows are stored, bodies, chats and tool calls are not.
+    bodies: bool,
+}
+
+/// Read the recording mutes of some sandboxes, once, for one call (B11).
+///
+/// A read that fails is logged and treated as "not muted": the same database
+/// error would stop the insert as well, so nothing is stored by mistake.
+async fn mute_states(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    sandbox_ids: &[Uuid],
+) -> std::collections::HashMap<Uuid, MuteState> {
+    let mut out = std::collections::HashMap::new();
+    let mut unique: Vec<Uuid> = sandbox_ids.to_vec();
+    unique.sort();
+    unique.dedup();
+    if unique.is_empty() {
+        return out;
+    }
+    let now = Utc::now();
+    let mut scope = match TenantScope::begin(&ctx.pool, environment_id).await {
+        Ok(scope) => scope,
+        Err(error) => {
+            tracing::warn!(?error, "cannot read recording mutes");
+            return out;
+        }
+    };
+    for id in unique {
+        match crate::store::postgres::sandboxes::telemetry_mute(&mut scope, id).await {
+            Ok((all, bodies)) => {
+                out.insert(
+                    id,
+                    MuteState {
+                        all: all.is_some_and(|until| until > now),
+                        bodies: bodies.is_some_and(|until| until > now),
+                    },
+                );
+            }
+            Err(error) => tracing::warn!(?error, "cannot read recording mutes"),
+        }
+    }
+    if let Err(error) = scope.commit().await {
+        tracing::warn!(?error, "cannot close the recording mute read");
+    }
+    out
+}
+
+/// Whether an event survives a full recording mute ("recording off").
+///
+/// The mute is a request to keep no content, not a request to hide a decision. A
+/// refused connection is the one fact an operator has to answer — it feeds the
+/// alerts, the tree badge and the audit trail — so it is kept, as metadata only
+/// (ADR 0066, addendum). The rule is deliberately narrow: a network or DNS event
+/// whose stored decision is `deny`. An `allow` or `audit` flow is traffic, not a
+/// refusal, and stays dropped.
+fn refusal_kept(kind: EventKind, detail: &serde_json::Value) -> bool {
+    matches!(kind, EventKind::Network | EventKind::Dns)
+        && detail.get("decision").and_then(serde_json::Value::as_str)
+            == Some(Decision::Deny.as_str())
+}
+
+/// The stored detail of an event kept through a mute: metadata only.
+///
+/// Its body rows are dropped, so the row must not claim one. Every other field
+/// stays, because the destination, the rule, the reason and the moment are what
+/// make the refusal answerable.
+fn without_bodies(detail: &serde_json::Value) -> serde_json::Value {
+    let mut detail = detail.clone();
+    if let serde_json::Value::Object(map) = &mut detail {
+        if map.contains_key("has_body") {
+            map.insert("has_body".into(), serde_json::json!(false));
+        }
+    }
+    detail
 }
 
 /// One event, built and ready to store.
@@ -569,11 +834,44 @@ fn prepare_traffic(
             "inspected".into(),
             serde_json::json!(channel == TrafficChannel::Inspected || entry.path.is_some()),
         );
+        // The rules still ran when a window or an "allow everything" mode let
+        // the request through. Recording their verdict is what makes a target
+        // that "would have been blocked" visible in the decisions view.
+        map.insert(
+            "would_deny".into(),
+            serde_json::json!(would_deny_flag(entry.would_deny.as_deref())),
+        );
+        if let Some(method) = entry.method.as_deref().filter(|value| !value.is_empty()) {
+            map.insert("method".into(), serde_json::json!(method));
+        }
+        if let Some(path) = entry.path.as_deref().filter(|value| !value.is_empty()) {
+            map.insert("path".into(), serde_json::json!(path));
+        }
         if let Some(reason) = entry.reason.as_deref().filter(|value| !value.is_empty()) {
             map.insert("reason".into(), serde_json::json!(reason));
         }
         if let Some(tool) = entry.mcp_tool.as_deref().filter(|value| !value.is_empty()) {
             map.insert("mcp_tool".into(), serde_json::json!(tool));
+        }
+        // A refused request is a fact about the chat, not only about the proxy:
+        // the console shows "not delivered" from this field.
+        if let Some(dlp) = entry.dlp.as_deref().filter(|value| !value.is_empty()) {
+            map.insert("dlp".into(), serde_json::json!(dlp));
+        }
+        // The address the request actually reached, and the one a refusal would
+        // have reached: "it went to Anthropic" is not the same fact as "it would
+        // have gone to 160.79.104.10".
+        for (key, value) in [
+            ("upstream_ip", entry.upstream_ip.as_deref()),
+            ("upstream_ip_would", entry.upstream_ip_would.as_deref()),
+            ("upstream_host", entry.upstream_host.as_deref()),
+            ("router_provider", entry.router_provider.as_deref()),
+            ("router_model", entry.router_model.as_deref()),
+            ("account_kind", entry.llm_auth.as_deref()),
+        ] {
+            if let Some(value) = value.filter(|value| !value.is_empty() && *value != "-") {
+                map.insert(key.into(), serde_json::json!(value));
+            }
         }
     }
 
@@ -810,6 +1108,19 @@ fn truthy(raw: Option<&str>) -> bool {
     )
 }
 
+/// Whether the rules would have denied a request the proxy let through.
+///
+/// The egress proxy's access log carries the ext_authz answer's `would_deny`
+/// as text: `1` when the rules said deny, `0` when they said allow, and a dash
+/// when the filter did not run at all. Only an explicit yes counts, so a line
+/// from a proxy version without the field is not turned into a claim.
+fn would_deny_flag(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        Some("1") | Some("true")
+    )
+}
+
 fn parse_decision(raw: Option<&str>) -> Decision {
     raw.map(str::trim)
         .and_then(Decision::parse)
@@ -999,6 +1310,12 @@ mod tests {
         ProxyTrafficEntry {
             ts: None,
             sandbox_id: None,
+            dlp: None,
+            upstream_ip: None,
+            upstream_ip_would: None,
+            upstream_host: None,
+            router_provider: None,
+            router_model: None,
             host: "mcp.example.com".into(),
             port: Some(443),
             protocol: Some("HTTP/2".into()),
@@ -1016,6 +1333,7 @@ mod tests {
             user_agent: Some("hermes/0.22".into()),
             request_id: Some("req-1".into()),
             decision: Some("allow".into()),
+            would_deny: None,
             reason: Some("rule".into()),
             rule_id: None,
             mcp_session_id: Some("sess-1".into()),
@@ -1024,6 +1342,9 @@ mod tests {
             mcp_server: Some("nestbox-hub".into()),
             request_body: None,
             response_body: None,
+            usage: None,
+            cache_markers: None,
+            llm_auth: None,
         }
     }
 
@@ -1080,6 +1401,60 @@ mod tests {
     }
 
     #[test]
+    fn a_full_mute_keeps_a_refused_flow_and_only_that() {
+        let mut entry = traffic_entry();
+        entry.decision = Some("deny".into());
+        let refused = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert!(refusal_kept(refused.kind, &refused.detail));
+
+        entry.decision = Some("allow".into());
+        let allowed = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert!(!refusal_kept(allowed.kind, &allowed.detail));
+
+        entry.decision = Some("audit".into());
+        let audited = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert!(!refusal_kept(audited.kind, &audited.detail));
+
+        let dns = prepare_dns(
+            &ProxyDnsEntry {
+                ts: None,
+                sandbox_id: None,
+                hostname: "blocked.example.net".into(),
+                qtype: Some("A".into()),
+                answer: None,
+                ttl: None,
+                decision: Some("deny".into()),
+                resolver: None,
+                request_id: Some("dns-1".into()),
+            },
+            Uuid::nil(),
+            Utc::now(),
+        )
+        .expect("built");
+        assert!(refusal_kept(dns.kind, &dns.detail));
+
+        // Only a flow or a name is governance; an inference row is content.
+        assert!(!refusal_kept(
+            EventKind::Inference,
+            &serde_json::json!({ "decision": "deny" })
+        ));
+    }
+
+    #[test]
+    fn a_refusal_kept_through_a_mute_does_not_claim_a_body() {
+        let mut entry = traffic_entry();
+        entry.decision = Some("deny".into());
+        entry.request_body =
+            Some(base64::engine::general_purpose::STANDARD.encode(b"secret"));
+        let refused = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert_eq!(refused.detail["has_body"], true);
+        assert_eq!(without_bodies(&refused.detail)["has_body"], false);
+        // The destination and the rule stay: that is what makes it answerable.
+        assert_eq!(without_bodies(&refused.detail)["destination"], "mcp.example.com");
+        assert_eq!(without_bodies(&refused.detail)["decision"], "deny");
+    }
+
+    #[test]
     fn a_missing_decision_is_read_as_a_deny() {
         // Defaulting to allow would turn a proxy that stopped sending the field
         // into a green traffic log.
@@ -1087,6 +1462,32 @@ mod tests {
         assert_eq!(parse_decision(Some("nonsense")), Decision::Deny);
         assert_eq!(parse_decision(Some("allow")), Decision::Allow);
         assert_eq!(parse_decision(Some("audit")), Decision::Audit);
+    }
+
+    #[test]
+    fn only_an_explicit_would_deny_is_a_would_deny() {
+        // The proxy writes text: "1" for a rule verdict of deny, "0" for allow,
+        // "-" when the authz filter never ran. A dash is not a claim.
+        assert!(would_deny_flag(Some("1")));
+        assert!(would_deny_flag(Some("true")));
+        assert!(would_deny_flag(Some(" TRUE ")));
+        assert!(!would_deny_flag(Some("0")));
+        assert!(!would_deny_flag(Some("-")));
+        assert!(!would_deny_flag(Some("")));
+        assert!(!would_deny_flag(None));
+    }
+
+    #[test]
+    fn a_would_deny_line_is_stored_as_a_boolean_in_the_detail() {
+        let mut entry = traffic_entry();
+        entry.decision = Some("allow".into());
+        entry.would_deny = Some("1".into());
+        let prepared = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert_eq!(prepared.detail["would_deny"], true);
+
+        entry.would_deny = None;
+        let prepared = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert_eq!(prepared.detail["would_deny"], false);
     }
 
     #[test]
@@ -1286,12 +1687,71 @@ pub async fn pull_openshell_events(ctx: &ServiceContext) -> Result<u64, ApiError
             .flatten()
             .collect::<Vec<_>>()
             .join("; ");
+            let request_id = format!(
+                "osh:{}:{}:{}:{}:{}",
+                sandbox_id,
+                (seconds * 1000.0) as i64,
+                host,
+                port.unwrap_or(0),
+                decision
+            );
+
+            // A name lookup is its own event kind, not a network row carrying a
+            // protocol word. The console's DNS facet, "which names did this
+            // sandbox ask for", and the live `dns` stream all filter on the kind;
+            // a row that says `network` can never answer any of them, and until
+            // this branch existed every DNS decision arrived as network/tcp.
+            if dns {
+                let id = event_id(environment_id, Some(*sandbox_id), Some(&request_id), ts, now);
+                let resolved = ts.unwrap_or(now);
+                let live = TelemetryEvent::Dns(DnsEvent {
+                    id,
+                    environment_id,
+                    sandbox_id: Some(*sandbox_id),
+                    ts: resolved,
+                    hostname: host.to_string(),
+                    resolver: Some("openshell".to_string()),
+                    decision: parse_decision(Some(decision)),
+                    binary: event.get("binary").and_then(|v| v.as_str()).map(str::to_string),
+                    correlation_id: Some(request_id),
+                });
+                let mut detail = serde_json::to_value(&live).unwrap_or(serde_json::Value::Null);
+                if let serde_json::Value::Object(map) = &mut detail {
+                    // The reason is the enforcement's own words and is what an
+                    // operator acts on; it has no place in the wire shape, so it
+                    // rides in the stored detail only.
+                    map.insert("reason".into(), serde_json::json!(reason));
+                    // The traffic list reads protocol and channel out of the
+                    // detail; a DNS event carries neither on the wire, and a row
+                    // without them would be badged as a plain TCP connection.
+                    map.insert("protocol".into(), serde_json::json!("dns"));
+                    map.insert("channel".into(), serde_json::json!("dns"));
+                }
+                prepared.push(PreparedEvent {
+                    id,
+                    ts: resolved,
+                    sandbox_id: Some(*sandbox_id),
+                    kind: EventKind::Dns,
+                    detail,
+                    body: None,
+                    call: None,
+                    live,
+                });
+                continue;
+            }
+
             let entry = ProxyTrafficEntry {
+                dlp: None,
+                upstream_ip: None,
+                upstream_ip_would: None,
+                upstream_host: None,
+                router_provider: None,
+                router_model: None,
                 ts,
                 sandbox_id: Some(*sandbox_id),
                 host: host.to_string(),
                 port,
-                protocol: Some(if dns { "dns" } else { "tcp" }.to_string()),
+                protocol: Some("tcp".to_string()),
                 method: None,
                 path: None,
                 status: None,
@@ -1304,15 +1764,9 @@ pub async fn pull_openshell_events(ctx: &ServiceContext) -> Result<u64, ApiError
                 sni: None,
                 app_protocol: None,
                 user_agent: None,
-                request_id: Some(format!(
-                    "osh:{}:{}:{}:{}:{}",
-                    sandbox_id,
-                    (seconds * 1000.0) as i64,
-                    host,
-                    port.unwrap_or(0),
-                    decision
-                )),
+                request_id: Some(request_id),
                 decision: Some(decision.to_string()),
+                would_deny: None,
                 reason: if reason.is_empty() { None } else { Some(reason) },
                 rule_id: None,
                 mcp_session_id: None,
@@ -1321,6 +1775,9 @@ pub async fn pull_openshell_events(ctx: &ServiceContext) -> Result<u64, ApiError
                 mcp_server: None,
                 request_body: None,
                 response_body: None,
+                usage: None,
+                cache_markers: None,
+                llm_auth: None,
             };
             if let Ok(item) = prepare_traffic(&entry, environment_id, now) {
                 prepared.push(item);
@@ -1350,8 +1807,111 @@ pub async fn pull_openshell_events(ctx: &ServiceContext) -> Result<u64, ApiError
             for item in &prepared {
                 ctx.bus.publish(LiveEvent::Telemetry(item.live.clone()));
             }
+            let live: Vec<TelemetryEvent> = prepared.iter().map(|item| item.live.clone()).collect();
+            crate::services::alert_service::publish_if_refused(ctx, environment_id, &live).await;
         }
         stored_total += stored as u64;
     }
     Ok(stored_total)
+}
+
+
+/// The model call an access-log line describes, when it carries usage counters.
+fn observed_call(
+    entry: &ProxyTrafficEntry,
+    event_id: Uuid,
+    environment_id: Uuid,
+) -> Option<crate::services::accounting_service::ObservedCall> {
+    use crate::domain::accounting::{AuthKind, ObservedUsage};
+
+    let sandbox_id = entry.sandbox_id?;
+    let counters: serde_json::Value = serde_json::from_str(entry.usage.as_deref()?.trim()).ok()?;
+    let number = |key: &str| counters.get(key).and_then(serde_json::Value::as_i64).unwrap_or(0);
+    let usage = ObservedUsage {
+        input: number("i"),
+        output: number("o"),
+        cache_read: number("cr"),
+        cache_write: number("cw"),
+        cache_write_1h: number("cw1"),
+        reasoning: number("rs"),
+    };
+    let request = decode_text(entry.request_body.as_deref());
+    let response = decode_text(entry.response_body.as_deref());
+    let model = request
+        .as_deref()
+        .and_then(model_of)
+        .or_else(|| response.as_deref().and_then(model_of));
+    Some(crate::services::accounting_service::ObservedCall {
+        id: event_id,
+        environment_id,
+        sandbox_id,
+        host: entry.host.clone(),
+        path: entry.path.clone(),
+        status: entry.status.unwrap_or(0),
+        latency_ms: entry.duration_ms.unwrap_or(0).clamp(0, i64::from(i32::MAX)) as i32,
+        model,
+        usage,
+        cache_markers: entry
+            .cache_markers
+            .as_deref()
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or(0),
+        auth: AuthKind::parse(entry.llm_auth.as_deref().unwrap_or("")),
+        conversation: request.as_deref().and_then(conversation_of),
+    })
+}
+
+fn decode_text(raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let engine = base64::engine::general_purpose::STANDARD;
+    let bytes = engine
+        .decode(raw)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(raw))
+        .ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The model a request or an answer names: the first `"model":"…"` in the text.
+fn model_of(text: &str) -> Option<String> {
+    let at = text.find("\"model\"")?;
+    let rest = text[at + 7..].trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
+    let name: String = rest.chars().take_while(|c| *c != '"').take(120).collect();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+/// The conversation a call belongs to: the proxy's own key for a long request, else
+/// the `session_id` inside the client's `metadata.user_id` (a JSON string, so its
+/// quotes are escaped).
+fn conversation_of(text: &str) -> Option<String> {
+    for key in ["\"nestbox_conversation\":\"", "session_id\\\":\\\"", "\"session_id\":\""] {
+        if let Some(at) = text.find(key) {
+            let id: String = text[at + key.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit() || *c == '-')
+                .take(64)
+                .collect();
+            if id.len() >= 8 {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod observed_telemetry_tests {
+    use super::*;
+
+    #[test]
+    fn the_model_and_the_conversation_are_read_from_a_request() {
+        let text = r#"{"model":"claude-opus-5-5","nestbox_conversation":"27a41161-b693-419a-850f-a5f2565bd848"}"#;
+        assert_eq!(model_of(text).as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(conversation_of(text).as_deref(), Some("27a41161-b693-419a-850f-a5f2565bd848"));
+        let escaped = r#"{"metadata":{"user_id":"{\"session_id\":\"aaaaaaaa-bbbb\"}"}}"#;
+        assert_eq!(conversation_of(escaped).as_deref(), Some("aaaaaaaa-bbbb"));
+        assert_eq!(model_of("{}"), None);
+    }
 }

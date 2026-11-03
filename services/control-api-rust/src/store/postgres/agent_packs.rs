@@ -157,7 +157,7 @@ mod tests {
         let packs = list_packs(&mut scope).await.expect("packs");
         scope.commit().await.expect("commit");
 
-        assert_eq!(packs.len(), 9, "the migration seeds nine packs");
+        assert_eq!(packs.len(), 10, "the migrations seed ten packs (nine agents and the desktop)");
         for pack in &packs {
             assert!(
                 !pack.default_image.trim().is_empty(),

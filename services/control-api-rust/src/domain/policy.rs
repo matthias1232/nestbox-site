@@ -689,6 +689,80 @@ impl Enforcement {
     }
 }
 
+/// Which firewall a policy document describes, as the console groups it.
+///
+/// Two kinds, because the document says exactly that much. A document that
+/// carries only `network_policies` is about egress and nothing else; a document
+/// that also carries `filesystem_policy`, `landlock` or `process` is the whole
+/// sandbox fence, which is what people mean by an OpenShell policy. DNS rules
+/// are rows in their own table, not document sections, so they are not a kind
+/// here — a policy that carries a DNS rule is still a network policy with a
+/// separate companion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyKind {
+    Openshell,
+    Network,
+}
+
+impl PolicyKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Openshell => "openshell",
+            Self::Network => "network",
+        }
+    }
+}
+
+/// The sections a document actually carries, in document order.
+///
+/// Reading the keys instead of trusting a label is what keeps the badge true: a
+/// document edited to add a filesystem section becomes an OpenShell policy
+/// without anyone updating a column.
+pub fn document_sections(spec: &serde_json::Value) -> Vec<&'static str> {
+    let Some(object) = spec.as_object() else {
+        return Vec::new();
+    };
+    PolicySection::all()
+        .into_iter()
+        .filter(|section| object.contains_key(section.as_str()))
+        .map(|section| section.as_str())
+        .collect()
+}
+
+/// Split the sections a document carries into hot and cold (ADR 0008).
+///
+/// Hot sections take effect on a running sandbox; cold ones are fixed when the
+/// workload starts, so a change needs a recreate. Order follows the document.
+pub fn hot_and_cold(spec: &serde_json::Value) -> (Vec<&'static str>, Vec<&'static str>) {
+    let mut hot = Vec::new();
+    let mut cold = Vec::new();
+    for name in document_sections(spec) {
+        let hot_reloadable = PolicySection::all()
+            .into_iter()
+            .any(|section| section.as_str() == name && section.is_hot_reloadable());
+        if hot_reloadable {
+            hot.push(name);
+        } else {
+            cold.push(name);
+        }
+    }
+    (hot, cold)
+}
+
+/// Classify one document.
+pub fn classify(spec: &serde_json::Value) -> PolicyKind {
+    let sections = document_sections(spec);
+    let startup = sections
+        .iter()
+        .any(|section| *section != PolicySection::NetworkPolicies.as_str());
+    if startup {
+        PolicyKind::Openshell
+    } else {
+        PolicyKind::Network
+    }
+}
+
 /// Validate a policy document and report which sections it touches.
 ///
 /// Returns the sections present so the caller can decide whether a save is a
@@ -1227,35 +1301,70 @@ pub struct DnsRule {
 
 /// How deeply one sandbox is observed on the way out.
 ///
-/// Three modes, because there are three real answers: the proxy sees the
-/// request and nothing more (`forward_proxy`), the proxy terminates TLS and
-/// reads the decrypted request (`transparent`), or both per port (`hybrid`).
-/// A mode is a per-sandbox row, not a global switch, so a sandbox that must
-/// not have its TLS read is not read.
+/// Four modes, because there are four real answers: no proxy at all
+/// (`direct`), the proxy sees the request and nothing more (`forward_proxy`),
+/// the proxy terminates TLS and reads the decrypted request (`transparent`), or
+/// both per port (`hybrid`).
+///
+/// A mode is a per-sandbox row, not a global switch, so a sandbox that must not
+/// have its TLS read is not read, and a sandbox that must not be proxied is not
+/// proxied. The mode is the *observation* answer; where traffic leaves the node
+/// is a separate choice (`sandboxes.proxy_id`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EgressMode {
+    Direct,
     ForwardProxy,
     Transparent,
     Hybrid,
+    /// The proxy only tunnels and blocks nothing: every connection is allowed
+    /// and recorded, and the OpenShell supervisor runs in audit mode. A
+    /// deliberate, loudly warned-about state (ADR 0053).
+    OffAllowAll,
 }
 
 impl EgressMode {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Direct => "direct",
             Self::ForwardProxy => "forward_proxy",
             Self::Transparent => "transparent",
             Self::Hybrid => "hybrid",
+            Self::OffAllowAll => "off_allow_all",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value {
+            "direct" => Self::Direct,
             "forward_proxy" => Self::ForwardProxy,
             "transparent" => Self::Transparent,
             "hybrid" => Self::Hybrid,
+            "off_allow_all" => Self::OffAllowAll,
             _ => return None,
         })
+    }
+
+    /// True when this mode lets every connection through and only records it.
+    pub fn allows_everything(self) -> bool {
+        matches!(self, Self::OffAllowAll)
+    }
+
+    /// True for the modes an end user may pick. `direct` changes the network and
+    /// the exit proxy, so it stays an administrator's choice that rebuilds.
+    pub fn user_selectable(self) -> bool {
+        !matches!(self, Self::Direct)
+    }
+
+    /// Whether this mode puts the node's egress proxy in the path at all.
+    pub fn uses_proxy(self) -> bool {
+        !matches!(self, Self::Direct)
+    }
+
+    /// Whether this mode may read the contents of a TLS connection, and
+    /// therefore needs the sandbox to trust the node's CA.
+    pub fn inspects_tls(self) -> bool {
+        matches!(self, Self::Transparent | Self::Hybrid)
     }
 }
 
@@ -1271,6 +1380,19 @@ pub struct EgressModeSetting {
     pub trust_ca_ref: Option<String>,
     pub enabled: bool,
     pub version: i64,
+    /// When the mode last changed.
+    #[serde(default)]
+    pub changed_at: Option<DateTime<Utc>>,
+    /// When it returns to `revert_to` by itself, if a timer was set.
+    #[serde(default)]
+    pub revert_at: Option<DateTime<Utc>>,
+    /// The mode it returns to.
+    #[serde(default)]
+    pub revert_to: Option<String>,
+    /// True when this sandbox was created before the CA was mounted for every
+    /// mode: one recreate is needed before TLS can be opened.
+    #[serde(default)]
+    pub needs_recreate: bool,
 }
 
 /// A preset in the template library.
@@ -1527,6 +1649,44 @@ pub fn rules_from_mcp(
         .collect()
 }
 
+/// The allow rule that lets one sandbox reach the accounting proxy.
+///
+/// Model traffic that is routed through the proxy (`route_through_accounting`)
+/// has to be allowed to reach it, or the agent would be cut off by the control
+/// plane that sent it there. The rule names the proxy's host and port and
+/// nothing else; what the proxy forwards upstream is the proxy's own business
+/// and is recorded there. Empty when the URL has no host.
+pub fn rules_for_accounting_proxy(
+    proxy_url: &str,
+    sandbox_id: Uuid,
+    environment_id: Uuid,
+) -> Vec<NetworkRule> {
+    let Some((host, port)) = endpoint_host_port(proxy_url) else {
+        return Vec::new();
+    };
+    vec![NetworkRule {
+        id: Uuid::nil(),
+        environment_id,
+        policy_id: None,
+        sandbox_id: Some(sandbox_id),
+        name: "Accounting proxy".to_string(),
+        action: RuleAction::Allow,
+        host: host.clone(),
+        port: Some(port),
+        protocol: RuleProtocol::Tcp,
+        methods: vec![],
+        binaries: vec![],
+        matchers: vec![
+            Matcher { kind: MatcherKind::Host, value: Some(host) },
+            Matcher { kind: MatcherKind::Port, value: Some(port.to_string()) },
+        ],
+        enforcement: Enforcement::Enforced,
+        priority: DOCUMENT_ALLOW_PRIORITY - 100,
+        enabled: true,
+        version: 1,
+    }]
+}
+
 /// The allow rule that lets a gateway sandbox reach the egress proxy.
 ///
 /// On an OpenShell gateway every destination must be named in the policy,
@@ -1572,6 +1732,17 @@ pub fn rules_for_egress_proxy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hot_and_cold_splits_network_from_startup_sections() {
+        let spec = serde_json::json!({
+            "network_policies": {}, "filesystem_policy": {}, "landlock": {}, "process": {}
+        });
+        let (hot, cold) = hot_and_cold(&spec);
+        assert_eq!(hot, vec!["network_policies"]);
+        assert_eq!(cold, vec!["filesystem_policy", "landlock", "process"]);
+    }
+
     use serde_json::json;
 
     #[test]
@@ -2015,4 +2186,40 @@ mod tests {
         assert_eq!(endpoint_host_port("http://gw.local/v1"), Some(("gw.local".into(), 80)));
         assert_eq!(endpoint_host_port("nonsense"), None);
     }
+
+    #[test]
+    fn a_document_is_classified_by_the_sections_it_carries() {
+        // The badge is derived, not stored: adding a filesystem section makes a
+        // policy an OpenShell policy without anyone updating a column.
+        let network_only = serde_json::json!({
+            "network_policies": { "api": { "endpoints": [] } }
+        });
+        assert_eq!(classify(&network_only), PolicyKind::Network);
+        assert_eq!(document_sections(&network_only), vec!["network_policies"]);
+
+        let whole_fence = serde_json::json!({
+            "filesystem_policy": { "paths": [] },
+            "network_policies": {}
+        });
+        assert_eq!(classify(&whole_fence), PolicyKind::Openshell);
+        assert_eq!(
+            document_sections(&whole_fence),
+            vec!["filesystem_policy", "network_policies"]
+        );
+
+        // A document that is not an object is not classified as anything it is
+        // not: the network default is the narrower claim.
+        assert_eq!(classify(&serde_json::json!("nonsense")), PolicyKind::Network);
+    }
+    #[test]
+    fn the_accounting_proxy_is_allowed_for_that_sandbox_only() {
+        let sandbox = Uuid::new_v4();
+        let rules = rules_for_accounting_proxy("http://host.openshell.internal:18099/", sandbox, Uuid::nil());
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].host, "host.openshell.internal");
+        assert_eq!(rules[0].port, Some(18099));
+        assert_eq!(rules[0].sandbox_id, Some(sandbox));
+        assert!(rules_for_accounting_proxy("not a url", sandbox, Uuid::nil()).is_empty());
+    }
+
 }

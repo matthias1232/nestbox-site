@@ -94,6 +94,10 @@ pub enum Action {
     Redact,
     /// Replace with a labelled placeholder (`<API_KEYS_1a2b3c4d>`).
     Replace,
+    /// Replace like [`Action::Replace`], and turn the placeholder back into the
+    /// value in the model's answer. The model never sees the value; the agent
+    /// still works with it.
+    Pseudonymize,
     /// Leave it alone; the finding is still recorded.
     Allow,
 }
@@ -105,6 +109,7 @@ impl Action {
             Self::Block => "block",
             Self::Redact => "redact",
             Self::Replace => "replace",
+            Self::Pseudonymize => "pseudonymize",
             Self::Allow => "allow",
         }
     }
@@ -115,6 +120,7 @@ impl Action {
             "block" => Some(Self::Block),
             "redact" => Some(Self::Redact),
             "replace" => Some(Self::Replace),
+            "pseudonymize" => Some(Self::Pseudonymize),
             "allow" => Some(Self::Allow),
             _ => None,
         }
@@ -129,6 +135,7 @@ impl Action {
             Self::Block => IncidentAction::Blocked,
             Self::Redact => IncidentAction::Redacted,
             Self::Replace => IncidentAction::Replaced,
+            Self::Pseudonymize => IncidentAction::Pseudonymized,
             Self::Allow => IncidentAction::Allowed,
         }
     }
@@ -145,6 +152,7 @@ pub enum IncidentAction {
     Blocked,
     Redacted,
     Replaced,
+    Pseudonymized,
     Allowed,
 }
 
@@ -155,6 +163,7 @@ impl IncidentAction {
             Self::Blocked => "blocked",
             Self::Redacted => "redacted",
             Self::Replaced => "replaced",
+            Self::Pseudonymized => "pseudonymized",
             Self::Allowed => "allowed",
         }
     }
@@ -165,6 +174,7 @@ impl IncidentAction {
             "blocked" => Some(Self::Blocked),
             "redacted" => Some(Self::Redacted),
             "replaced" => Some(Self::Replaced),
+            "pseudonymized" => Some(Self::Pseudonymized),
             "allowed" => Some(Self::Allowed),
             _ => None,
         }
@@ -178,7 +188,7 @@ impl IncidentAction {
     pub fn severity(self) -> &'static str {
         match self {
             Self::Blocked => "critical",
-            Self::Redacted | Self::Replaced => "warning",
+            Self::Redacted | Self::Replaced | Self::Pseudonymized => "warning",
             Self::Allowed => "info",
         }
     }
@@ -187,8 +197,14 @@ impl IncidentAction {
 /// What kind of sensitive content a detector looks for.
 ///
 /// The set is closed on purpose: the database CHECK, the `detectors` array and
-/// the scraper in `privacy_service` all name the same ten things, and a new one
-/// is a code change in all three places rather than a free-form string.
+/// the scraper in `privacy_service` all name the same things, and a new one is a
+/// code change in all three places rather than a free-form string.
+///
+/// Two variants are **evidence only**: [`Detector::CheckUnavailable`] and
+/// [`Detector::Oversize`] describe a refusal the proxy reported (the check could
+/// not answer, or the body was too large to read). They never scan anything and
+/// are not part of [`Detector::ALL`], so nobody can switch them on in the
+/// settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Detector {
@@ -206,10 +222,17 @@ pub enum Detector {
     CreditCards,
     /// An amount with a currency: `$1,240.00`, `900 EUR`.
     FinancialData,
+    /// The content check could not answer, so the request was refused.
+    CheckUnavailable,
+    /// The body was larger than the content check reads, so it was refused.
+    Oversize,
 }
 
 impl Detector {
-    /// Every detector, in the order a report lists them.
+    /// Every configurable detector, in the order a report lists them.
+    ///
+    /// The two evidence-only kinds are absent by design: they are not a policy
+    /// choice, they are what the proxy reports when no policy could run.
     pub const ALL: [Detector; 10] = [
         Detector::Credentials,
         Detector::ApiKeys,
@@ -236,6 +259,8 @@ impl Detector {
             Self::Iban => "iban",
             Self::CreditCards => "credit_cards",
             Self::FinancialData => "financial_data",
+            Self::CheckUnavailable => "check_unavailable",
+            Self::Oversize => "oversize",
         }
     }
 
@@ -252,6 +277,8 @@ impl Detector {
             "iban" => Some(Self::Iban),
             "credit_cards" => Some(Self::CreditCards),
             "financial_data" => Some(Self::FinancialData),
+            "check_unavailable" => Some(Self::CheckUnavailable),
+            "oversize" => Some(Self::Oversize),
             _ => None,
         }
     }
@@ -270,6 +297,8 @@ impl Detector {
             Self::Iban => "IBAN",
             Self::CreditCards => "CREDIT_CARDS",
             Self::FinancialData => "FINANCIAL_DATA",
+            Self::CheckUnavailable => "CHECK_UNAVAILABLE",
+            Self::Oversize => "OVERSIZE",
         }
     }
 
@@ -282,6 +311,7 @@ impl Detector {
     pub fn default_action(self) -> Action {
         match self {
             Self::Credentials | Self::ApiKeys | Self::Iban | Self::CreditCards => Action::Block,
+            Self::CheckUnavailable | Self::Oversize => Action::Block,
             Self::EmailAddresses
             | Self::PersonNames
             | Self::IpAddresses
@@ -389,6 +419,16 @@ pub struct PrivacySettings {
     pub block_cloud_egress: bool,
     /// How long an incident is kept, in days.
     pub retention_days: i32,
+    /// Whether a sandbox's owner may grant DLP exceptions for it.
+    pub owners_may_grant_exceptions: bool,
+    /// Whether an administrator may read chat content. End users are told which
+    /// way this is set (ADR 0063).
+    pub admin_chat_view: bool,
+    /// Hosts whose content is checked on top of the model hosts. The transparent
+    /// hop sees every request a sandbox makes, including a browser's; rewriting a
+    /// shop's form because a value looked like an e-mail is breakage, not
+    /// protection, so everything else is only recorded.
+    pub enforce_hosts: Vec<String>,
     /// Who saved the row last; `None` for the built-in default.
     pub updated_by: Option<Uuid>,
     /// `None` for the built-in default, which has no row.
@@ -408,6 +448,9 @@ impl PrivacySettings {
             actions: BTreeMap::new(),
             block_cloud_egress: true,
             retention_days: DEFAULT_RETENTION_DAYS,
+            enforce_hosts: Vec::new(),
+            owners_may_grant_exceptions: false,
+            admin_chat_view: true,
             updated_by: None,
             updated_at: None,
         }
@@ -456,6 +499,22 @@ pub struct PrivacyUpdate {
     /// Defaults to 30 days.
     #[serde(default = "default_retention_days")]
     pub retention_days: i32,
+    /// Extra hosts to check. The model hosts are always checked.
+    #[serde(default)]
+    pub enforce_hosts: Vec<String>,
+    /// Defaults to `false`: an owner may not grant exceptions unless an operator
+    /// says so.
+    #[serde(default)]
+    pub owners_may_grant_exceptions: bool,
+    /// Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub admin_chat_view: bool,
+}
+
+/// The default for an opt-out switch that protects a person's work from default
+/// prying: off is the safe default, on is the documented decision.
+fn default_true() -> bool {
+    true
 }
 
 impl Default for PrivacyUpdate {
@@ -467,6 +526,9 @@ impl Default for PrivacyUpdate {
             actions: settings.actions,
             block_cloud_egress: settings.block_cloud_egress,
             retention_days: settings.retention_days,
+            enforce_hosts: settings.enforce_hosts,
+            owners_may_grant_exceptions: settings.owners_may_grant_exceptions,
+            admin_chat_view: settings.admin_chat_view,
         }
     }
 }
@@ -488,6 +550,19 @@ impl PrivacyUpdate {
     pub fn validate(&self) -> Result<(), String> {
         if !(1..=3650).contains(&self.retention_days) {
             return Err("retention_days must be between 1 and 3650.".into());
+        }
+        for host in &self.enforce_hosts {
+            let trimmed = host.trim();
+            let plain = !trimmed.is_empty()
+                && trimmed.len() <= 253
+                && !trimmed
+                    .chars()
+                    .any(|character| matches!(character, '/' | '\\' | '@' | ' ' | '"'));
+            if !plain {
+                return Err(format!(
+                    "enforce_hosts must be plain host names; '{trimmed}' is not one."
+                ));
+            }
         }
         Ok(())
     }
@@ -511,6 +586,9 @@ impl PrivacyUpdate {
             actions: self.actions,
             block_cloud_egress: self.block_cloud_egress,
             retention_days: self.retention_days,
+            enforce_hosts: self.enforce_hosts,
+            owners_may_grant_exceptions: self.owners_may_grant_exceptions,
+            admin_chat_view: self.admin_chat_view,
             updated_by: None,
             updated_at: None,
         }
@@ -526,15 +604,29 @@ impl PrivacyUpdate {
 pub struct Marked {
     pub finding: Finding,
     pub token: String,
+    /// A policy exception that covers this finding, decided by the service
+    /// before [`apply`] runs. It replaces the configured action.
+    pub override_action: Option<Action>,
+    /// The exception that granted the override, for the incident row.
+    pub exception_id: Option<Uuid>,
 }
 
 impl Marked {
-    /// A finding and its token.
+    /// A finding and its token, with no exception.
     pub fn new(finding: Finding, token: impl Into<String>) -> Self {
         Self {
             finding,
             token: token.into(),
+            override_action: None,
+            exception_id: None,
         }
+    }
+
+    /// The same finding with the action an exception granted.
+    pub fn with_exception(mut self, action: Action, exception_id: Uuid) -> Self {
+        self.override_action = Some(action);
+        self.exception_id = Some(exception_id);
+        self
     }
 }
 
@@ -575,6 +667,8 @@ pub struct Decision {
     pub masked_value: String,
     /// The fingerprint the placeholder is built from.
     pub token: String,
+    /// The exception that granted a different action, when one did.
+    pub exception_id: Option<Uuid>,
 }
 
 impl Decision {
@@ -628,12 +722,13 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// The wire spelling of [`Outcome::action`]: `allowed`, `replaced`, `blocked`.
+    /// The wire spelling of [`Outcome::action`].
     pub fn action_str(&self) -> &'static str {
         match self.action {
             Action::Allow => "allowed",
             Action::Block => "blocked",
             Action::Redact | Action::Replace => "replaced",
+            Action::Pseudonymize => "pseudonymized",
         }
     }
 }
@@ -658,13 +753,19 @@ pub fn apply(settings: &PrivacySettings, marked: &[Marked], text: &str) -> Outco
     let mut decisions = Vec::with_capacity(marked.len());
     for entry in marked {
         let configured = settings.action_for(entry.finding.detector);
-        let effective = effective_action(settings.mode, configured, settings.block_cloud_egress);
+        // An exception takes the decision over entirely: it says what should
+        // happen to this value, and the mode must not water it down again.
+        let effective = match entry.override_action {
+            Some(action) => action,
+            None => effective_action(settings.mode, configured, settings.block_cloud_egress),
+        };
         let decision = Decision {
             detector: entry.finding.detector,
-            action: configured,
+            action: entry.override_action.unwrap_or(configured),
             effective,
             masked_value: entry.finding.masked(),
             token: entry.token.clone(),
+            exception_id: entry.exception_id,
         };
         // A block still rewrites what it refuses: the caller discards the text,
         // and the redacted copy is what a log may keep.
@@ -682,7 +783,7 @@ pub fn apply(settings: &PrivacySettings, marked: &[Marked], text: &str) -> Outco
                 action = Action::Block;
                 break;
             }
-            Action::Redact | Action::Replace => action = Action::Replace,
+            Action::Redact | Action::Replace | Action::Pseudonymize => action = Action::Replace,
             Action::Allow => {}
         }
     }
@@ -720,12 +821,111 @@ pub struct PrivacyIncident {
     pub destination: Option<String>,
     /// Whether the content counted as a delivery to a cloud destination.
     pub cloud_delivery: bool,
+    /// `inbound` (to the model) or `outbound` (to the agent).
+    pub direction: String,
+    /// What the policy asked for, next to what happened. Equal to `action`
+    /// unless the mode was `observe`, where the policy asks and the request goes
+    /// out unchanged; `None` marks a row written before the column existed.
+    pub requested_action: Option<IncidentAction>,
+    /// The mode in force when the finding happened; `None` for older rows.
+    pub mode: Option<String>,
+    /// The substitute the detector wrote (`<IBAN_faf7e1c0>`, `[REDACTED]`).
+    /// Derived from the fingerprint, so it reveals no more than the mask.
+    pub replacement: Option<String>,
+    /// `egress`, `accounting_proxy`, `mcp` or `test`: which hop saw the content.
+    pub source: String,
+    /// The HTTP facts of the request the finding belonged to, when known.
+    pub method: Option<String>,
+    pub path: Option<String>,
+    pub model: Option<String>,
+    pub mcp_tool: Option<String>,
+    /// The conversation the request belonged to, for the link to the chat.
+    pub conversation_id: Option<String>,
+    /// The proxy's `x-request-id` for the request this finding belonged to.
+    /// What joins a finding to its `chat_turns` row and to the live stream.
+    pub request_ref: Option<String>,
+    /// The exception that allowed the finding, when one did.
+    pub exception_id: Option<Uuid>,
+    /// How often this finding was seen. A repeated value within a day increments
+    /// the same row instead of writing a new one.
+    pub occurrences: i32,
+    /// When it was last seen.
+    pub last_seen_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Where a finding was seen. A closed list: the value is a column with a CHECK.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IncidentSource {
+    /// The transparent proxy, between the sandbox and the internet.
+    Egress,
+    /// The accounting proxy the agent's SDK points at.
+    AccountingProxy,
+    /// An MCP tool call, seen by the proxy's JSON-RPC filter.
+    Mcp,
+    /// The test button on the settings screen; also the default for a caller
+    /// that does not say, so a new call site cannot silently claim to be egress.
+    #[default]
+    Test,
+}
+
+impl IncidentSource {
+    /// The database and wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Egress => "egress",
+            Self::AccountingProxy => "accounting_proxy",
+            Self::Mcp => "mcp",
+            Self::Test => "test",
+        }
+    }
+
+    /// Read the database spelling; unknown input is `None`.
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "egress" => Self::Egress,
+            "accounting_proxy" => Self::AccountingProxy,
+            "mcp" => Self::Mcp,
+            "test" => Self::Test,
+            _ => return None,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_evidence_only_detectors_are_not_configurable() {
+        // The proxy reports a refusal under these names; a person must not be
+        // able to switch them on, so they are parseable but not part of ALL.
+        for detector in [Detector::CheckUnavailable, Detector::Oversize] {
+            assert_eq!(Detector::parse(detector.as_str()), Some(detector));
+            assert!(!Detector::ALL.contains(&detector));
+            assert_eq!(detector.default_action(), Action::Block);
+        }
+        assert_eq!(Detector::parse("check_unavailable"), Some(Detector::CheckUnavailable));
+        assert_eq!(Detector::CheckUnavailable.label(), "CHECK_UNAVAILABLE");
+        assert_eq!(Detector::Oversize.label(), "OVERSIZE");
+    }
+
+    #[test]
+    fn every_incident_source_round_trips() {
+        for source in [
+            IncidentSource::Egress,
+            IncidentSource::AccountingProxy,
+            IncidentSource::Mcp,
+            IncidentSource::Test,
+        ] {
+            assert_eq!(IncidentSource::parse(source.as_str()), Some(source));
+        }
+        // The default is the one that cannot claim to be the egress proxy: a new
+        // call site that forgets to say where it is must not look like real
+        // traffic in the log.
+        assert_eq!(IncidentSource::default(), IncidentSource::Test);
+        assert_eq!(IncidentSource::parse("somewhere"), None);
+    }
 
     fn settings(mode: PrivacyMode) -> PrivacySettings {
         PrivacySettings {
@@ -825,6 +1025,17 @@ mod tests {
         assert!(observe.permitted);
         assert_eq!(observe.transformed, text);
         assert_eq!(observe.decisions[0].incident_action(), IncidentAction::Allowed);
+        // Two facts, both stored: what the policy asked for and what happened.
+        // In observe they differ, and that difference is the only evidence that
+        // the content left although a detector matched.
+        assert_eq!(
+            observe.decisions[0].action.incident_action(),
+            IncidentAction::Blocked
+        );
+        assert_eq!(observe.decisions[0].incident_action(), IncidentAction::Allowed);
+        // The substitute is safe to store: a placeholder, never the value.
+        assert!(observe.decisions[0].replacement().starts_with('<'));
+        assert!(!observe.decisions[0].replacement().contains("sk-live-0123456789abcdef"));
     }
 
     #[test]
@@ -992,5 +1203,115 @@ mod tests {
         assert_eq!(PrivacyMode::parse("paranoid"), None);
         assert_eq!(Action::parse(""), None);
         assert_eq!(IncidentAction::parse("ignored"), None);
+    }
+}
+
+/// What the content check does with one request, decided before any detector
+/// runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Enforcement {
+    /// Read the body and block or rewrite it.
+    Enforce,
+    /// Read the body and record what the policy would have done; change nothing.
+    /// The transparent hop sees a browser as well as an agent, and rewriting a
+    /// shop's form is breakage, not protection.
+    RecordOnly,
+    /// Do not read the body at all. Login and token endpoints only: a refresh
+    /// token is machine-issued, and blocking it signs the user out.
+    Exempt,
+}
+
+/// Hosts whose whole traffic the content check never reads.
+///
+/// `claude.ai` is deliberately not one of them: it carries both the login flow
+/// and the chat completion, and exempting the host exempted the conversation
+/// (finding R7). It is exempt on its login paths only, through
+/// [`LOGIN_PATH_PREFIXES`].
+pub const EXEMPT_HOSTS: &[&str] = &[
+    "console.anthropic.com",
+    "platform.claude.com",
+    "auth.openai.com",
+    "accounts.google.com",
+];
+
+/// The path prefixes a login flow uses on a host that also carries chat.
+///
+/// Matched against the lower-cased path prefix, so `/login/step-2` and
+/// `/oauth/authorize?…` are both covered and `/api/organizations/x/…` is not.
+pub const LOGIN_PATH_PREFIXES: &[&str] = &[
+    "/login",
+    "/api/auth",
+    "/oauth",
+    "/v1/oauth",
+    "/api/oauth",
+    "/magic-link",
+];
+
+/// Whether one request is checked, only recorded, or left alone.
+pub fn enforcement_for(
+    source: super::privacy::IncidentSource,
+    destination: Option<&str>,
+    path: Option<&str>,
+    enforce_hosts: &[String],
+) -> Enforcement {
+    let host = destination
+        .unwrap_or_default()
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let path = path.unwrap_or_default().to_ascii_lowercase();
+    // Every host's token endpoint, and the four login hosts as a whole.
+    if path.ends_with("/oauth/token") || EXEMPT_HOSTS.contains(&host.as_str()) {
+        return Enforcement::Exempt;
+    }
+    // `claude.ai` carries login *and* chat, so only its login paths are exempt.
+    if host == "claude.ai" && LOGIN_PATH_PREFIXES.iter().any(|prefix| path.starts_with(prefix)) {
+        return Enforcement::Exempt;
+    }
+    let listed = enforce_hosts
+        .iter()
+        .any(|entry| entry.trim().eq_ignore_ascii_case(&host));
+    if source == super::privacy::IncidentSource::Mcp || crate::domain::egress::is_agent_host(&host) || listed
+    {
+        return Enforcement::Enforce;
+    }
+    Enforcement::RecordOnly
+}
+
+#[cfg(test)]
+mod enforcement_tests {
+    use super::*;
+
+    fn decide(destination: &str, path: &str) -> Enforcement {
+        enforcement_for(IncidentSource::Egress, Some(destination), Some(path), &[])
+    }
+
+    #[test]
+    fn a_chat_completion_on_a_login_host_is_enforced() {
+        // `claude.ai` carries the conversation as well as the sign-in: the whole
+        // host used to be exempt, so the chat content was never read (R7).
+        assert_eq!(
+            decide("claude.ai", "/api/organizations/x/chat_conversations/y/completion"),
+            Enforcement::Enforce
+        );
+        assert_eq!(decide("claude.ai", "/login"), Enforcement::Exempt);
+        assert_eq!(decide("claude.ai", "/api/auth/callback"), Enforcement::Exempt);
+        assert_eq!(decide("claude.ai", "/oauth/authorize"), Enforcement::Exempt);
+    }
+
+    #[test]
+    fn an_oauth_path_on_a_stranger_host_is_only_recorded() {
+        // `contains("/oauth/")` exempted any host with that segment anywhere in
+        // the path, which let a non-model host opt out of inspection.
+        assert_eq!(decide("evil.example", "/oauth/x"), Enforcement::RecordOnly);
+    }
+
+    #[test]
+    fn a_token_endpoint_is_exempt_on_every_host() {
+        assert_eq!(decide("console.anthropic.com", "/v1/oauth/token"), Enforcement::Exempt);
+        assert_eq!(decide("api.anthropic.com", "/v1/oauth/token"), Enforcement::Exempt);
+        assert_eq!(decide("api.anthropic.com", "/v1/messages"), Enforcement::Enforce);
     }
 }

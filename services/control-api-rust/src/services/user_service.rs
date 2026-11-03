@@ -36,9 +36,12 @@ fn db(error: sqlx::Error) -> ApiError {
     ApiError::from(StoreError::Database(error))
 }
 
-async fn organization_of(ctx: &ServiceContext, user_id: Uuid) -> Result<Uuid, ApiError> {
-    sqlx::query_scalar("SELECT organization_id FROM users WHERE id = $1")
-        .bind(user_id)
+/// The organisation that owns the environment the caller works in. Not the caller's own: a
+/// provider's administrator acting inside a customer's data center creates users of the
+/// customer (ADR 0044).
+async fn organization_of(ctx: &ServiceContext, environment_id: Uuid) -> Result<Uuid, ApiError> {
+    sqlx::query_scalar("SELECT organization_id FROM environments WHERE id = $1")
+        .bind(environment_id)
         .fetch_one(&ctx.pool)
         .await
         .map_err(db)
@@ -62,7 +65,7 @@ fn check_password(value: &str) -> Result<(), ApiError> {
 }
 
 fn parse_role(value: &str) -> Result<Role, ApiError> {
-    Role::parse(value).ok_or_else(|| ApiError::validation("A role is admin, operator or viewer."))
+    Role::parse(value).ok_or_else(|| ApiError::validation("A role is admin, operator, member or viewer."))
 }
 
 async fn admin_count(scope: &mut TenantScope<'_>, excluding: Option<Uuid>) -> Result<i64, ApiError> {
@@ -103,7 +106,7 @@ async fn audit(
 
 pub async fn list(ctx: &ServiceContext, principal: &Principal) -> Result<Vec<UserView>, ApiError> {
     require(principal, Permission::UserManage)?;
-    let org = organization_of(ctx, principal.user_id).await?;
+    let org = organization_of(ctx, principal.environment_id).await?;
     // Inside the tenant scope: the sandbox count reads a table under row-level security.
     let mut scope = TenantScope::begin_for(&ctx.pool, principal).await.map_err(ApiError::from)?;
     let rows: Vec<(Uuid, String, String, String, String, i64)> = sqlx::query_as(
@@ -148,7 +151,7 @@ pub async fn create(
     }
     check_password(password_value)?;
     let role = parse_role(role)?;
-    let org = organization_of(ctx, principal.user_id).await?;
+    let org = organization_of(ctx, principal.environment_id).await?;
     let hash = password::hash_password(password_value.to_string())
         .await
         .map_err(|_| ApiError::validation("The password could not be processed."))?;
@@ -205,7 +208,7 @@ pub async fn update(
     status: Option<&str>,
 ) -> Result<(), ApiError> {
     require(principal, Permission::UserManage)?;
-    let org = organization_of(ctx, principal.user_id).await?;
+    let org = organization_of(ctx, principal.environment_id).await?;
     let mut scope = TenantScope::begin_for(&ctx.pool, principal).await.map_err(ApiError::from)?;
     let current: Option<(String, String)> = sqlx::query_as(
         "SELECT s.role, u.status FROM users u JOIN user_scopes s ON s.user_id = u.id AND s.environment_id = $2
@@ -296,7 +299,7 @@ pub async fn set_password(
 ) -> Result<(), ApiError> {
     require(principal, Permission::UserManage)?;
     check_password(password_value)?;
-    let org = organization_of(ctx, principal.user_id).await?;
+    let org = organization_of(ctx, principal.environment_id).await?;
     let hash = password::hash_password(password_value.to_string())
         .await
         .map_err(|_| ApiError::validation("The password could not be processed."))?;

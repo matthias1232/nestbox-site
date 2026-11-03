@@ -12,6 +12,7 @@ FROM node:22-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG CLAUDE_CODE_VERSION=2.1.312
+ARG CODEX_VERSION=0.166.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -44,4 +45,26 @@ ENV PATH=/home/nestbox/.local/bin:${PATH}
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && claude --version
 
+# Codex CLI: its sign-in (ChatGPT or gateway) is switched by the Nestbox launcher.
+#
+# Installed into the same user prefix as Claude Code, so both agents are found on
+# PATH by `docker exec` and the SSH door without a login shell. Pinned like every
+# other tool here: a silent upgrade would change what the sandbox's agent sees.
+RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
+    && codex --version
+
 CMD ["sleep", "infinity"]
+
+# nestbox-sandbox-user: the sandbox does not run as root.
+#
+# A gateway (OpenShell) sandbox refuses to start when its working directory
+# belongs to another user than the sandbox identity, and an agent that signs in
+# on a root account has the whole container to damage. The user is added here,
+# after every install step, so the image layers above stay cached.
+# The steps below need root to create the account, whatever the base image left set.
+USER root
+RUN id -u nestbox >/dev/null 2>&1 || useradd -m -d /home/nestbox -u 10001 -s /bin/bash nestbox \
+ && install -d -o nestbox -g nestbox /workspace /home/nestbox \
+ && chown -R nestbox /workspace /home/nestbox
+USER nestbox
+WORKDIR /workspace

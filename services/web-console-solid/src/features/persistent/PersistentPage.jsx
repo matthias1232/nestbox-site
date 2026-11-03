@@ -11,6 +11,8 @@ import PersistentDetail from './PersistentDetail.jsx';
 import MountsMatrix from './MountsMatrix.jsx';
 import { usePersistent, usageLabel } from './usePersistent.js';
 import '../../styles/recipes-persist.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 export default function PersistentPage() {
   const state = usePersistent();
@@ -38,20 +40,16 @@ export default function PersistentPage() {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Persistent data</h1>
-          <p class="muted">
-            {state.items().length} roots · a root is a directory on a node; a mount binds it into
-            a sandbox
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Persistent data"
+        subtitle={<>{state.items().length} roots · a root is a directory on a node; a mount binds it into a sandbox</>}
+        actions={<>
           <button class="secondary" onClick={() => state.load()} disabled={state.loading()}>
             {state.loading() ? 'Refreshing…' : 'Refresh'}
           </button>
-        </div>
-      </header>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={!state.selected()}>
         <Show when={state.error()}><p class="error">{state.error()}</p></Show>

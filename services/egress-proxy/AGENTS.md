@@ -31,6 +31,41 @@ then un-terminate it. This is why the CA certificate ships in every sandbox imag
 trusted root). An image without it is a broken image, and the log shows the
 CONNECT with no readable request rather than pretending the request was empty.
 
+## Content check on the decrypted hop (ADR 0059)
+
+`mitm/dlp.go` asks the control API about every JSON body the broker forwards, and
+does what the answer says: refuse with `403`, forward the rewritten text, or
+forward unchanged. It is here and not in the Lua filter because a body rewrite
+needs a reader, not a pattern match. `observe` is the only mode that forwards a
+body it could not check; everywhere else an unanswered check is a refusal. Only
+requests are inspected — a streamed answer cannot be rewritten mid-stream. The
+sandbox id and the egress mode reach this process as upstream headers that Envoy
+copied out of the policy answer; a client cannot set them.
+
+### What the console learns about the far end (`NESTBOX_ROUTER_HEADERS`)
+
+`mitm/meta.go` adds the address a request actually reached to the answer
+(`x-nestbox-upstream-ip`), taken from the connection the transport opened and not
+from the name in the `Host` header: a routing proxy makes the two differ, and the
+console must show the address that was used. A refused request has no connection,
+so `x-nestbox-upstream-ip-would` carries the first address the name resolves to,
+looked up with a 1 s deadline and cached for 5 minutes. That field says "would
+have reached" and never "reached".
+
+When the sandbox sends its traffic through an LLM router, the router names the
+provider and the model in headers of its own. `NESTBOX_ROUTER_HEADERS` names
+them, comma separated, provider first and model second — for example
+`x-omniroute-provider,x-omniroute-model`. Their values are copied to
+`x-nestbox-router-provider` and `x-nestbox-router-model`, and only when the
+router sent one. Unset or empty writes nothing, which is the truth for a direct
+connection: an empty header would read as "the router was asked and did not
+answer", a different fact.
+
+A refusal this hop writes itself (`unavailable`, `too_large`) is reported to the
+control API in the background, because the control API never saw that request and
+the console would otherwise show a gap where a refusal was. A `blocked` refusal
+is not reported twice: the control API wrote it, together with its findings.
+
 ## Update (ADR 0034)
 
 The default HTTPS path is a *decided tunnel*, not the broker described below: the
@@ -83,6 +118,9 @@ Two decisions were made here that are easy to get wrong:
 | `envoy.yaml` | Listener 3128, terminating listener 10000, ext_authz, JSON access log, 64 KiB buffer |
 | `extensions/mcp.lua` | Recognise JSON-RPC MCP on request and response; never rewrite a body |
 | `mitm/main.go` | Sign a leaf per SNI, terminate TLS, forward to the inner listener |
+| `mitm/restore.go` | Turn pseudonymised placeholders back into their values in the answer, for JSON and for server-sent events |
+| `mitm/meta_test.go` | The upstream address from the connection trace, the `x-nestbox-upstream-ip-would` lookup, and the router headers |
+| `mitm/livetap_test.go` | The live reader: the sandbox gets the same bytes, the control API gets the text so far |
 | `mitm/main_test.go` | The certificate tests: host SAN, CA signature, cache |
 | `start-egress-proxy.sh` | Start the broker, then `exec envoy` so Envoy stays PID 1 |
 
@@ -153,6 +191,12 @@ One JSON line per stream, from two listeners with different `sni` sources:
 | `mcp_method` / `mcp_tool` | Lua from the request body | `initialize`, `tools/call`, … and `params.name` |
 | `mcp_is_error` / `mcp_result_kind` | Lua from the response body | `true`/`false`, `result` / `error` / `tool_error` when the body was readable |
 | `decision` / `reason` / `rule_id` | ext_authz response headers via `dynamic_metadata_from_headers` | what the decider said. Empty until a decider answers — that is the truth, not a bug |
+| `would_deny` | `x-nestbox-would-deny` via `dynamic_metadata_from_headers` | `1` when only a window or an allow-all mode let the request through although a rule would have denied it |
+
+A CONNECT tunnel has `idle_timeout: 10s` on both routes, so a changed egress mode
+reaches the next connection within seconds instead of five minutes (ADR 0052); the
+Lua filter calls `clearRouteCache()` after setting `x-nestbox-inspect`, because the
+route is chosen from that header.
 
 The decision headers are copied into filter metadata **by Envoy**, so neither the
 sandbox nor the destination host sees them. The previous configuration read them
@@ -216,3 +260,16 @@ inside the container and are unreachable from any network.
 - Body capture into the access log (base64). The bodies are already visible to the
   filters up to 64 KiB; putting them in the log line is a size decision, not a
   capability one.
+
+## The hop that leaves for the internet
+
+`mitm/upstream.go` listens on `127.0.0.1:10002`. Envoy's inner listener routes
+every decrypted request to the `egress_reencrypt` cluster, which is this port; the
+broker encrypts the request again towards the host in its `Host` header and checks
+that server's certificate against the system roots plus `/etc/envoy/mozilla-ca.pem`
+(both root lists). Envoy's own upstream TLS was dropped because it checked a second
+name on a shared address against the first one's and refused wildcard certificates
+(both a bare 503 in the sandbox). Policy is still decided by Envoy's ext_authz
+before the request reaches this port; the port is loopback only.
+| `mitm/livetap.go` | Report a streamed answer live, without changing a byte of it |
+| `mitm/meta.go` | Record the upstream address and the router's own headers |

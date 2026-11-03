@@ -364,7 +364,7 @@ async fn a_recipe_without_an_image_refuses_to_instantiate() {
     let created = builder_service::create(&ctx, &who, shell_recipe(&unique("unbuilt")))
         .await
         .expect("created");
-    let error = builder_service::instantiate(&ctx, &who, created.id, &unique("sandbox"))
+    let error = builder_service::instantiate(&ctx, &who, created.id, &unique("sandbox"), None)
         .await
         .expect_err("an unbuilt recipe has no image");
     assert_eq!(error.status, axum::http::StatusCode::CONFLICT);
@@ -484,7 +484,7 @@ async fn instantiate_places_the_sandbox_with_the_recipes_mount_and_refuses_an_ov
     scope.commit().await.expect("commit");
 
     let sandbox_name = unique("sandbox");
-    let sandbox = builder_service::instantiate(&ctx, &who, recipe.id, &sandbox_name)
+    let sandbox = builder_service::instantiate(&ctx, &who, recipe.id, &sandbox_name, None)
         .await
         .expect("the sandbox is placed");
     assert_eq!(sandbox.name, sandbox_name);
@@ -546,7 +546,7 @@ async fn instantiate_places_the_sandbox_with_the_recipes_mount_and_refuses_an_ov
     .expect("state recorded");
     scope.commit().await.expect("commit");
 
-    let error = builder_service::instantiate(&ctx, &who, too_big.id, &unique("sandbox"))
+    let error = builder_service::instantiate(&ctx, &who, too_big.id, &unique("sandbox"), None)
         .await
         .expect_err("32 GiB do not fit an 8 GiB node");
     assert_eq!(error.status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
@@ -617,7 +617,7 @@ async fn an_instantiated_sandbox_reports_through_its_supervisor_token() {
     scope.commit().await.expect("commit");
 
     let sandbox_name = unique("sandbox");
-    let sandbox = builder_service::instantiate(&ctx, &who, recipe.id, &sandbox_name)
+    let sandbox = builder_service::instantiate(&ctx, &who, recipe.id, &sandbox_name, None)
         .await
         .expect("the sandbox is placed");
 
@@ -813,7 +813,7 @@ async fn an_mcp_assignment_is_attached_when_the_recipe_becomes_a_sandbox() {
     .expect("state recorded");
     scope.commit().await.expect("commit");
 
-    let sandbox = builder_service::instantiate(&ctx, &who, recipe.id, &unique("mcp-sandbox"))
+    let sandbox = builder_service::instantiate(&ctx, &who, recipe.id, &unique("mcp-sandbox"), None)
         .await
         .expect("the sandbox starts");
     let attached = mcp_service::sandbox_servers(&ctx, &who, sandbox.id)

@@ -76,6 +76,15 @@ pub async fn processes(
     Ok(Json(table))
 }
 
+/// A live, read-only view of one sandbox: its sockets and the processes that own them.
+pub async fn live_view(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path((id, kind)): Path<(Uuid, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(metrics_service::live_view(&state.services, &auth.principal, id, &kind).await?))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ProcessActionRequest {
     pub action: String,

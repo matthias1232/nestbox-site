@@ -19,6 +19,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axum::Json;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::header::{HOST, ORIGIN};
@@ -39,6 +40,70 @@ const SUBPROTOCOL: &str = "nestbox-terminal";
 
 #[derive(Debug, Deserialize)]
 pub struct TerminalQuery { pub tab: Option<String> }
+
+/// The tab-list read: `all=1` shows every user's tabs of the sandbox.
+#[derive(Debug, serde::Deserialize)]
+pub struct TabsQuery {
+    /// Any value means "everybody's tabs".
+    #[serde(default)]
+    pub all: Option<u8>,
+}
+
+/// One tab in a PUT body.
+#[derive(Debug, Deserialize)]
+pub struct TabSpec {
+    pub tab_id: String,
+    pub title: String,
+}
+
+/// The complete tab set the console is showing.
+#[derive(Debug, Deserialize)]
+pub struct TabSet {
+    #[serde(default)]
+    pub tabs: Vec<TabSpec>,
+}
+
+/// The tabs one user keeps in this sandbox, and whether their shells are alive.
+///
+/// The list lives on the server so a reload reopens the same terminals on any
+/// machine. `durable` is the sandbox's answer about tmux: without it a tab cannot
+/// survive a reload, and the console says so rather than showing a fresh shell
+/// where an application used to be.
+pub async fn tabs(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    Query(query): Query<TabsQuery>,
+) -> Result<Json<terminal_service::TerminalTabs>, ApiError> {
+    let tabs = terminal_service::tabs(&state.services, &auth.principal, id, query.all.is_some()).await?;
+    Ok(Json(tabs))
+}
+
+/// Replace the tab set. A tab that is absent is closed, so a reload cannot
+/// resurrect one the operator removed.
+pub async fn save_tabs(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+    Json(body): Json<TabSet>,
+) -> Result<Json<terminal_service::TerminalTabs>, ApiError> {
+    let items = body
+        .tabs
+        .into_iter()
+        .map(|tab| (tab.tab_id, tab.title))
+        .collect();
+    let tabs = terminal_service::save_tabs(&state.services, &auth.principal, id, items).await?;
+    Ok(Json(tabs))
+}
+
+/// Which terminal tabs of this sandbox are open, and who is in each.
+pub async fn sessions(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(terminal_service::attached(&state.services, &auth.principal, id).await?))
+}
 
 /// Attach a terminal to a sandbox.
 pub async fn terminal(
@@ -100,7 +165,7 @@ pub async fn terminal(
 ///   no ambient credential for a foreign page to ride on. A session request
 ///   without an `Origin` is the case where a non-browser is trying to use the
 ///   browser's cookie, and it is refused.
-fn refuse_foreign_origin(
+pub(crate) fn refuse_foreign_origin(
     state: &AppState,
     auth: &Auth,
     headers: &HeaderMap,

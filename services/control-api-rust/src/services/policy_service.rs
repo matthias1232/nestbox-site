@@ -10,7 +10,8 @@ use uuid::Uuid;
 use super::{require, ServiceContext};
 use crate::domain::auth::{Permission, Principal};
 use crate::domain::egress::{
-    decide, CheckRequest, CheckResponse, CompiledPolicy, Decision, DecisionReason,
+    decide, CheckRequest, CheckResponse, CompiledPolicy, Decision, DecisionReason, WindowChannel,
+    WindowMode,
 };
 use crate::domain::policy::{
     apply_outcome, rules_from_document, validate_document, ApplyOutcome, DnsRule, EgressMode,
@@ -66,6 +67,31 @@ pub async fn get(
     let policy = store::get(&mut scope, id).await.map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
     Ok(policy)
+}
+
+/// The revision history of one policy, newest first.
+///
+/// The rows are written by `store::insert` and `store::update` inside the same
+/// transaction as the change, so a version cannot exist without its policy and a
+/// policy change cannot exist without its version. This read is what makes the
+/// history visible instead of merely stored.
+pub async fn versions(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    policy_id: Uuid,
+) -> Result<Vec<store::VersionRow>, ApiError> {
+    require(principal, Permission::PolicyRead)?;
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    // Reading the policy first turns "not found" and "no revisions" into two
+    // different answers.
+    store::get(&mut scope, policy_id).await.map_err(ApiError::from)?;
+    let rows = store::list_versions(&mut scope, policy_id)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+    Ok(rows)
 }
 
 /// The active global override, if any.
@@ -298,18 +324,65 @@ pub async fn list_rules(
     Ok(rules)
 }
 
+/// What a caller may change about a sandbox's own rules, windows and egress mode.
+///
+/// An operator or admin may change anything (`PolicyWrite`). A member holds only
+/// `SandboxPolicy`, and only for a sandbox they can see: the lookup runs under row-level
+/// security, so a sandbox that is not theirs is a plain not-found, not a refusal that
+/// confirms it exists. Anything not tied to one sandbox (a shared policy, an
+/// environment-wide window) stays `PolicyWrite`.
+pub(crate) async fn require_sandbox_scope(
+    scope: &mut TenantScope<'_>,
+    principal: &Principal,
+    sandbox_id: Option<Uuid>,
+) -> Result<(), ApiError> {
+    if principal.can(Permission::PolicyWrite) {
+        return Ok(());
+    }
+    match sandbox_id {
+        Some(id) if principal.can(Permission::SandboxPolicy) => {
+            sandbox_store::get(scope, id).await.map_err(ApiError::from)?;
+            Ok(())
+        }
+        _ => Err(ApiError::forbidden(Permission::PolicyWrite.code())),
+    }
+}
+
+/// The sandbox a stored row belongs to, or `None` for a shared one. The table name is a
+/// constant chosen by the caller, never user input.
+async fn sandbox_of_row(
+    scope: &mut TenantScope<'_>,
+    table: &'static str,
+    id: Uuid,
+) -> Result<Option<Uuid>, ApiError> {
+    // A draft names its target by type and id; every other table has a `sandbox_id`.
+    let column = if table == "rule_drafts" {
+        "CASE WHEN target_type = 'sandbox' THEN target_id END"
+    } else {
+        "sandbox_id"
+    };
+    let sql = format!("SELECT {column} FROM {table} WHERE id = $1");
+    let found: Option<Option<Uuid>> = sqlx::query_scalar(&sql)
+        .bind(id)
+        .fetch_optional(scope.connection())
+        .await
+        .map_err(|e| ApiError::from(crate::store::map_sqlx_error(e)))?;
+    Ok(found.flatten())
+}
+
 /// Create a network rule.
 pub async fn create_rule(
     ctx: &ServiceContext,
     principal: &Principal,
     rule: NetworkRule,
 ) -> Result<NetworkRule, ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
     validate_rule(&rule)?;
 
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    require_sandbox_scope(&mut scope, principal, if rule.policy_id.is_some() { None } else { rule.sandbox_id }).await?;
     let created = store::insert_rule(&mut scope, &rule)
         .await
         .map_err(ApiError::from)?;
@@ -323,10 +396,11 @@ pub async fn delete_rule(
     principal: &Principal,
     id: Uuid,
 ) -> Result<(), ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    { let owner = sandbox_of_row(&mut scope, "network_rules", id).await?; require_sandbox_scope(&mut scope, principal, owner).await?; }
     store::delete_rule(&mut scope, id).await.map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
     Ok(())
@@ -368,11 +442,18 @@ pub async fn draft_from_event(
     event: &serde_json::Value,
     sandbox_id: Option<Uuid>,
 ) -> Result<serde_json::Value, ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
 
     let draft = serde_json::json!({
         "action": draft_action_for(event),
-        "host": event.get("destination").and_then(|v| v.as_str()).unwrap_or_default(),
+        // The traffic table names the destination `host`; older callers say
+        // `destination`. Reading only the second one produced a draft with no
+        // host, which an approval turned into a rule that matched nothing.
+        "host": event
+            .get("host")
+            .or_else(|| event.get("destination"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default(),
         "port": event.get("port"),
         "protocol": event.get("protocol").and_then(|v| v.as_str()).unwrap_or("rest"),
         "enforcement": "enforced",
@@ -383,6 +464,7 @@ pub async fn draft_from_event(
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    require_sandbox_scope(&mut scope, principal, sandbox_id).await?;
 
     let id = store::insert_draft(
         &mut scope,
@@ -399,6 +481,92 @@ pub async fn draft_from_event(
     scope.commit().await.map_err(ApiError::from)?;
 
     Ok(serde_json::json!({ "id": id, "draft": draft, "status": "pending" }))
+}
+
+/// Let one destination through for one sandbox, right now.
+///
+/// This is the one-click release: the operator saw a blocked request and wants
+/// it through, so the rule is created enabled in a single step instead of
+/// going through a draft that someone has to find and approve. It is still a
+/// normal stored rule: it shows in the sandbox's rule list, can be deleted, and
+/// is read by the decider and the OpenShell sync like any other.
+///
+/// Idempotent: allowing the same host and port again returns the rule that is
+/// already there, so a double click does not stack copies.
+pub async fn allow_destination(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+    host: &str,
+    port: Option<i32>,
+    protocol: Option<&str>,
+) -> Result<NetworkRule, ApiError> {
+    
+    let host = host.trim().to_ascii_lowercase();
+    if host.is_empty() || host.contains(' ') || host.contains('/') {
+        return Err(ApiError::validation("A destination needs a plain host name."));
+    }
+    if let Some(port) = port {
+        if !(1..=65535).contains(&port) {
+            return Err(ApiError::validation("A port is between 1 and 65535."));
+        }
+    }
+
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    require_sandbox_scope(&mut scope, principal, Some(sandbox_id)).await?;
+    // The caller must be able to see the sandbox: another user's sandbox is not
+    // theirs to open, whatever their policy permission.
+    sandbox_store::get(&mut scope, sandbox_id).await.map_err(ApiError::from)?;
+
+    let existing = store::list_rules(&mut scope).await.map_err(ApiError::from)?;
+    if let Some(rule) = existing.into_iter().find(|rule| {
+        rule.sandbox_id == Some(sandbox_id)
+            && rule.enabled
+            && rule.action == crate::domain::policy::RuleAction::Allow
+            && rule.host.eq_ignore_ascii_case(&host)
+            && rule.port == port
+    }) {
+        scope.commit().await.map_err(ApiError::from)?;
+        return Ok(rule);
+    }
+
+    let mut matchers = vec![crate::domain::policy::Matcher {
+        kind: crate::domain::policy::MatcherKind::Host,
+        value: Some(host.clone()),
+    }];
+    if let Some(port) = port {
+        matchers.push(crate::domain::policy::Matcher {
+            kind: crate::domain::policy::MatcherKind::Port,
+            value: Some(port.to_string()),
+        });
+    }
+    let rule = NetworkRule {
+        id: Uuid::nil(),
+        environment_id: principal.environment_id,
+        policy_id: None,
+        sandbox_id: Some(sandbox_id),
+        name: match port {
+            Some(port) => format!("allow {host}:{port}"),
+            None => format!("allow {host}"),
+        },
+        action: crate::domain::policy::RuleAction::Allow,
+        host,
+        port,
+        protocol: protocol_from(protocol),
+        methods: Vec::new(),
+        matchers,
+        binaries: Vec::new(),
+        enforcement: crate::domain::policy::Enforcement::Enforced,
+        priority: 100,
+        enabled: true,
+        version: 1,
+    };
+    validate_rule(&rule)?;
+    let created = store::insert_rule(&mut scope, &rule).await.map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+    Ok(created)
 }
 
 /// Pending drafts.
@@ -442,11 +610,12 @@ pub async fn decide_draft(
     approve: bool,
     reason: Option<&str>,
 ) -> Result<serde_json::Value, ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
 
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    { let owner = sandbox_of_row(&mut scope, "rule_drafts", id).await?; require_sandbox_scope(&mut scope, principal, owner).await?; }
 
     let decided = store::decide_draft(
         &mut scope,
@@ -525,20 +694,53 @@ pub async fn decide_draft(
     Ok(serde_json::json!({ "id": decided.id, "status": decided.status }))
 }
 
-/// Open a temporary traffic window.
+/// Open a temporary traffic window: the master switch, and observation mode.
+///
+/// A window is scoped to one channel so a DNS window does not open the web, and
+/// carries a mode so observation (allow and record the block) is a different
+/// thing from a bypass (allow quietly). Every channel is switchable: an OpenShell
+/// window is compiled into the sandbox's own policy in audit mode (ADR 0053).
+/// `minutes` of `None` opens the window until somebody closes it.
 pub async fn open_window(
     ctx: &ServiceContext,
     principal: &Principal,
     sandbox_id: Option<Uuid>,
-    minutes: i32,
+    minutes: Option<i32>,
+    mode: &str,
+    channel: &str,
     reason: &str,
 ) -> Result<serde_json::Value, ApiError> {
-    require(principal, Permission::PolicyWrite)?;
-    if !(1..=1440).contains(&minutes) {
-        return Err(ApiError::validation(
-            "The window must last between 1 and 1440 minutes.",
-        ));
+    if let Some(minutes) = minutes {
+        if !(1..=525_600).contains(&minutes) {
+            return Err(ApiError::validation(
+                "A window lasts 1 to 525600 minutes, or is unlimited.",
+            ));
+        }
     }
+    // An environment may bound how long its rules can be suspended (ADR 0053);
+    // the bound is read in its own short transaction, before anything is written.
+    {
+        let mut probe = TenantScope::begin_for(&ctx.pool, principal)
+            .await
+            .map_err(ApiError::from)?;
+        let bound: Option<i32> = store::max_window_minutes_for_environment(&mut probe)
+            .await
+            .map_err(ApiError::from)?;
+        probe.commit().await.map_err(ApiError::from)?;
+        if let Some(bound) = bound {
+            if minutes.map(|minutes| minutes > bound).unwrap_or(true) {
+                return Err(ApiError::validation(format!(
+                    "This environment allows windows of at most {bound} minutes."
+                )));
+            }
+        }
+    }
+    let mode = WindowMode::parse(mode).ok_or_else(|| {
+        ApiError::validation("A window mode is bypass or audit.")
+    })?;
+    let channel = WindowChannel::parse(channel).ok_or_else(|| {
+        ApiError::validation("A window channel is all, proxy, dns, mcp, gateway or openshell.")
+    })?;
     if reason.trim().is_empty() {
         return Err(ApiError::validation(
             "A reason is required for a temporary traffic window.",
@@ -548,24 +750,74 @@ pub async fn open_window(
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    require_sandbox_scope(&mut scope, principal, sandbox_id).await?;
     let (id, expires_at) = store::open_window(
         &mut scope,
         sandbox_id,
         if sandbox_id.is_some() { "sandbox" } else { "environment" },
         reason,
         minutes,
+        mode.as_str(),
+        channel.as_str(),
         Some(principal.user_id),
     )
     .await
     .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
 
+    // An `openshell` window is compiled into the sandbox's own OpenShell policy
+    // (ADR 0053), so the change only reaches the supervisor once it is pushed.
+    // In the background: the window is already open in the store, and a sandbox
+    // that is not on a gateway must not delay the answer.
+    let ctx2 = ctx.clone();
+    tokio::spawn(async move {
+        if let Err(error) = sync_openshell_policies(&ctx2).await {
+            tracing::warn!(
+                code = error.code.0,
+                "OpenShell policies not pushed after a window was opened"
+            );
+        }
+    });
+
+    // A window that changes what a sandbox may reach is a control change the
+    // console and every other viewer hear about at once.
+    ctx.bus.publish(crate::domain::telemetry::LiveEvent::SandboxControlChanged {
+        sandbox_id,
+        environment_id: principal.environment_id,
+        what: "window".to_string(),
+        detail: serde_json::json!({
+            "id": id,
+            "mode": mode.as_str(),
+            "channel": channel.as_str(),
+            "expires_at": expires_at,
+        }),
+    });
+
     Ok(serde_json::json!({
         "id": id,
         "expires_at": expires_at,
         "minutes": minutes,
+        "mode": mode.as_str(),
+        "channel": channel.as_str(),
         "reason": reason,
     }))
+}
+
+/// The traffic windows in force, for the master-switch panel.
+///
+/// One read, so a switch shows the same state the decider is applying: the two
+/// come from the same table and the same window.
+pub async fn windows(
+    ctx: &ServiceContext,
+    principal: &Principal,
+) -> Result<Vec<store::WindowRow>, ApiError> {
+    require(principal, Permission::PolicyRead)?;
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    let rows = store::list_windows(&mut scope).await.map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+    Ok(rows)
 }
 
 /// Close a window early.
@@ -574,14 +826,29 @@ pub async fn close_window(
     principal: &Principal,
     id: Uuid,
 ) -> Result<(), ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    { let owner = sandbox_of_row(&mut scope, "traffic_windows", id).await?; require_sandbox_scope(&mut scope, principal, owner).await?; }
     store::revoke_window(&mut scope, id)
         .await
         .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
+    // Closing a window changes what a sandbox may reach exactly like opening one
+    // does, so the OpenShell policy is pushed again and every console hears it.
+    let ctx2 = ctx.clone();
+    tokio::spawn(async move {
+        if let Err(error) = sync_openshell_policies(&ctx2).await {
+            tracing::warn!(code = error.code.0, "OpenShell policies not pushed after a window closed");
+        }
+    });
+    ctx.bus.publish(crate::domain::telemetry::LiveEvent::SandboxControlChanged {
+        sandbox_id: None,
+        environment_id: principal.environment_id,
+        what: "window".to_string(),
+        detail: serde_json::json!({ "closed": id }),
+    });
     Ok(())
 }
 
@@ -657,7 +924,7 @@ pub async fn create_dns_rule(
     principal: &Principal,
     rule: DnsRule,
 ) -> Result<DnsRule, ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
 
     let pattern = rule.pattern.trim().to_string();
     if pattern.is_empty() {
@@ -675,6 +942,7 @@ pub async fn create_dns_rule(
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    require_sandbox_scope(&mut scope, principal, if rule.policy_id.is_some() { None } else { rule.sandbox_id }).await?;
     let created = store::insert_dns_rule(
         &mut scope,
         &DnsRule { pattern, ..rule },
@@ -691,10 +959,11 @@ pub async fn delete_dns_rule(
     principal: &Principal,
     id: Uuid,
 ) -> Result<(), ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    { let owner = sandbox_of_row(&mut scope, "dns_rules", id).await?; require_sandbox_scope(&mut scope, principal, owner).await?; }
     store::delete_dns_rule(&mut scope, id)
         .await
         .map_err(ApiError::from)?;
@@ -724,36 +993,82 @@ pub async fn egress_mode(
             trust_ca_ref: None,
             enabled: true,
             version: 0,
+            changed_at: None,
+            revert_at: None,
+            revert_to: None,
+            needs_recreate: false,
         });
     scope.commit().await.map_err(ApiError::from)?;
     Ok(setting)
 }
 
 /// Set one sandbox's egress mode.
-pub async fn set_egress_mode(
+pub(crate) async fn set_egress_mode_rebuilding(
     ctx: &ServiceContext,
     principal: &Principal,
     sandbox_id: Uuid,
     mode: EgressMode,
     trust_ca_ref: Option<String>,
 ) -> Result<EgressModeSetting, ApiError> {
-    require(principal, Permission::PolicyWrite)?;
+    
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+    require_sandbox_scope(&mut scope, principal, Some(sandbox_id)).await?;
     let sandbox = sandbox_store::get(&mut scope, sandbox_id)
         .await
         .map_err(ApiError::from)?;
+    // A sandbox built from a recipe cannot be recreated in place (its entrypoint and
+    // supervisor identity are generated when it is created), so it is made again
+    // from its recipe with the new mode: the old one is removed, a new one takes its
+    // name. Persistent folders (login, history) stay. The sandbox gets a new id,
+    // which the answer carries, so the console can follow it.
+    if sandbox.image.starts_with("nestbox-recipe/") {
+        scope.commit().await.map_err(ApiError::from)?;
+        let rebuilt = crate::services::builder_service::rebuild_with_mode(
+            ctx,
+            principal,
+            sandbox.id,
+            mode.as_str(),
+        )
+        .await?;
+        let mut again = TenantScope::begin_for(&ctx.pool, principal)
+            .await
+            .map_err(ApiError::from)?;
+        let setting = store::egress_mode_for_sandbox(&mut again, rebuilt.id)
+            .await
+            .map_err(ApiError::from)?
+            .ok_or_else(|| ApiError::validation("The rebuilt sandbox has no egress setting."))?;
+        again.commit().await.map_err(ApiError::from)?;
+        return Ok(setting);
+    }
     let setting = store::set_egress_mode(
         &mut scope,
         sandbox.id,
         mode,
         trust_ca_ref.as_deref(),
         true,
+        None,
+        None,
     )
     .await
     .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
+    // A mode is not a rule the proxy reads per request: it decides whether the
+    // sandbox has a proxy at all (`direct`) and whether it trusts the node CA
+    // (`transparent`, `hybrid`). Docker fixes both when the container is
+    // created, so a running sandbox is recreated — the same operation a mount
+    // change uses, with the same visible consequence (its non-persistent files
+    // are gone, its persistent roots survive).
+    if sandbox.status == crate::domain::sandbox::SandboxStatus::Running {
+        if let Err(error) = crate::services::sandbox_service::recreate(ctx, principal, sandbox.id).await {
+            tracing::warn!(
+                sandbox = %sandbox.name,
+                code = error.code.0,
+                "egress mode saved, but the sandbox could not be recreated to apply it"
+            );
+        }
+    }
     Ok(setting)
 }
 
@@ -1306,6 +1621,23 @@ pub async fn check(ctx: &ServiceContext, input: CheckInput) -> Result<CheckOutco
         windows,
     };
     let mut response = decide(&request, &policy, now);
+    // The proxy decides tunnel versus TLS termination from this answer, so the
+    // sandbox's own setting has to travel with it. Read through the same scope as
+    // the rules: a mode that belonged to another tenant would be a leak, and an
+    // unset sandbox keeps the `forward_proxy` default.
+    let sandbox_mode = store::egress_mode_for_sandbox(&mut scope, sandbox_id)
+        .await
+        .map_err(ApiError::from)?
+        .map(|setting| setting.mode);
+    response.egress_mode = sandbox_mode
+        .map(|mode| mode.as_str().to_string())
+        .unwrap_or_else(crate::domain::egress::default_egress_mode);
+    // A sandbox whose proxy is switched off allows every connection and records
+    // it: the rules still ran for `would_deny`, but they cannot block (ADR 0053).
+    let allows_everything = sandbox_mode.map(|mode| mode.allows_everything()).unwrap_or(false);
+    if allows_everything {
+        response = crate::domain::egress::allow_everything(response);
+    }
     // A rule compiled from a document has no row; a decision must not cite an id
     // that points at nothing.
     if response.rule_id == Some(Uuid::nil()) {
@@ -1314,7 +1646,7 @@ pub async fn check(ctx: &ServiceContext, input: CheckInput) -> Result<CheckOutco
     // A DNS block is stronger than an allow: a name the operator has said a sandbox
     // must not resolve is not reachable by any network rule or window. (An allow
     // DNS rule adds nothing; the network rules still decide.)
-    if response.decision != Decision::Deny {
+    if response.decision != Decision::Deny && !allows_everything {
         let dns_rules = store::list_dns_rules(&mut scope).await.map_err(ApiError::from)?;
         if let Some(blocked) = crate::domain::policy::dns_rule_for(
             &dns_rules,
@@ -1388,6 +1720,8 @@ fn refusal(explanation: String) -> CheckResponse {
         explanation,
         policy_hash: String::new(),
         cache_ttl_seconds: 0,
+        would_deny: false,
+        egress_mode: crate::domain::egress::default_egress_mode(),
     }
 }
 
@@ -1447,6 +1781,20 @@ mod draft_tests {
 }
 
 fn openshell_proxy_rules(sandbox_id: Uuid, environment_id: Uuid) -> Vec<NetworkRule> {
+    let mut rules = accounting_proxy_rules(sandbox_id, environment_id);
+    rules.extend(gateway_proxy_rules(sandbox_id, environment_id));
+    rules
+}
+
+/// The allow rule for the accounting proxy, when model traffic is routed there.
+fn accounting_proxy_rules(sandbox_id: Uuid, environment_id: Uuid) -> Vec<NetworkRule> {
+    match crate::services::provider_service::accounting_proxy_url() {
+        Some(url) => crate::domain::policy::rules_for_accounting_proxy(&url, sandbox_id, environment_id),
+        None => Vec::new(),
+    }
+}
+
+fn gateway_proxy_rules(sandbox_id: Uuid, environment_id: Uuid) -> Vec<NetworkRule> {
     if !crate::services::sandbox_service::openshell_runtime() {
         return Vec::new();
     }
@@ -1511,10 +1859,20 @@ pub async fn sync_openshell_policies(ctx: &ServiceContext) -> Result<u64, ApiErr
         let mut work = Vec::new();
         for (id, name) in rows.into_iter().filter(|(_, name)| on_gateway.contains(name)) {
             let rules = effective_rules(&mut scope, id, environment_id).await?;
-            work.push((id, name, crate::domain::openshell_policy::compile(&rules)));
+            let mut compiled = crate::domain::openshell_policy::compile(&rules);
+            // A sandbox whose rules are suspended gets the destinations it has
+            // been seen reaching, in audit mode, on top of its own entries. The
+            // fingerprint covers that addition, so switching in and out of the
+            // state pushes a policy on the next pass by itself.
+            let suspended = rules_suspended(&mut scope, id).await?;
+            if suspended {
+                let hosts = suspended_hosts(&mut scope, id, &rules).await?;
+                compiled = crate::domain::openshell_policy::allow_hosts(&compiled, &hosts);
+            }
+            work.push((id, name, compiled, suspended));
         }
         scope.commit().await.map_err(ApiError::from)?;
-        for (id, name, compiled) in work {
+        for (id, name, compiled, suspended) in work {
             let fingerprint = compiled.fingerprint();
             if pushed.lock().map(|map| map.get(&id) == Some(&fingerprint)).unwrap_or(false) {
                 continue;
@@ -1525,7 +1883,12 @@ pub async fn sync_openshell_policies(ctx: &ServiceContext) -> Result<u64, ApiErr
                         map.insert(id, fingerprint);
                     }
                     changed += 1;
-                    tracing::info!(sandbox = %name, skipped = compiled.skipped.len(), "pushed the OpenShell policy");
+                    tracing::info!(
+                        sandbox = %name,
+                        skipped = compiled.skipped.len(),
+                        allow_all = suspended,
+                        "pushed the OpenShell policy"
+                    );
                 }
                 Err(error) => tracing::warn!(sandbox = %name, error = %error, "could not push the OpenShell policy"),
             }
@@ -1533,6 +1896,71 @@ pub async fn sync_openshell_policies(ctx: &ServiceContext) -> Result<u64, ApiErr
     }
     Ok(changed)
 }
+
+/// Whether the sandbox's own rules are suspended, so the supervisor must let
+/// everything through and only record it.
+///
+/// Two ways in: the egress proxy is switched off (`off_allow_all`), or an open
+/// window with channel `all` or `openshell` covers the sandbox. A window on a
+/// narrower channel does not suspend the supervisor: it opens one firewall, not
+/// this one (ADR 0053).
+async fn rules_suspended(scope: &mut TenantScope<'_>, sandbox_id: Uuid) -> Result<bool, ApiError> {
+    let mode = store::egress_mode_for_sandbox(scope, sandbox_id)
+        .await
+        .map_err(ApiError::from)?;
+    if mode.map(|setting| setting.mode.allows_everything()).unwrap_or(false) {
+        return Ok(true);
+    }
+    // `open_windows` filters by the database clock, so an expired window is gone
+    // on the same pass that it expired.
+    let windows = egress_store::open_windows(scope, Some(sandbox_id))
+        .await
+        .map_err(ApiError::from)?;
+    Ok(windows
+        .iter()
+        .any(|window| matches!(window.channel, WindowChannel::All | WindowChannel::Openshell)))
+}
+
+/// The destinations a suspended sandbox may reach: every host its own rules
+/// name, plus every host its telemetry recorded in the last seven days.
+///
+/// OpenShell has no host wildcard (see `openshell_policy::allow_hosts`), so a
+/// policy that allows "everything" has to say what everything is. The rule hosts
+/// are what the operator already allowed; the telemetry hosts are what the
+/// sandbox actually used while it was still blocked, which is the same set the
+/// rule drafts screen offers to turn into rules.
+async fn suspended_hosts(
+    scope: &mut TenantScope<'_>,
+    sandbox_id: Uuid,
+    rules: &[NetworkRule],
+) -> Result<Vec<(String, i32)>, ApiError> {
+    use crate::store::postgres::traffic as traffic_store;
+    let mut hosts: Vec<(String, i32)> = rules
+        .iter()
+        .filter(|rule| rule.enabled && !rule.host.is_empty() && !rule.host.contains('*'))
+        .map(|rule| (rule.host.clone(), rule.port.unwrap_or(443)))
+        .collect();
+    let now = Utc::now();
+    let edges = traffic_store::map_edges(
+        scope,
+        sandbox_id,
+        now - chrono::Duration::days(7),
+        now,
+        500,
+    )
+    .await
+    .map_err(ApiError::from)?;
+    for edge in edges {
+        if !edge.host.is_empty() {
+            hosts.push((edge.host, edge.port));
+        }
+    }
+    hosts.sort();
+    hosts.dedup();
+    Ok(hosts)
+}
+
+
 
 /// A copy of a policy under a new name, never global: a clone is a starting point an
 /// operator edits and assigns, not an override that appears by itself.

@@ -1,0 +1,123 @@
+# The node package: a runner and an egress proxy, the same images the control plane runs.
+# Written by the join script; values come from .env.
+name: nestbox-node
+
+services:
+  sandbox-runner:
+    image: ${REGISTRY}/nestbox-sandbox-runner:latest
+    restart: unless-stopped
+    environment:
+      NESTBOX_RUNNER_REQUIRE_TOKEN: "1"
+      NESTBOX_NODE_TOKEN_FILE: /run/node/node-token
+      NESTBOX_ALLOWED_PREFIXES: "${REGISTRY}/"
+      NESTBOX_IMAGE_REGISTRY: ${REGISTRY}
+      NESTBOX_ALLOWED_IMAGES: "ubuntu:24.04,debian:12-slim,rockylinux:9,fedora:41,alpine:3.21,nestbox-ubuntu-dev:local,nestbox-hermes:local,nestbox-openclaw:local,nestbox-tool-git:local,nestbox-claude-code:local,nestbox-openchamber:local"
+      NESTBOX_RUNTIME_NETWORK: nestbox-node_runtime
+      NESTBOX_PERSISTENT_BASE: /var/lib/nestbox/persistent
+      NESTBOX_CONTROL_API_URL: http://control-api:8000
+      NESTBOX_METRICS_POST_URL: http://control-api:8000/api/v1/internal/metrics/batch
+      NESTBOX_NODE_ID: ${NODE_ID}
+      NESTBOX_ENVIRONMENT_ID: ${ENVIRONMENT_ID}
+      NESTBOX_FORWARD_RANGE: "22200-22299"
+      # Where the control plane asks this node to publish a local model server: the runner opens
+      # the port on the overlay so an inference request can be sent to the node directly.
+      NESTBOX_MODEL_PUBLISH_RANGE: "22300-22399"
+      NESTBOX_FORWARD_BIND: ${OVERLAY_IP}
+      NESTBOX_RUNNER_STATE: /var/lib/nestbox-runner
+      NESTBOX_EGRESS_CA: ${NODE_DIR}/secrets/proxy/egress-ca.crt
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/nestbox/persistent:/var/lib/nestbox/persistent
+      - /var/lib/nestbox/backups:/var/lib/nestbox/backups
+      - /var/lib/nestbox/egress:/var/lib/nestbox/egress
+      - ${NODE_DIR}/secrets/node-token:/run/node/node-token:ro
+      - ${NODE_DIR}/secrets/proxy:${NODE_DIR}/secrets/proxy:ro
+      - ${NODE_DIR}/state:/var/lib/nestbox-runner
+      - /proc:/host/proc:ro
+    # The runner is reached only over the overlay: bound to this node's overlay address.
+    ports:
+      - "${OVERLAY_IP}:9000:9000"
+    networks:
+      - control
+      - runtime
+
+  egress-proxy:
+    image: ${REGISTRY}/nestbox-egress-proxy:latest
+    restart: unless-stopped
+    environment:
+      NESTBOX_NODE_NAME: ${NODE_NAME}
+      NESTBOX_NODE_ID: ${NODE_ID}
+      NESTBOX_NODE_TOKEN_FILE: /run/node/node-token
+      NESTBOX_EGRESS_CA_CERT: /run/node/egress-ca.crt
+      NESTBOX_EGRESS_CA_KEY: /run/node/egress-ca.key
+    volumes:
+      - ${NODE_DIR}/secrets/proxy:/run/node:ro
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    expose:
+      - "3128"
+    depends_on:
+      - control-api
+    networks:
+      - control
+      - runtime
+
+  # The proxy and the runner call the control plane as `control-api:8000`. On a node that name
+  # is a forwarder to the control plane's address inside the overlay, so neither needs to know
+  # it is not on the same machine.
+  control-api:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: ["TCP-LISTEN:8000,fork,reuseaddr", "TCP:${CONTROL_HOST}:${CONTROL_PORT}"]
+    networks:
+      - control
+      - runtime
+
+  # The hub's shared services under the names sandboxes use on the appliance (ADR 0057): a
+  # sandbox that runs on this node asks for `mcp-hub:8080`, `media-mcp:8080` or
+  # `accounting-proxy:8099` and reaches the hub without knowing it is not on the same machine.
+  mcp-hub:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: ["TCP-LISTEN:8080,fork,reuseaddr", "TCP:${HUB_IP}:18088"]
+    networks:
+      - control
+      - runtime
+
+  media-mcp:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: ["TCP-LISTEN:8080,fork,reuseaddr", "TCP:${HUB_IP}:18089"]
+    networks:
+      - control
+      - runtime
+
+  accounting-proxy:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: ["TCP-LISTEN:8099,fork,reuseaddr", "TCP:${HUB_IP}:18099"]
+    networks:
+      - control
+      - runtime
+
+  # The same services on the host's loopback, for OpenShell sandboxes: they address them as
+  # `host.openshell.internal:<port>` with the port the appliance uses (18087 egress proxy, 18088
+  # MCP hub, 18089 media renderer, 18099 accounting proxy). The last socat runs in the foreground
+  # so the container stays up; the others end with it.
+  hub-forward-host:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        socat TCP-LISTEN:18087,bind=127.0.0.1,fork,reuseaddr TCP:${HUB_IP}:18087 &
+        socat TCP-LISTEN:18088,bind=127.0.0.1,fork,reuseaddr TCP:${HUB_IP}:18088 &
+        socat TCP-LISTEN:18089,bind=127.0.0.1,fork,reuseaddr TCP:${HUB_IP}:18089 &
+        exec socat TCP-LISTEN:18099,bind=127.0.0.1,fork,reuseaddr TCP:${HUB_IP}:18099
+
+networks:
+  control: {}
+  runtime:
+    internal: true

@@ -45,6 +45,13 @@ impl ErrorCode {
     /// WebSocket is not covered by the same-origin policy, so this check is the
     /// only thing standing between a logged-in operator and a page they visit.
     pub const SANDBOX_TERMINAL_ORIGIN: Self = Self("sandbox.terminal_origin_refused");
+    /// A desktop-only call reached a sandbox whose image has no desktop pack
+    /// (no `nestbox-display`, no X server). The caller's next step is another
+    /// sandbox, not a retry.
+    pub const SANDBOX_NO_DESKTOP: Self = Self("sandbox.no_desktop");
+    /// The display layout was changed by somebody else since the caller read it;
+    /// `details` carries the layout that is on the screen now.
+    pub const DISPLAY_CHANGED: Self = Self("display.changed");
 
     pub const POLICY_NOT_FOUND: Self = Self("policy.not_found");
     pub const POLICY_INVALID: Self = Self("policy.invalid");
@@ -65,7 +72,12 @@ impl ErrorCode {
     /// The install is between the reservation and the answer; wait or let it fail.
     pub const MODEL_INSTALL_IN_PROGRESS: Self = Self("model.install_in_progress");
 
+    /// A named site is not part of the caller's data center.
+    pub const SITE_NOT_FOUND: Self = Self("site.not_found");
     pub const NODE_NOT_FOUND: Self = Self("node.not_found");
+    /// A node of that name is already registered on this installation. Its own code, so a
+    /// client does not read it as a sandbox name clash.
+    pub const NODE_NAME_TAKEN: Self = Self("node.name_taken");
     pub const CUDAX_COMPONENT_NOT_FOUND: Self = Self("cudax.component_not_found");
     pub const CUDAX_INSTALL_NOT_FOUND: Self = Self("cudax.install_not_found");
     pub const COMPONENT_NOT_FOUND: Self = Self("component.not_found");

@@ -95,3 +95,6 @@ pool and trusts the event's own `environment_id` — exactly like
 `telemetry::insert`. It still redacts the arguments and bounds the result before
 the row exists, because a write path that relies on its caller is a write path
 that will be called without the check.
+
+`agent_auth.rs` and `presence.rs` are the workbox's tables; `node_gateway.rs` the tunnel and lock of
+a node. The rest of the workbox's reads live in the module of the table they touch.

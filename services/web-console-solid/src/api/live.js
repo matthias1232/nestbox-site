@@ -22,7 +22,7 @@ export function snapshot() {
 // so both the default message listener and the two named ones are attached; a
 // single frame can only fire one of them, and a plain data frame still arrives.
 export function stream(handlers) {
-  const source = new EventSource('/api/v1/live/agents');
+  const source = new EventSource(environmentUrl('/api/v1/live/agents'));
 
   const onFrame = (event) => {
     try {

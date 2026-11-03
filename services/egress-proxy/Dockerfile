@@ -18,10 +18,23 @@ ENV CGO_ENABLED=0 \
     GOFLAGS=-mod=mod \
     GOPROXY=off
 
-COPY mitm/go.mod mitm/main.go mitm/main_test.go ./
+COPY mitm/go.mod mitm/main.go mitm/main_test.go mitm/upstream.go mitm/upstream_test.go \
+    mitm/dlp.go mitm/dlp_test.go mitm/restore.go mitm/restore_test.go \
+    mitm/livetap.go mitm/meta.go ./
 RUN go vet ./... \
  && go test ./... \
  && go build -trimpath -ldflags='-s -w' -o /out/egress-mitm .
+
+# The roots Envoy checks real servers against. The envoy image carries a bundle
+# from its build date; a server that moved to a newer intermediate (Let's
+# Encrypt's 2025 "YE" chain, for one) then fails with CERTIFICATE_VERIFY_FAILED
+# and the sandbox sees a bare 503. The current Mozilla list is fetched here and
+# checked against the checksum published beside it.
+FROM golang:1.23-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db AS roots
+RUN cd /tmp \
+ && curl -fsSL --proto '=https' --tlsv1.2 -o cacert.pem https://curl.se/ca/cacert.pem \
+ && curl -fsSL --proto '=https' --tlsv1.2 -o cacert.pem.sha256 https://curl.se/ca/cacert.pem.sha256 \
+ && sha256sum -c cacert.pem.sha256
 
 FROM envoyproxy/envoy:v1.31-latest@sha256:caa5b411be1633b90023592a34a7e010c933d6e60206c758f631485e53006865
 
@@ -32,6 +45,13 @@ COPY envoy.yaml /etc/envoy/envoy.yaml
 COPY extensions/ /etc/envoy/extensions/
 
 COPY --from=mitm /out/egress-mitm /usr/local/bin/egress-mitm
+COPY --from=roots /tmp/cacert.pem /tmp/mozilla-ca.pem
+# Both lists, not one: BoringSSL follows the chain a server sends. api.anthropic.com
+# sends GTS Root R4 cross-signed by GlobalSign, which only the older list still
+# has; a server on a 2025 Let's Encrypt chain needs the newer one. OpenSSL finds
+# either path, Envoy does not, so the trust file is the union.
+RUN cat /etc/ssl/certs/ca-certificates.crt /tmp/mozilla-ca.pem > /etc/envoy/mozilla-ca.pem \
+ && rm /tmp/mozilla-ca.pem
 COPY start-egress-proxy.sh /usr/local/bin/start-egress-proxy.sh
 RUN chmod 0755 /usr/local/bin/start-egress-proxy.sh /usr/local/bin/egress-mitm
 

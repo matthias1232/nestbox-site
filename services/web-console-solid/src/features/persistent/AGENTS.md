@@ -42,3 +42,13 @@ Styles live in `src/styles/recipes-persist.css`, imported by the page.
 
 `App.jsx` is not part of this package: the integrator adds the route and the
 `features/AGENTS.md` row. The page exports a default component with no props.
+
+Restyle (F25): `PersistentPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `BackupsSection.jsx` | Backups of one persistent root: take one, see the list, restore, delete. |
+| `MountsMatrix.jsx` | Folders × sandboxes: the whole map at a glance. |

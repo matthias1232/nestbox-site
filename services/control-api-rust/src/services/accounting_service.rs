@@ -309,6 +309,12 @@ pub async fn set_price(
     store::upsert_price(&mut scope, Some(principal.environment_id), model, &price)
         .await
         .map_err(ApiError::from)?;
+    // The calls already stored without a price get one now, so the page does not
+    // show n/a for last week's traffic of a model that has a price today.
+    let repriced = store::reprice_model(&mut scope, model, &price)
+        .await
+        .map_err(ApiError::from)?;
+    tracing::info!(model, repriced, "price set, earlier calls priced");
     crate::store::postgres::audit::record(
         &mut scope,
         crate::store::postgres::audit::NewAuditEvent {
@@ -597,4 +603,250 @@ mod tests {
         assert_eq!(MAX_RETENTION_DAYS, 3_650);
         assert!(AccountingSettings::default().invalid_reason().is_none());
     }
+}
+
+
+// ---------------------------------------------------------------------------
+// Usage read off the transparent proxy
+// ---------------------------------------------------------------------------
+
+/// One model call as the egress proxy saw it.
+pub struct ObservedCall {
+    /// The traffic event the counters were read from (idempotency key).
+    pub id: Uuid,
+    pub environment_id: Uuid,
+    pub sandbox_id: Uuid,
+    pub host: String,
+    pub path: Option<String>,
+    pub status: i32,
+    pub latency_ms: i32,
+    pub model: Option<String>,
+    pub usage: crate::domain::accounting::ObservedUsage,
+    pub cache_markers: i32,
+    pub auth: crate::domain::accounting::AuthKind,
+    pub conversation: Option<String>,
+}
+
+/// The provider a host belongs to, by name. Unknown hosts keep their own name, so
+/// a self-hosted gateway still appears as itself instead of vanishing.
+pub fn provider_of(host: &str) -> String {
+    let host = host.trim().to_ascii_lowercase();
+    let host = host.split(':').next().unwrap_or("");
+    match host {
+        "api.anthropic.com" => "anthropic".into(),
+        "api.openai.com" => "openai".into(),
+        "chatgpt.com" | "chat.openai.com" => "codex".into(),
+        "generativelanguage.googleapis.com" => "google".into(),
+        "openrouter.ai" => "openrouter".into(),
+        "api.mistral.ai" => "mistral".into(),
+        "api.groq.com" => "groq".into(),
+        "api.x.ai" => "xai".into(),
+        "api.deepseek.com" => "deepseek".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Store a call the egress proxy read, priced.
+///
+/// Only a call made with an API key gets a `cost_micros`. A call made through a
+/// signed-in account has no per-token price (the subscription is the price), so
+/// its list-price figure is an *estimate*, kept in its own column and shown on its
+/// own line. A call with no known price has neither, and is counted as unpriced.
+///
+/// Best effort for the caller: the telemetry batch has already stored the traffic
+/// row, and a failure here must not turn into a refused batch.
+pub async fn record_observed(ctx: &ServiceContext, call: ObservedCall) -> Result<(), ApiError> {
+    use crate::domain::accounting::{AuthKind, observed_cost_micros};
+
+    let usage = call.usage.normalised();
+    if usage.prompt() + usage.output <= 0 {
+        return Ok(());
+    }
+    let mut scope = TenantScope::begin(&ctx.pool, call.environment_id)
+        .await
+        .map_err(ApiError::from)?;
+    if !store::sandbox_exists(&mut scope, call.sandbox_id)
+        .await
+        .map_err(ApiError::from)?
+    {
+        return Ok(());
+    }
+    let price = match call.model.as_deref() {
+        Some(model) => price_for(&mut scope, model).await?,
+        None => None,
+    };
+    let (cost, estimate, source) = match &price {
+        Some((price, source)) => {
+            let figure = observed_cost_micros(&usage, Some(price));
+            match call.auth {
+                AuthKind::Key => (figure, None, *source),
+                _ => (None, figure, *source),
+            }
+        }
+        None => (None, None, PriceSource::Unknown),
+    };
+    let provider = provider_of(&call.host);
+    store::insert_observed(
+        &mut scope,
+        &store::ObservedRow {
+            id: call.id,
+            sandbox_id: call.sandbox_id,
+            provider: &provider,
+            model: call.model.as_deref(),
+            endpoint: call.path.as_deref().map(|path| path.split('?').next().unwrap_or(path)),
+            status: call.status,
+            latency_ms: call.latency_ms,
+            usage,
+            cache_markers: call.cache_markers,
+            auth: call.auth,
+            conversation: call.conversation.as_deref(),
+            cost_micros: cost,
+            estimated_cost_micros: estimate,
+            price_source: source,
+        },
+    )
+    .await
+    .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+    Ok(())
+}
+
+/// The answer to "how much, of what, by whom".
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UsageReport {
+    pub group_by: String,
+    pub since: chrono::DateTime<Utc>,
+    pub rows: Vec<store::UsageRow>,
+    pub totals: store::UsageRow,
+}
+
+/// Usage over a window, grouped by one dimension.
+///
+/// An admin sees every sandbox of the environment; anyone else sees their own.
+/// `sandbox_id` narrows to one sandbox and is checked to exist first.
+pub async fn usage(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    timeframe: Timeframe,
+    group_by: &str,
+    sandbox_id: Option<Uuid>,
+) -> Result<UsageReport, ApiError> {
+    require(principal, Permission::TelemetryRead)?;
+    let group = store::UsageGroup::parse(group_by).ok_or_else(|| {
+        ApiError::validation(
+            "group_by is provider, model, sandbox, auth, day, owner, site, organization, agent or conversation.",
+        )
+    })?;
+    let since = timeframe.since(Utc::now());
+    let owner = if principal.role == crate::domain::auth::Role::Admin {
+        None
+    } else {
+        Some(principal.user_id)
+    };
+
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    ensure_sandbox(&mut scope, sandbox_id).await?;
+    let rows = store::usage_breakdown(&mut scope, group, sandbox_id, owner, since)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+
+    let mut totals = store::UsageRow {
+        key: "total".into(),
+        requests: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cache_write_1h_tokens: 0,
+        reasoning_tokens: 0,
+        cache_markers: 0,
+        cost_micros: None,
+        estimated_cost_micros: None,
+        unpriced_requests: 0,
+        account_requests: 0,
+        key_requests: 0,
+        cache_hit_rate: 0.0,
+    };
+    for row in &rows {
+        totals.requests += row.requests;
+        totals.prompt_tokens += row.prompt_tokens;
+        totals.completion_tokens += row.completion_tokens;
+        totals.cache_read_tokens += row.cache_read_tokens;
+        totals.cache_write_tokens += row.cache_write_tokens;
+        totals.cache_write_1h_tokens += row.cache_write_1h_tokens;
+        totals.reasoning_tokens += row.reasoning_tokens;
+        totals.cache_markers += row.cache_markers;
+        totals.unpriced_requests += row.unpriced_requests;
+        totals.account_requests += row.account_requests;
+        totals.key_requests += row.key_requests;
+        totals.cost_micros = sum_option(totals.cost_micros, row.cost_micros);
+        totals.estimated_cost_micros = sum_option(totals.estimated_cost_micros, row.estimated_cost_micros);
+    }
+    if totals.prompt_tokens > 0 {
+        totals.cache_hit_rate = totals.cache_read_tokens as f64 / totals.prompt_tokens as f64;
+    }
+    Ok(UsageReport { group_by: group_by.to_string(), since, rows, totals })
+}
+
+/// Sum that stays `None` while nothing contributed, so "no price" is not "zero".
+fn sum_option(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0).saturating_add(b.unwrap_or(0))),
+    }
+}
+
+#[cfg(test)]
+mod observed_service_tests {
+    use super::*;
+
+    #[test]
+    fn hosts_map_to_providers_and_unknown_hosts_keep_their_name() {
+        assert_eq!(provider_of("api.anthropic.com"), "anthropic");
+        assert_eq!(provider_of("API.OpenAI.com:443"), "openai");
+        assert_eq!(provider_of("chatgpt.com"), "codex");
+        assert_eq!(provider_of("llm.internal.example"), "llm.internal.example");
+    }
+
+    #[test]
+    fn a_sum_with_nothing_in_it_is_not_zero() {
+        assert_eq!(sum_option(None, None), None);
+        assert_eq!(sum_option(None, Some(5)), Some(5));
+        assert_eq!(sum_option(Some(2), Some(3)), Some(5));
+    }
+}
+
+
+/// The price list and the models that still lack a price.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PriceList {
+    pub prices: Vec<store::PriceEntry>,
+    pub unpriced: Vec<UnpricedModel>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UnpricedModel {
+    pub model: String,
+    pub calls: i64,
+    pub tokens: i64,
+}
+
+/// What prices exist and which used models have none (last 30 days).
+pub async fn prices(ctx: &ServiceContext, principal: &Principal) -> Result<PriceList, ApiError> {
+    require(principal, Permission::TelemetryRead)?;
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    let prices = store::list_prices(&mut scope).await.map_err(ApiError::from)?;
+    let unpriced = store::unpriced_models(&mut scope, Utc::now() - chrono::Duration::days(30))
+        .await
+        .map_err(ApiError::from)?
+        .into_iter()
+        .map(|(model, calls, tokens)| UnpricedModel { model, calls, tokens })
+        .collect();
+    scope.commit().await.map_err(ApiError::from)?;
+    Ok(PriceList { prices, unpriced })
 }

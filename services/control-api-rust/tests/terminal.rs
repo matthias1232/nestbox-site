@@ -187,6 +187,10 @@ fn spec(name: &str) -> SandboxSpec {
         pids_limit: 256,
         mounts: Vec::new(),
         gpu_count: 0,
+        egress_mode: "forward_proxy".into(),
+        node_id: None,
+        memory_reservation: None,
+        cpu_shares: None,
     }
 }
 
@@ -288,7 +292,7 @@ async fn a_session_is_recorded_and_closed_with_a_reason_and_no_content() {
 }
 
 #[tokio::test]
-async fn the_fifth_terminal_in_one_sandbox_is_refused() {
+async fn the_fifth_terminal_of_one_user_in_one_sandbox_is_refused() {
     let Some(pool) = pool().await else {
         eprintln!("skipping: TEST_DATABASE_URL is not set");
         return;
@@ -301,7 +305,9 @@ async fn the_fifth_terminal_in_one_sandbox_is_refused() {
     let ctx = context(&pool, &runtime);
     let principal = principal(environment);
 
-    for slot in 0..terminal_service::MAX_PER_SANDBOX {
+    // One person may keep four shells here; the sandbox itself has room for more,
+    // because an administrator joins the same machine (ADR 0056).
+    for slot in 0..terminal_service::MAX_PER_USER_IN_SANDBOX {
         terminal_service::open(&ctx, &principal, sandbox_id, Limits::default(), String::new())
             .await
             .unwrap_or_else(|error| panic!("slot {slot} should be open: {}", error.message));
@@ -309,7 +315,7 @@ async fn the_fifth_terminal_in_one_sandbox_is_refused() {
 
     let refusal = terminal_service::open(&ctx, &principal, sandbox_id, Limits::default(), String::new())
         .await
-        .expect_err("the fifth terminal must be refused");
+        .expect_err("the fifth terminal of one user must be refused");
     assert_eq!(refusal.code, ErrorCode::SANDBOX_TERMINAL_LIMIT);
     assert_eq!(refusal.status, axum::http::StatusCode::TOO_MANY_REQUESTS);
     assert!(
@@ -317,7 +323,7 @@ async fn the_fifth_terminal_in_one_sandbox_is_refused() {
         "the message names the limit: {}",
         refusal.message
     );
-    assert_eq!(refusal.details["scope"], "sandbox");
+    assert_eq!(refusal.details["scope"], "user_in_sandbox");
     assert_eq!(refusal.details["open"], 4);
 }
 

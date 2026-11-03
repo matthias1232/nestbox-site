@@ -85,6 +85,33 @@ pub async fn count_open_in_sandbox(
 }
 
 /// How many terminals one user has open, across all sandboxes.
+/// Open terminals one person has in one sandbox right now.
+pub async fn count_open_for_user_in_sandbox(
+    scope: &mut TenantScope<'_>,
+    sandbox_id: Uuid,
+    user_id: Uuid,
+    stale_after: Duration,
+) -> Result<i64, StoreError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*)
+           FROM sandbox_sessions
+          WHERE environment_id = $1
+            AND sandbox_id = $2
+            AND user_id = $3
+            AND kind = $4
+            AND closed_at IS NULL
+            AND opened_at > now() - ($5::double precision * interval '1 second')",
+    )
+    .bind(scope.environment_id())
+    .bind(sandbox_id)
+    .bind(user_id)
+    .bind(KIND_TERMINAL)
+    .bind(stale_after.as_secs_f64())
+    .fetch_one(scope.connection())
+    .await?;
+    Ok(count)
+}
+
 pub async fn count_open_for_user(
     scope: &mut TenantScope<'_>,
     user_id: Uuid,

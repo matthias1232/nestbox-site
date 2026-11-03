@@ -109,6 +109,10 @@ pub struct CreateRequest {
     pub cpu_limit: f64,
     #[serde(default = "default_pids")]
     pub pids_limit: i64,
+    /// GPUs to hand to the container. Omitted means none; a node that cannot hand
+    /// them out refuses the request.
+    #[serde(default)]
+    pub gpu_count: Option<u32>,
     /// The node to place the sandbox on, by name. Omitted means the local node.
     #[serde(default)]
     pub node: Option<String>,
@@ -116,6 +120,10 @@ pub struct CreateRequest {
     /// key or the user signs in themselves inside the sandbox.
     #[serde(default)]
     pub login: Option<String>,
+    /// The egress mode this sandbox is created for; it decides the runtime.
+    /// `transparent` and `hybrid` run on Docker, `forward_proxy` on the gateway.
+    #[serde(default)]
+    pub egress_mode: Option<String>,
 }
 
 fn default_memory() -> String {
@@ -146,9 +154,11 @@ pub async fn create(
             memory_limit: body.memory_limit,
             cpu_limit: body.cpu_limit,
             pids_limit: body.pids_limit,
+            gpu_count: body.gpu_count,
             node: body.node,
             parent_id: body.parent_id,
             login: body.login,
+            egress_mode: body.egress_mode,
         },
     )
     .await?;

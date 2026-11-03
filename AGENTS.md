@@ -26,7 +26,7 @@ in-memory store, and no import path. If you need state, it belongs in a table.
 | `deploy/` | Compose files, scripts, secrets layout. |
 | `docs/adr/` | Architecture decision records. Read these before changing a design. |
 | `docs/brain/` | Project knowledge for agents, in prose. |
-| `docs/architecture/` | Published architecture notes and data flow. |
+| `docs/architecture/` | Published architecture notes and data flow; `privacy-module.md` describes the content check end to end. |
 | `graphify-out/` | Generated knowledge graph. Do not edit by hand. |
 | `index.html`, `docs/` | The public website. It is the product specification. |
 

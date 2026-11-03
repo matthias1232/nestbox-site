@@ -57,6 +57,11 @@ shape it:
    hash, and a cache TTL of zero; a database failure is a 5xx, which the proxy's
    `ext_authz` filter turns into a refusal on its own.
 
+Opening or closing a window is a control change: `open_window` publishes
+`SandboxControlChanged { what: "window" }` and pushes the OpenShell policy in the
+background, because an `openshell` window only reaches the supervisor through
+that push (ADR 0053).
+
 ## Files
 
 | File | Responsibility |
@@ -64,31 +69,33 @@ shape it:
 | `auth_service.rs` | Login, logout, session validation, principal building |
 | `access_control.rs` | Permission evaluation and the refusal message |
 | `sandbox_service.rs` | Lifecycle, placement, bulk actions, and the proxy environment every sandbox receives |
-| `provider_service.rs` | Provider profiles with their probe status, the pending profile an install creates, the in-use check on delete, and the reachable-only inference environment a sandbox receives |
+| `provider_service.rs` | Provider profiles with their probe status, the pending profile an install creates (by container name locally, by overlay address on a joined node), the in-use check on delete, and the reachable-only inference environment a sandbox receives |
 | `agent_service.rs` | Agents inside a sandbox: which packs may join, homes and their persistence, the supervisor command |
 | `policy_service.rs` | Validation, diff, scope rules, global override, and the egress decider (`check`: windows, rules, one evidence row; `authenticate_node`; `deployment`) |
-| `telemetry_service.rs` | Ingest (one event, and the proxy's access-log batch with bodies and MCP calls), live publish, history queries |
-| `traffic_service.rs` | Traffic rows with window counts, the map, one body, MCP calls, effective rules with the deployment comparison, live edges for the cluster graph (`feat/live-traffic`) |
+| `telemetry_service.rs` | Ingest (one event, and the proxy's access-log batch with bodies and MCP calls, including the `would_deny` verdict), live publish, history queries; honours `sandboxes.telemetry_mute_until` / `telemetry_mute_bodies_until` (B11), and a full mute still stores a denied network or DNS event without its bodies (P09, ADR 0066 addendum) |
+| `traffic_service.rs` | Traffic rows with window counts, per sandbox and for the whole environment (the Live traffic page), the map, one body, MCP calls, effective rules with the deployment comparison, live edges for the cluster graph (`feat/live-traffic`) |
 | `geography_service.rs` | RDAP lookup per destination host, cached; runs after a traffic read and never blocks it |
-| `model_service.rs` | Hardware probing through a node's runner (CPU, RAM, GPU, unified pool), fit against a node's free budget, facets, catalog filters, installs and their reservations, editing an install (reserved RAM, on/off; off frees the memory) |
+| `model_service.rs` | Hardware probing through a node's runner (CPU, RAM, GPU, unified pool), fit against a node's free budget, facets, catalog filters, installs and their reservations (fetched and served on the install's own node, profile corrected to the published address), editing an install (reserved RAM, on/off; off frees the memory) |
 | `node_service.rs` | The nodes list, one node with its budget, a node's sandboxes, name-or-id resolution, display rename |
 | `pack_service.rs` | Baselines, agent packs, and tool catalog as data; pack defaults by row, baseline compatibility, package-name resolution |
-| `builder_service.rs` | Recipes: validation against the catalogs, the Dockerfile generator, content hash, build job, package verification, instantiate with MCP attachments |
+| `builder_service.rs` | Recipes: validation against the catalogs, the Dockerfile generator, content hash, build job, package verification, instantiate with MCP attachments, and `recreate_in_place` for an existing recipe sandbox (a move) |
 | `catalogue_service.rs` | The live package catalogue: permission, baseline resolution, fragment validation, delegation to the runtime |
 | `template_service.rs` | Image templates: sharing and default rules, validation, apply-to-recipe |
 | `selection.rs` | The one validation for package names, repository URLs/keys and template names |
 | `gateway_service.rs` | Registry, settings, drift, sync |
-| `job_service.rs` | Job creation and progress |
+| `job_service.rs` | Job creation and progress; `settle_interrupted` closes the Control Center jobs (bulk action, bulk model install, drain, quick deploy) a restart left `pending`/`running`, so the dock stops naming one that can never move |
 | `catalog_sync/` | The model catalogue is rebuilt from Hugging Face, Ollama, NGC, and NIM, never over a curated row |
 | `schedule_service.rs` | Schedule evaluation and runs |
-| `metrics_service.rs` | Sample ingest, ranged query, rollup, partition maintenance, the two metrics jobs |
+| `metrics_service.rs` | Sample ingest, ranged query, rollup, partition maintenance, the two metrics jobs; `desktop_target` decides the desktop permission (drive needs `SandboxExec`, view only needs `SandboxRead`) and whether the stream really is view-only |
 | `inventory_service.rs` | Snapshot storage and age, the allow-list that keeps a value out, never an environment value |
 | `access_service.rs` | SSH key pair as a file with a locator, port pool, sessions; pushes the port set and key to the runner and records what it opened |
 | `stack_topology_service.rs` | Reads the facts for the stack diagram (timeouts, degrade to unknown) and the appliance components |
 | `mcp_service.rs` | Registry validation, attachments, discovery from inside the sandbox, and the agent-config rewrite an attach/detach triggers |
-| `media_service.rs` | Media settings, the effective model per sandbox, the provider call, renders and their assets |
+| `media_service.rs` | Media settings, the effective model per sandbox, the provider call, renders and their assets; `sandbox_environment` answers the data center a named sandbox lives in (one → use it, two → 409, none → 404, function missing → the single-data-center fallback), which is the tenant for every appliance-side caller that has no principal |
 | `persist_service.rs` | Persistent roots: derived host paths, mounts, the one-read-write rule, honest usage |
-| `terminal_service.rs` | The browser terminal: permission, the four-per-sandbox and twenty-per-user limits, the idle clock, the session row and its two audit events (`feat/terminal`) |
+| `terminal_service.rs` | The browser terminal: permission, the four-per-sandbox and twenty-per-user limits, the idle clock, the session row and its two audit events, and the stored tab list a reload reopens (`feat/terminal`) |
+| `display_service.rs` | The monitor layout of a desktop sandbox: `get` reads it with `nestbox-display get`, `set` validates it, applies it with `nestbox-display set` (the actor travels as `NESTBOX_DISPLAY_ACTOR`), audits `sandbox.display`, publishes `SandboxControlChanged { what: "display" }`, and refuses a stale `expected_applied_at` with `409 display.changed`; a sandbox without the tool is `409 sandbox.no_desktop` |
+| `session_service.rs` | The login overview of running sandboxes: the in-sandbox probe, the assessed login, and per agent the chosen mode with `signed_in` |
 
 ## Probing a node
 
@@ -147,6 +154,39 @@ Four decisions worth keeping:
 created through a different path, and a path that forgot the proxy would be a
 sandbox that is isolated and therefore useless, with nothing in the UI saying
 why.
+
+## Trust files, agent files, and where a sign-in mode acts
+
+The container is built once and never gains a mount, so everything a later mode
+switch could need is present from the start:
+
+1. **Both CA files, mounted by the runner, referenced by `create`/`recreate`.**
+   `EGRESS_CA_IN_SANDBOX` is the CA alone and is what `NODE_EXTRA_CA_CERTS` gets;
+   `CA_BUNDLE_IN_SANDBOX` is the public roots plus that CA and is what the clients
+   which *replace* their store get (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+   `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`). `egress_environment_for`
+   adds the trust variables for every mode with `uses_proxy()`, not only for the
+   modes that read TLS today, so switching to `transparent` needs no recreate.
+2. **The container keeps the gateway keys.** A sign-in mode is a launcher's
+   decision (ADR 0054): `write_agent_files` strips the gateway settings from the
+   map that feeds the *config files*, and the launcher strips the variables for a
+   `subscription` agent. `apply_login_choice` is for config files only.
+3. **`sandbox_service::write_agent_files` is the one place that writes agent
+   files**, for create, recreate, `reconfigure_pack` and a mode switch. It reads
+   the sandbox, its egress mode and every pack it holds (the pack's own plus one
+   per recipe agent), builds the environment from `provider_service`, strips by
+   mode, adds the proxy variables, writes each pack's files with the MCP servers,
+   and installs the launcher. It returns `Ok(0)` for a sandbox that is not
+   running: the files are written the next time it runs.
+4. **The spec, not the request, is what a recreate reproduces.** `command`,
+   `gpu_count`, `memory_reservation` and `cpu_shares` are stored at create and
+   read back in `recreate`. A GPU request on a node with `container_gpu == false`
+   is a 409 before a row exists.
+5. **Sign-in rules come from one place.** `create` calls
+   `agent_auth_service::sync_login_rules` after the commit instead of inserting
+   `Sign-in: <host>` rules itself, so a mode switch and a create cannot disagree.
+6. **Model readiness is spawned, not awaited**, after create, recreate and a
+   successful start.
 
 ## Persistence rules
 
@@ -274,3 +314,133 @@ redactor masks every key containing "session" (so a session cookie can never
 leak), and a masked reference reads like a redacted secret instead of a pointer.
 The row itself is in `sandbox_sessions`; `terminal_id` is the join key a reviewer
 uses to find it.
+
+## Multi-tenant and multi-node services (ADR 0044-0050)
+
+| File | Responsibility |
+|---|---|
+| `tenancy_service.rs` | Customers, data centers, sites, sandbox grants, invitations |
+| `oidc_service.rs` | Sign-in through an identity provider: PKCE flow, profile parsing, who a stranger is |
+| `node_join_service.rs` | Join tokens, the join script, overlay addresses, the hub's peer list, the sync loop |
+| `node_join/` | The scripts and the compose file a joined node runs (embedded with `include_str!`): `prepare.sh` installs and makes the key, `apply.sh` brings up the tunnel, the egress lock and the node package, `join.sh` is both with the join request in the middle |
+| `node_join_service.rs` | Join tokens, the join script, overlay addresses, the hub's peer list, the sync loop; `join_with_key` also stores the endpoint the hub dials |
+| `node_join/` | The three scripts (`join.sh`, `prepare.sh`, `apply.sh`) and the compose file a joined node runs (embedded with `include_str!`) |
+| `image_sync_service.rs` | Image assignments, the images x nodes matrix, the pull loop |
+| `move_service.rs` | Moving a sandbox and its folders to another node with restic snapshots; the preflight that says whether it can work, the rollback after a failed cutover, and the model warm-up on the target |
+| `provision_service.rs` | Provider accounts, renting machines, the budget, the reaper |
+
+## Workbox control (ADR 0052-0057)
+
+| Service | Question it answers |
+|---|---|
+| `agent_auth_service` | which agent signs in how, how a change reaches a running agent, the sign-in rules that follow the mode, and the restart that waits for an idle agent |
+| `agent_launch_service` | the launcher, agentctl and env.sh written into a sandbox |
+| `agent_activity_service` | which tmux panes run an agent, and whether one is busy |
+| `egress_live_service` | switching a sandbox's proxy mode without a new container, the revert timer that switches it back (`revert_plan`, `revert_due`), and the `direct` exception that still rebuilds |
+| `agent_activity_service` | which tmux panes run an agent, whether one is busy, restarting a pane or a supervised agent, recent model traffic |
+| `egress_live_service` | switching a sandbox's proxy mode without a new container |
+| `presence_service` | who is connected to a sandbox now |
+| `model_grant_service` | which models a sandbox may use, and where they are served; `provider_service::environment_for_sandbox` then points the agent at the accounting router (`NESTBOX_MODEL_*`, `…/s/<sandbox>/r`) |
+| `model_readiness_service` | starting and warming those models before they are used |
+| `node_connect_service` | joining a machine by address (prepare, join, apply over SSH, credentials never stored), tunnels from the hub's `status.tsv`, the egress lock |
+| `rule_bulk_service` | turning observation into rule drafts |
+| `node_connect_service` | joining a machine by address, tunnels, the egress lock |
+| `rule_bulk_service` | turning observation into rule drafts (one allow draft per denied or would-deny destination) |
+| `control_service` | the one summary the workbox and the admin list read; its `recording` reads both mute columns and derives `full` / `flows` / `off` with the end of the decisive mute (X14) |
+
+`agent_launch_service` installs the launcher with one `sh -c` per sandbox: the scripts arrive
+base64-encoded, so no shell quoting of the payload is needed, and every file is written beside its
+target and moved into place, so a shell never sources half a script. A mode change does not
+reinstall anything: the launcher reads `.nestbox/mode/<agent>` at start, and `write_mode` writes
+that one line.
+`policy_service::sync_openshell_policies` pushes each sandbox's compiled policy and, while the rules
+are suspended (`off_allow_all`, or an open `all`/`openshell` window), the destinations it has been
+seen reaching, in audit mode: OpenShell logs them instead of blocking.
+| `chat_service.rs` | Chat turns: storing, querying, grouping, and who may read the text |
+| `chat_live.rs` | The live report of a running model request; nothing stored |
+| `privacy_exceptions.rs` | DLP exceptions: create, list, delete, and the check the filter asks |
+| `quick_allow.rs` | Allow one destination for a while, from the live view |
+
+Control Center services (Wave 0 stubs returning `ApiError::internal("not built: <package>")`; a package replaces the body in place):
+
+| File | Responsibility |
+|---|---|
+| `inventory_tree_service.rs` | `tree` (B01) |
+| `search_service.rs` | `search`: walks reachable data centers, one RLS scope each, scores and sorts hits; users for admins only |
+| `inventory_tree_service.rs` | `tree`: one scope per reachable data center with the caller's role there, flat rows, then `build_tree`; node budgets only for operators and above, no runner probe |
+| `search_service.rs` | `search` (B02) |
+| `bulk_service.rs` | `sandboxes` (B03) |
+| `model_bulk_service.rs` | `install_bulk` (B04): plans targets with the catalog verdict, creates one `ModelBulkInstall` job, installs up to 4 nodes in parallel via `model_service::install`, waits for each, optionally makes a cluster |
+| `bulk_service.rs` | `sandboxes` (B03): validates, checks the permission the action needs before a job row exists (a viewer cannot fill the Tasks list with failed jobs), creates the job, runs one action per sandbox with the caller's principal, one log line and one `JobProgress` per target; `params.source` is copied into the job payload so the console can leave a caller's own test job out of the Tasks list |
+| `model_bulk_service.rs` | `install_bulk` (B04) |
+| `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
+| `node_ops_service.rs` | `summary` (node + load + installs + images + tunnel), `drain` (move or stop every sandbox, job `NodeDrain`) and `quick` (rent/connect/script, probe, install a model, job `NodeQuickDeploy`); `drain` and `quick` also take `&Config` (B07) |
+| `model_bulk_service.rs` | `install_bulk` (B04) |
+| `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05): a cluster plus its `local_openai_compatible` provider profile in one transaction; `proxy_view` takes the data center from the cluster row through `nb_cluster_environment` (migration 0087), so it works with several data centers, and 404s an unknown cluster; the media bridge is the fallback only when the function itself is missing (SQLSTATE 42883), because any other store error must surface instead of becoming a validation error |
+| `node_ops_service.rs` | `summary drain quick` (B07) |
+| `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
+| `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it, and refuses an unknown site (`site.not_found`), an unknown model (`model.not_found`) and a taken node name (`node.name_taken`) each with its own code and sentence; `drain` needs `NodeManage`; the `connect` source passes `ssh_port` and `wg_port` (the connect body's `wg_listen_port`) through to `node_connect_service::connect` and leaves both to that request's defaults when absent |
+| `alert_service.rs` | `list` (open alerts), `publish_if_refused` (live `alert` event per refused network or DNS event; no DB read) (B08) |
+| `mount_service.rs` | `effective set` (B09) |
+| `mount_service.rs` | `effective set`: C10 mount view; `set` diffs, calls `persist_service` mount/dismount, audits `sandbox.mounts_changed`, recreates on `apply=now` (B09) |
+| `policy_preview_service.rs` | `preview compiled` (B10) |
+| `policy_preview_service.rs` | `preview compiled` — validate, compile, hot/cold split and diff for a spec or a stored policy (B10) |
+| `quick_control_service.rs` | `set` (B11) |
+| `quick_control_service.rs` | `set`: allow all, egress mode, DNS/internet/MCP windows, recording mute (B11); `recording=off` mutes flows and bodies, but a refusal is still stored as metadata (ADR 0066 addendum) |
+| `permission_service.rs` | `list set remove` (B12) |
+| `permission_service.rs` | `list set remove`: roles per data center (`user_scopes`), sandbox (via `tenancy_service::grant/revoke`) and organisation (read-only); refuses removing the last direct admin (`permission.last_admin`, 409) |
+| `tour_service.rs` | `mark_seen` (F18) |
+| `tour_service.rs` | `mark_seen` (validated name), `seen` (the caller's finished tours) |
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `accounting_service.rs` | Request accounting: what a request used, what it cost, and what a window |
+| `agent_activity_service.rs` | What the agents in a sandbox are doing right now: their tmux panes, whether a |
+| `agent_auth_service.rs` | Switching an agent between the user's own subscription and the gateway; `run_pending_restarts` retries a waiting restart, warns at most once per 10 minutes per sandbox and agent, and clears the flag after 12 attempts with `node.runtime_unavailable` |
+| `agent_launch_service.rs` | The launcher inside a sandbox that starts each agent in its chosen sign-in |
+| `audit_service.rs` | Reading the audit trail. |
+| `backup_service.rs` | Backup and restore of persistent roots. |
+| `cudax_service.rs` | CUDA-X catalogue and per-node installation. |
+| `egress_live_service.rs` | Switching a sandbox's egress mode while it runs (ADR 0052). |
+| `environment_service.rs` | Environment membership and summary. |
+| `mod.rs` | Module root: declares and re-exports the submodules. |
+| `model_grant_service.rs` | Which models a sandbox may use, and what it sees of them (ADR 0056). `routes_for_accounting` takes the data center from the sandbox name (`media_service::sandbox_environment`, migration 0088), never from the environment count. |
+| `model_readiness_service.rs` | Making the models a sandbox was granted ready before it is used (ADR 0057). |
+| `node_connect_service.rs` | Connecting a machine by its address and SSH credentials, and the state of |
+| `presence_service.rs` | Who is connected to a sandbox right now (ADR 0055). |
+| `privacy_service.rs` | Content privacy (DLP) for sandbox chat content. |
+| `proxy_service.rs` | The exit proxy catalogue, and choosing one. |
+| `rule_bulk_service.rs` | Turning a period of observation into rule drafts in one step (ADR 0053). |
+| `secret_service.rs` | The secret store: keys typed into the console, kept encrypted, never shown again. |
+| `snapshot_service.rs` | Snapshots on a timer, and clearing out old ones (ADR 0049). |
+| `user_service.rs` | Users: who may sign in, with what role, in this environment. |
+
+## The display of a desktop sandbox
+
+`display_service.rs` is deliberately thin, because the sandbox owns its screen.
+`nestbox-display` inside the desktop pack is the only code that talks to RandR;
+this service decides who may ask, refuses an invalid layout early with the same
+sentences the tool would print, and records the result.
+
+1. **Reading needs `SandboxRead`, writing needs `SandboxExec`.** A viewer may
+   already watch the same screen through the view-only desktop stream, so the
+   geometry is not a secret; changing it is the same power as typing into the
+   desktop, so it needs the same permission as the VNC input path.
+2. **Nothing is cached.** Every `get` executes the tool, so a layout an agent
+   changed through the desktop-control MCP server is what the console sees on
+   its next poll or its `control` event.
+3. **A write carries `expected_applied_at`.** `nestbox-display set` returns the
+   layout it read back from X, whose `applied_at` is the new stamp. A mismatch
+   means somebody else (an agent, another operator) changed the screen in
+   between; overwriting that silently would undo their work, so the answer is
+   `409 display.changed` with the layout that is really there in `details`.
+4. **A missing tool is a 409, not a 500.** Exit code 127 means the image has no
+   desktop pack; the caller's next step is another sandbox, so
+   `409 sandbox.no_desktop` says so. Any other refusal from the tool is a 422
+   carrying its own sentence, which was written for a person.
+5. **One audit line and one event per apply.** `sandbox.display` holds the mode
+   and the monitors; `SandboxControlChanged { what: "display" }` is what makes an
+   open console redraw its tabs.

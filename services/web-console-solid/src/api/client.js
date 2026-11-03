@@ -35,10 +35,66 @@ export function setCsrfMissingHandler(handler) {
 
 export function setCsrfToken(token) {
   csrfToken = token;
+  // A pop-out window cannot ask for its own token without invalidating this one,
+  // so it picks the token up from its opener through this property.
+  try {
+    window.__nestboxCsrf = token;
+  } catch {
+    /* a window without a document (a worker) has nothing to share */
+  }
+}
+
+// Adopt the opener's CSRF token in a pop-out window; false when there is none.
+export function adoptOpenerCsrf() {
+  try {
+    const token = window.opener && window.opener.__nestboxCsrf;
+    if (token) {
+      setCsrfToken(token);
+      return true;
+    }
+  } catch {
+    /* an opener from another origin */
+  }
+  return false;
 }
 
 export function setEnvironment(id) {
   environmentId = id;
+  // A pop-out window opened the same page and needs the data center too; it
+  // cannot ask the server which one the opener used without a second switch.
+  try {
+    window.__nestboxEnvironment = id;
+  } catch {
+    /* a window without a document has nothing to share */
+  }
+}
+
+// Adopt the opener's data center in a pop-out window; false when there is none.
+export function adoptOpenerEnvironment() {
+  try {
+    const id = window.opener && window.opener.__nestboxEnvironment;
+    if (id) {
+      setEnvironment(id);
+      return id;
+    }
+  } catch {
+    /* an opener from another origin */
+  }
+  return null;
+}
+
+// `url` with the active data center appended, for the requests the browser opens
+// itself (WebSocket, EventSource, a download link): they send no headers.
+//
+// The local binding matters: `export { x } from './y.js'` re-exports without defining `x`
+// here, and `environmentUrl` below calls it. Found live in U03/U04: the console was dead
+// with "withEnvironment is not defined" on every terminal, desktop and live stream.
+import { withEnvironment } from './environmentUrl.js';
+
+export { withEnvironment };
+
+export function environmentUrl(url) {
+  return withEnvironment(url, environmentId);
 }
 
 export function getEnvironment() {

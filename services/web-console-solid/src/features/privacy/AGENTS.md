@@ -12,6 +12,7 @@ shows the incidents it recorded.
 | File | Responsibility |
 |---|---|
 | `PrivacyPage.jsx` | Scope picker, mode, detectors with their actions, egress and retention, the inspection test, incidents, the admin purge |
+| `DlpPanels.jsx` | The DLP dashboard (`DlpDashboard`: findings grouped by detector, action, severity, sandbox, day or destination), the log (`DlpLog`: direction, detector, what happened, masked value → substitute, the request, the hop that saw it; filterable) and the policy history (`DlpChanges`: who changed what, with the old and the new values). All take an optional `sandboxId`; without one an admin sees the environment, anyone else only the sandboxes they own |
 | `usePrivacy.js` | Loading, the draft, saving, inspecting, purging, error text; no JSX |
 
 ## Rules
@@ -32,9 +33,27 @@ shows the incidents it recorded.
    "Save", because the environment default changes what every sandbox inherits.
 7. The purge asks once and says what it deletes: incident rows older than the
    day count, for the selected sandbox.
+8. Every label, option and tooltip is English (P08). "Would have" is written
+   `would: `, a policy's different wish is `asked for: `, and an empty result
+   says so without claiming that nothing exists. `src/noGerman.test.js` guards
+   the rule for the whole console.
 
 ## Wiring
 
 `App.jsx` is not part of this package: the integrator adds the route and the
 `features/AGENTS.md` row. The page takes a `role` prop and hides the save and
 purge controls for anyone who is not an admin.
+
+## The three facts a row must keep apart
+
+`action` is what happened, `requested_action` is what the policy asked for, and
+`replacement` is what the filter wrote instead of the value. In `observe` the
+first two differ — the row says "recorded only · would have refused" — and that
+difference is the only evidence that content left after a match. Never collapse
+them into one word: "allowed" alone reads as "nothing was found".
+| `PrivacyDlpSection.jsx` | The DLP section of the Content privacy page |
+| `PrivacyExtraSettings.jsx` | The two environment switches for exceptions and chat reading |
+| `DlpFindingDrawer.jsx` | One finding in full, with the way to allow it on purpose |
+| `DlpExceptionsTable.jsx` | The findings allowed on purpose, and when they stop |
+
+Restyle (F25): `PrivacyPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

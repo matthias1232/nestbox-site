@@ -10,6 +10,8 @@
 //! The probe reads files and environment inside the sandbox; the decision about what
 //! they mean is made here, in plain functions, so it is tested without a sandbox.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -22,6 +24,12 @@ pub struct Probe {
     /// The user's own account, when a login is stored.
     #[serde(default)]
     pub account: Option<Account>,
+    /// One short label per agent that has a login of the user's own, keyed by
+    /// the agent name (`claude`, `codex`, `opencode`). An absent key means the
+    /// agent has no own login; the label is what the user would recognise it
+    /// by (an e-mail address, "signed in", or the provider list).
+    #[serde(default)]
+    pub accounts: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -138,7 +146,7 @@ mod tests {
 
     #[test]
     fn only_the_gateway_key_is_a_gateway_login_checked_by_the_provider_probe() {
-        let probe = Probe { gateway_key: true, account: None };
+        let probe = Probe { gateway_key: true, ..Probe::default() };
         assert_eq!(assess(Some(&probe), 0, true).mode, LoginMode::Gateway);
         assert_eq!(assess(Some(&probe), 0, true).check, Check::Ok);
         assert_eq!(assess(Some(&probe), 0, false).check, Check::Warn);
@@ -146,7 +154,11 @@ mod tests {
 
     #[test]
     fn an_own_account_is_ok_until_it_expires_and_then_an_error() {
-        let valid = Probe { gateway_key: false, account: Some(account(Some(2_000))) };
+        let valid = Probe {
+            gateway_key: false,
+            account: Some(account(Some(2_000))),
+            ..Probe::default()
+        };
         assert_eq!(assess(Some(&valid), 1_000, true).check, Check::Ok);
         let state = assess(Some(&valid), 3_000, true);
         assert_eq!(state.check, Check::Error);
@@ -156,13 +168,13 @@ mod tests {
 
     #[test]
     fn an_account_without_an_expiry_is_not_called_expired() {
-        let probe = Probe { gateway_key: false, account: Some(account(None)) };
+        let probe = Probe { gateway_key: false, account: Some(account(None)), ..Probe::default() };
         assert!(!assess(Some(&probe), i64::MAX, true).account_expired);
     }
 
     #[test]
     fn both_at_once_warns_that_the_key_wins() {
-        let probe = Probe { gateway_key: true, account: Some(account(None)) };
+        let probe = Probe { gateway_key: true, account: Some(account(None)), ..Probe::default() };
         let state = assess(Some(&probe), 0, true);
         assert_eq!(state.mode, LoginMode::Both);
         assert_eq!(state.check, Check::Warn);
@@ -175,5 +187,24 @@ mod tests {
         assert_eq!(assess(Some(&Probe::default()), 0, true).check, Check::Error);
         assert_eq!(assess(None, 0, true).mode, LoginMode::Unknown);
         assert_eq!(assess(None, 0, true).check, Check::Unknown);
+    }
+
+    #[test]
+    fn a_probe_answer_names_the_agents_that_have_an_own_login() {
+        let probe: Probe = serde_json::from_str(
+            r#"{"gateway_key": false, "account": null, "accounts": {"codex": "signed in"}}"#,
+        )
+        .unwrap();
+        assert_eq!(probe.accounts.get("codex").map(String::as_str), Some("signed in"));
+        assert!(!probe.accounts.contains_key("claude"));
+        assert!(!probe.gateway_key);
+    }
+
+    #[test]
+    fn a_probe_answer_without_accounts_still_deserialises() {
+        let probe: Probe =
+            serde_json::from_str(r#"{"gateway_key": true, "account": null}"#).unwrap();
+        assert!(probe.accounts.is_empty());
+        assert!(probe.gateway_key);
     }
 }

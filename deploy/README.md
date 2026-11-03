@@ -176,3 +176,24 @@ docker compose -f docker-compose.test.yml up -d
 export DATABASE_URL=postgres://nestbox:test@localhost:55432/nestbox_test
 cargo test
 ```
+
+## Multi-tenant and multi-node (ADR 0044-0050)
+
+| Piece | Where |
+|---|---|
+| One-line installer | `install.sh` (see `docs/guides/self-hosting.md`) |
+| WireGuard hub for joined nodes | `overlay-hub/`, compose service `overlay-hub` (host network, `NET_ADMIN`) |
+| Image registry for nodes | compose service `registry`, listens on the loopback, forwarded to the overlay by the hub |
+| Snapshot server (restic, append-only) | compose service `restic-server` |
+| Publish images for nodes | `scripts/publish-node-images.sh` |
+| Proxmox template for rented machines | `scripts/make-proxmox-template.sh` (run on the Proxmox host) |
+| Seed ISO that makes a VM join | `scripts/make-node-seed.sh` |
+| Control-plane backup | `scripts/backup-control-plane.sh` |
+| Signed release images | `docker-compose.images.yml`, built by `.github/workflows/release.yml` |
+
+Settings in `deploy/.env`: `NESTBOX_MODE`, `NESTBOX_PUBLIC_URL`, `NESTBOX_OVERLAY_ENDPOINT`
+(`host:51821`, UDP, reachable from the nodes), `NESTBOX_OIDC_PROVIDERS` and the per-provider client
+settings. Joining nodes is off while `NESTBOX_OVERLAY_ENDPOINT` is empty.
+
+The hub forwards the shared services (MCP hub, media, accounting, egress proxy) to every node and
+routes a strict-locked node's traffic out (ADR 0057).

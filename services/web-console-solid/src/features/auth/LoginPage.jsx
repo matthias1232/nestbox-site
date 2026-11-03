@@ -2,14 +2,42 @@
 //
 // The password is read from the form at submit and never stored in a signal, so
 // it does not sit in the component tree after the request.
+//
+// Identity providers (ADR 0046) are plain links: the browser leaves for the provider and comes
+// back to the API, which sets the session cookie and redirects here. An invitation link
+// (`/?invite=<token>`) is carried through the same trip, so the person lands in the right place.
 
-import { createSignal } from 'solid-js';
+import { For, Show, createSignal, onMount } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
+import { IconEye, IconEyeOff } from '../../components/icons.jsx';
+import * as api from '../../api/tenancy.js';
+import '../../styles/login.css';
 
 export default function LoginPage() {
   const session = useSession();
-  const [email, setEmail] = createSignal('admin@nestbox.local');
+  const params = new URLSearchParams(window.location.search);
+  const invite = params.get('invite');
+  const [email, setEmail] = createSignal('');
   const [password, setPassword] = createSignal('');
+  const [options, setOptions] = createSignal({ providers: [], registration_open: false });
+  const [preview, setPreview] = createSignal(null);
+  const [reveal, setReveal] = createSignal(false);
+  const [imageFailed, setImageFailed] = createSignal(false);
+  const [videoFailed, setVideoFailed] = createSignal(false);
+  // The looping video is decoration, not information: it is fetched and played only when the
+  // visitor has not asked for reduced motion. The poster image is always there, so the visual
+  // column never stays empty.
+  const prefersReducedMotion =
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const [problem, setProblem] = createSignal(params.get('login_error'));
+
+  onMount(async () => {
+    try { setOptions(await api.signInOptions()); } catch { /* password sign-in still works */ }
+    if (invite) {
+      try { setPreview(await api.invitationPreview(invite)); }
+      catch { setProblem('This invitation link is not valid any more. Ask for a new one.'); }
+    }
+  });
 
   async function submit(event) {
     event.preventDefault();
@@ -17,35 +45,94 @@ export default function LoginPage() {
     setPassword('');
   }
 
+  const providerLink = (id) =>
+    `/api/v1/auth/oidc/${id}/start${invite ? `?invitation=${encodeURIComponent(invite)}` : ''}`;
+
   return (
-    <div class="login">
-      <form onSubmit={submit}>
-        <h1>Nestbox</h1>
-        <p class="muted">Control plane for governed agent sandboxes.</p>
+    <div class="lp">
+      <main class="lp-form-side">
+        <form class="lp-form" onSubmit={submit}>
+          <span class="brand-mark lp-brand">nestbox<i>_</i></span>
+          <h1>Your private AI operations center.</h1>
+          <p class="muted">Open source · governed sandboxes · local models</p>
 
-        <label>
-          <span>Email</span>
-          <input value={email()} onInput={(e) => setEmail(e.currentTarget.value)}
-                 autocomplete="username" required />
-        </label>
+          <Show when={preview()}>
+            <p class="notice">
+              You are invited to <strong>{preview().data_center}</strong> of {preview().organization} as{' '}
+              <strong>{preview().role}</strong>
+              {preview().sandbox ? <> for the sandbox <strong>{preview().sandbox}</strong></> : null}.
+              {preview().email ? <> Use {preview().email}.</> : null}
+            </p>
+          </Show>
+          <Show when={problem()}><p class="error">{problem()}</p></Show>
 
-        <label>
-          <span>Password</span>
-          <input type="password" value={password()}
-                 onInput={(e) => setPassword(e.currentTarget.value)}
-                 autocomplete="current-password" required />
-        </label>
+          <Show when={options().providers.length > 0}>
+            <div class="providers">
+              <For each={options().providers}>
+                {(provider) => (
+                  <a class="button secondary" href={providerLink(provider.id)}>Continue with {provider.label}</a>
+                )}
+              </For>
+            </div>
+            <p class="muted small">
+              {options().registration_open && !invite
+                ? 'New here? Continue with a provider to create your workspace.'
+                : invite ? '' : 'This installation is by invitation.'}
+            </p>
+            <hr />
+          </Show>
 
-        {session.error() && <p class="error">{session.error()}</p>}
+          <Show when={!invite || options().providers.length === 0}>
+            <label>
+              <span>Email</span>
+              <input value={email()} onInput={(e) => setEmail(e.currentTarget.value)}
+                     autocomplete="username" required />
+            </label>
 
-        <button type="submit" disabled={session.busy()}>
-          {session.busy() ? 'Signing in…' : 'Sign in'}
-        </button>
+            <label>
+              <span>Password</span>
+              <span class="lp-password">
+                <input type={reveal() ? 'text' : 'password'} value={password()}
+                       onInput={(e) => setPassword(e.currentTarget.value)}
+                       autocomplete="current-password" required />
+                <button type="button" class="ghost tiny" onClick={() => setReveal(!reveal())}
+                        aria-label={reveal() ? 'Hide password' : 'Show password'}
+                        aria-pressed={reveal()}>
+                  <Show when={reveal()} fallback={<IconEye />}>
+                    <IconEyeOff />
+                  </Show>
+                </button>
+              </span>
+            </label>
 
-        <p class="hint muted">
-          The bootstrap password was printed once by the migration step.
-        </p>
-      </form>
+            {session.error() && <p class="error">{session.error()}</p>}
+
+            <button type="submit" class="primary" disabled={session.busy()}>
+              {session.busy() ? 'Signing in…' : 'Sign in'}
+            </button>
+            <p class="muted small">Forgot your password? Ask your administrator.</p>
+          </Show>
+
+          <p class="lp-foot small">
+            <span class="muted">Built in public · </span>
+            <a href="https://nestbox.mmbits.com/" rel="noopener">nestbox.mmbits.com</a>
+          </p>
+        </form>
+      </main>
+
+      <aside class="lp-visual" aria-hidden="true">
+        <Show when={!imageFailed()} fallback={<div class="lp-fallback" />}>
+          <img src="/illustrations/login.webp" alt="" onError={() => setImageFailed(true)} />
+        </Show>
+        <Show when={!prefersReducedMotion && !videoFailed()}>
+          <video autoplay muted loop playsinline preload="none" poster="/illustrations/login.webp"
+                 onError={() => setVideoFailed(true)}>
+            <source src="/illustrations/login-loop.mp4" type="video/mp4" onError={() => setVideoFailed(true)} />
+          </video>
+        </Show>
+        <span class="lp-tag lp-tag-a">OPEN SOURCE</span>
+        <span class="lp-tag lp-tag-b">SELF-HOSTED</span>
+      </aside>
     </div>
   );
 }

@@ -15,7 +15,7 @@ what to show and what to offer.
 | `src/features/` | One folder per screen |
 | `src/state/` | Session and environment |
 | `src/styles/` | Tokens and layout |
-| `nginx.conf` | Same-origin proxy to the API, SSE-safe |
+| `nginx.conf` | Same-origin proxy to the API; gzip for text assets, never for `/api/` (SSE) |
 
 ## Build and run
 
@@ -44,3 +44,11 @@ because there is one origin.
 - Routing is a signal, not a router: a reload returns to the sandbox list.
 - After a reload the CSRF token is gone, so a write requires signing in again.
   Read-only views keep working, which is the intended trade.
+
+## Bundle layout
+
+Pages (`features/shell/pages.js`, the route imports in `App.jsx`) and the terminal/desktop tabs
+(`TerminalTab`, `DesktopTab`, imported at `AdminCenter`, `ConsoleFrame` and the pop-outs) are
+`lazy()` imports. `vite.config.js` splits `@xterm/*`, `@novnc/novnc` and `solid-js` into their own
+chunks, so xterm and noVNC load only when a console opens. Keep Login, Shell and the session state
+eager. New pages must use `lazy(() => import(...))`.

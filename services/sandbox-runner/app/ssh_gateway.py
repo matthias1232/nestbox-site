@@ -18,6 +18,11 @@ sandbox (`scp -t`), the same as typing it in a shell.
 Authentication is public-key only. The authorised keys are the sandbox's own
 public key (the pair the control plane generated), delivered with the forward
 set; the private half never reaches the runner.
+
+Where a login *lands* is tmux, so that SSH and the browser terminal are two
+windows on the same work: a plain login joins the shared session `nestbox-ssh`,
+`ssh -p <port> nestbox@<node> attach <tab>` joins the browser tab `<tab>`, and a
+dropped connection only detaches from tmux instead of ending the shell.
 """
 from __future__ import annotations
 from app.workload import get_container, list_workloads, sandbox_name
@@ -27,6 +32,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import struct
 import time
 from pathlib import Path
@@ -38,6 +44,9 @@ CONTAINER_PREFIX = "nestbox-sandbox-"
 READ_CHUNK = 65_536
 SSH_USER = "nestbox"
 TERM_ENV = {"LANG": "C.UTF-8"}
+# A tab name is also a tmux session name, so it is the same shape the browser
+# terminal is held to: short, ASCII, no path and no shell metacharacter.
+TAB_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def demux(buffer: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
@@ -79,13 +88,28 @@ def password_matches(credentials: list[dict[str, Any]], username: str, password:
     return ok
 
 
-def shell_command(command: str | None) -> list[str]:
-    """The argument vector for a login shell or one requested command.
+def tmux_tab(command: str | None) -> str | None:
+    """The tmux tab an SSH login asks for: none = the shared 'ssh' tab; 'attach X' / 'tab X' = X."""
+    if not command or not command.strip():
+        return "ssh"
+    parts = command.split()
+    if len(parts) == 2 and parts[0] in ("attach", "tab") and TAB_RE.match(parts[1]):
+        return parts[1]
+    return None
 
-    The command string is the client's own, like any `ssh host <command>`; it is
-    handed to `bash -lc` as a single argument and never spliced into another
-    string here.
+
+def shell_command(command: str | None, has_tmux: bool = False) -> list[str]:
+    """The argument vector for one SSH session; never a spliced shell string.
+
+    With tmux in the image a login is a *tab* rather than a shell: `-A` attaches
+    to the tab when it exists and creates it otherwise, so the browser terminal
+    and a second SSH client share one session. Without tmux (an older image)
+    the login is an ordinary shell, and a requested command always stays a
+    command: only the bare login and `attach`/`tab` are turned into a tab.
     """
+    tab = tmux_tab(command) if has_tmux else None
+    if tab:
+        return ["tmux", "new-session", "-A", "-s", f"nestbox-{tab}"]
     if command:
         return ["bash", "-lc", command]
     return ["bash", "-l"]
@@ -114,36 +138,84 @@ def ensure_host_key(state_dir: str) -> Path:
 
 
 class _Exec:
-    """One `docker exec` of a sandbox, as a byte stream."""
+    """One shell of a sandbox, as a byte stream.
+
+    A Docker sandbox is a `docker exec`. A gateway (OpenShell) sandbox goes
+    through `openshell sandbox exec --tty`, so the shell has the proxy, the CA
+    and the boundary the agent has (see `gateway_exec.py`); a `docker exec`
+    there would run outside that boundary and be a different machine.
+    """
 
     def __init__(self, client: Any, sandbox: str, command: str | None, tty: bool, size: tuple[int, int]):
         from app.terminal import PtySocket
+        from app.workload import openshell_name
 
         container = get_container(client, sandbox)
         if container.status != "running":
             raise RuntimeError(f"sandbox '{sandbox}' is {container.status}, not running")
         self._client = client
-        created = client.api.exec_create(
-            container.id,
-            shell_command(command),
-            tty=tty,
-            stdin=True,
-            stdout=True,
-            stderr=True,
-            environment={**TERM_ENV, "TERM": "xterm-256color"} if tty else TERM_ENV,
-        )
-        self.exec_id: str = created["Id"]
         self.bytes_in = 0
         self.bytes_out = 0
         self.tty = tty
-        self.sock = PtySocket(client.api.exec_start(self.exec_id, tty=tty, socket=True))
+        # tmux is what makes an SSH login land in a tab the browser terminal
+        # shares, so it is only worth a container round-trip for a terminal.
+        has_tmux = False
+        if tty:
+            code, _ = container.exec_run(["sh", "-c", "command -v tmux >/dev/null"], stdout=False, stderr=False)
+            has_tmux = code == 0
+        self.tab = tmux_tab(command) if has_tmux else None
+        argv = shell_command(command, has_tmux)
+        self.gateway = openshell_name(container.name) or ""
+        if self.gateway:
+            from app.gateway_exec import GatewayPty
+
+            self._gateway: Any = GatewayPty.open_command(self.gateway, argv)
+            self.exec_id = ""
+            self.sock: Any = self._gateway
+        else:
+            self._gateway = None
+            created = client.api.exec_create(
+                container.id,
+                argv,
+                tty=tty,
+                stdin=True,
+                stdout=True,
+                stderr=True,
+                environment={**TERM_ENV, "TERM": "xterm-256color"} if tty else TERM_ENV,
+            )
+            self.exec_id = created["Id"]
+            self.sock = PtySocket(client.api.exec_start(self.exec_id, tty=tty, socket=True))
         if tty:
             self.resize(*size)
 
     def resize(self, cols: int, rows: int) -> None:
+        if self.gateway:
+            self._gateway.resize(cols, rows)
+            return
         self._client.api.exec_resize(self.exec_id, height=max(rows, 1), width=max(cols, 1))
 
+    def end_input(self) -> None:
+        """Tell the command that the client sent its last byte.
+
+        A pipe ends with a half-close. A PTY has no half-close, so the byte a
+        terminal means by "end of input" is Ctrl-D (a gateway sandbox pipes a
+        non-terminal command through a PTY, so it needs that form too).
+        """
+        if self.tty:
+            return  # a terminal session is ended by `_pump`, not by an end-of-file
+        if self.gateway:
+            self.sock.write(b"\x04")
+            return
+        try:
+            self.sock._socket.shutdown(1)  # SHUT_WR
+        except OSError:
+            pass
+
     def exit_code(self) -> int:
+        # The gateway CLI is a local process talking to a PTY and reports no exit
+        # status for what ran inside; a detached terminal ends cleanly.
+        if self.gateway:
+            return 0
         info = self._client.api.exec_inspect(self.exec_id)
         code = info.get("ExitCode")
         return int(code) if code is not None else 0
@@ -163,7 +235,10 @@ async def _pump(process: Any, run: _Exec) -> None:
             if not chunk:
                 return
             run.bytes_out += len(chunk)
-            if run.tty:
+            # A PTY carries one bare stream, and so does the gateway CLI (stdout
+            # and stderr arrive together); only a plain `docker exec` without a
+            # TTY frames its two streams with Docker's 8-byte headers.
+            if run.tty or run.gateway:
                 process.stdout.write(chunk)
                 continue
             pending += chunk
@@ -181,13 +256,9 @@ async def _pump(process: Any, run: _Exec) -> None:
             except (asyncssh.BreakReceived, asyncssh.SignalReceived):
                 continue
             if not data:
-                # The client closed its input. For a TTY the shell ends with the
-                # session; for a plain command this is end-of-file on stdin.
-                if not run.tty:
-                    try:
-                        run.sock._socket.shutdown(1)  # SHUT_WR
-                    except OSError:
-                        pass
+                # The client closed its input: end the command's stdin so it can
+                # finish. A terminal session is ended by the wait below.
+                await asyncio.to_thread(run.end_input)
                 return
             run.bytes_in += len(data)
             await asyncio.to_thread(run.sock.write, data)
@@ -202,10 +273,14 @@ async def _pump(process: Any, run: _Exec) -> None:
             # an idle shell; closing the socket releases the reader either way.
             await asyncio.wait({reader, writer}, return_when=asyncio.FIRST_COMPLETED)
             if not reader.done():
-                try:
-                    await asyncio.to_thread(run.sock.write, b"\x04\x04")
-                except Exception:  # noqa: BLE001 - the shell may already be gone
-                    pass
+                if run.tab is None:
+                    # No tmux, so the shell is the session: a dropped client must not
+                    # leave an orphan `bash` behind. With a tab, closing the door is
+                    # the whole point — the session keeps running for the next login.
+                    try:
+                        await asyncio.to_thread(run.sock.write, b"\x04\x04")
+                    except Exception:  # noqa: BLE001 - the shell may already be gone
+                        pass
                 run.close()
                 reader.cancel()
         else:
@@ -229,10 +304,13 @@ def make_process_handler(client: Any, sandbox: str):
             process.exit(1)
             return
         # Who, when, how long and how many bytes go to the control plane's audit
-        # table; what was typed or printed never does.
+        # table; what was typed or printed never does. The tab says which window
+        # of the sandbox the login joined.
         from app.telemetry_shipper import post_json
 
-        opened = await asyncio.to_thread(post_json, "/api/v1/internal/ssh-sessions", {"event": "open", "sandbox": sandbox})
+        opened = await asyncio.to_thread(
+            post_json, "/api/v1/internal/ssh-sessions", {"event": "open", "sandbox": sandbox, "tab": run.tab}
+        )
         session_id = (opened or {}).get("session_id")
         reason = "user"
         try:

@@ -80,9 +80,18 @@ services:
         # readable by it alone: the proxy mounts nothing else from secrets/.
         mkdir -p /secrets/proxy
         cp /secrets/node/token /secrets/proxy/node-token
+        # The certificate broker runs in the same container and signs leaf
+        # certificates with the egress CA, so it needs the key. A Docker secret
+        # keeps the host file's owner and mode (0600, another uid), so the broker
+        # could not read it and exited; the copy below is owned by the proxy user.
+        if [ -s /secrets/egress/ca.crt ] && [ -s /secrets/egress/ca.key ]; then
+          cp /secrets/egress/ca.crt /secrets/proxy/egress-ca.crt
+          cp /secrets/egress/ca.key /secrets/proxy/egress-ca.key
+        fi
         chown -R 101:101 /secrets/proxy
         chmod 0500 /secrets/proxy
         chmod 0400 /secrets/proxy/node-token
+        chmod 0400 /secrets/proxy/egress-ca.crt /secrets/proxy/egress-ca.key 2>/dev/null || true
         chmod 0700 /secrets
         find /secrets -type f -exec chmod 0600 {} + 2>/dev/null || true
         echo "data and secret directories prepared"
@@ -162,14 +171,14 @@ services:
       NESTBOX_RUNTIME_NETWORK: ${COMPOSE_PROJECT_NAME:-nestbox}_runtime
       NESTBOX_SECRET_DIR: /secrets
       # "openshell" creates new sandboxes on the OpenShell gateway.
-      NESTBOX_SANDBOX_RUNTIME: ${NESTBOX_SANDBOX_RUNTIME:-docker-development}
+      NESTBOX_SANDBOX_RUNTIME: ${NESTBOX_SANDBOX_RUNTIME:-openshell}
       # Where an agent finds the Nestbox MCP hub. On OpenShell the hub is reached
       # through the host (see the mcp-hub service).
-      NESTBOX_MCP_HUB_URL: ${NESTBOX_MCP_HUB_URL:-http://mcp-hub:8080/mcp}
+      NESTBOX_MCP_HUB_URL: ${NESTBOX_MCP_HUB_URL:-}
       # Where an agent reaches the media MCP server. On OpenShell the compose name
       # is not resolvable from a host-network supervisor, so a deployment sets this
       # to the host.openshell.internal form the hub already uses.
-      NESTBOX_MEDIA_MCP_URL: ${NESTBOX_MEDIA_MCP_URL:-http://media-mcp:8080/mcp}
+      NESTBOX_MEDIA_MCP_URL: ${NESTBOX_MEDIA_MCP_URL:-}
       # Rendered assets: a volume, not the container's writable layer, so a
       # rebuild does not delete what an operator asked to keep.
       NESTBOX_MEDIA_DIR: /var/lib/nestbox/media
@@ -177,6 +186,10 @@ services:
       # request while this is missing.
       NESTBOX_MEDIA_BRIDGE_TOKEN_FILE: /secrets/media_bridge_token
       NESTBOX_ACCOUNTING_TOKEN_FILE: /secrets/accounting_token
+      # Opt-in: set to the address a sandbox reaches the accounting proxy at
+      # (OpenShell: http://host.openshell.internal:18099) and every agent's model
+      # base URL is routed through it, with the sandbox named in the path.
+      NESTBOX_ACCOUNTING_PROXY_URL: ${NESTBOX_ACCOUNTING_PROXY_URL:-}
       NESTBOX_SESSION_COOKIE_SECURE: "false"
       # The same token the runner demands on the terminal upgrade. It comes from
       # the node directory rather than from a compose secret, because compose
@@ -185,6 +198,18 @@ services:
       # mounted under `/run/secrets`: that directory belongs to the compose
       # secrets and is mounted read-only, so a second mount below it fails.
       NESTBOX_NODE_TOKEN_FILE: /run/node/token
+      # Joining nodes over the overlay (ADR 0047). Empty endpoint = joining is off.
+      NESTBOX_OVERLAY_DIR: /overlay
+      NESTBOX_OVERLAY_ENDPOINT: ${NESTBOX_OVERLAY_ENDPOINT:-}
+      NESTBOX_PUBLIC_URL: ${NESTBOX_PUBLIC_URL:-}
+      NESTBOX_MODE: ${NESTBOX_MODE:-selfhosted}
+      # How often a folder that works on a joined node is snapshotted (minutes).
+      NESTBOX_SNAPSHOT_MINUTES: ${NESTBOX_SNAPSHOT_MINUTES:-15}
+      NESTBOX_OIDC_PROVIDERS: ${NESTBOX_OIDC_PROVIDERS:-}
+      NESTBOX_OIDC_GOOGLE_CLIENT_ID: ${NESTBOX_OIDC_GOOGLE_CLIENT_ID:-}
+      NESTBOX_OIDC_GOOGLE_CLIENT_SECRET: ${NESTBOX_OIDC_GOOGLE_CLIENT_SECRET:-}
+      NESTBOX_OIDC_GITHUB_CLIENT_ID: ${NESTBOX_OIDC_GITHUB_CLIENT_ID:-}
+      NESTBOX_OIDC_GITHUB_CLIENT_SECRET: ${NESTBOX_OIDC_GITHUB_CLIENT_SECRET:-}
       RUST_LOG: info,tower_http=warn
     secrets:
       - database_url
@@ -198,6 +223,8 @@ services:
       # read-only, and the runner never mounts this directory.
       - ./secrets/ssh:/secrets/ssh
       - ./secrets/node:/run/node:ro
+      # The hub's public key (read) and the peer list (written): see overlay-hub.
+      - ./data/overlay:/overlay
     depends_on:
       postgres:
         condition: service_healthy
@@ -207,9 +234,49 @@ services:
         condition: service_completed_successfully
     expose:
       - "8000"
+    # Loopback only: the overlay hub forwards it to the hub address for joined nodes.
+    ports:
+      - "127.0.0.1:18000:8000"
     networks:
       - control
       - runtime
+
+  # The WireGuard hub and the image registry for nodes on other machines (ADR 0047, 0048).
+  # Both run on the host network: the hub owns the `nb-hub` interface, and the registry listens
+  # on the host's loopback (the hub forwards it to the overlay address).
+  overlay-hub:
+    build:
+      context: ./overlay-hub
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NESTBOX_OVERLAY_HUB_IP: ${NESTBOX_OVERLAY_HUB_IP:-10.77.0.1}
+      NESTBOX_OVERLAY_PORT: ${NESTBOX_OVERLAY_PORT:-51821}
+    volumes:
+      - ./data/overlay:/overlay
+
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      REGISTRY_HTTP_ADDR: 127.0.0.1:5000
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - ./data/registry:/var/lib/registry
+
+  # Where snapshots of persistent folders are kept (ADR 0049): a restic REST server, listening on
+  # the overlay address only. Append-only: a node can add snapshots and never delete one, and the
+  # data is encrypted with a password per data center that the server never sees.
+  restic-server:
+    image: restic/rest-server:0.13.0
+    restart: unless-stopped
+    network_mode: host
+    command: ["rest-server", "--path", "/data", "--listen", "${NESTBOX_OVERLAY_HUB_IP:-10.77.0.1}:8500", "--append-only", "--no-auth"]
+    volumes:
+      - ./data/restic:/data
 
   web-console:
     build:
@@ -279,6 +346,14 @@ services:
       NESTBOX_ENVIRONMENT_ID: ${NESTBOX_ENVIRONMENT_ID:-00000000-0000-0000-0000-000000000002}
       NESTBOX_FORWARD_RANGE: ${NESTBOX_FORWARD_RANGE:-22200-22299}
       NESTBOX_RUNNER_STATE: /var/lib/nestbox-runner
+      # Where a `direct` sandbox leaves the node: an ordinary bridge with a
+      # route out, separate from the stack's control network.
+      NESTBOX_DIRECT_NETWORK: ${COMPOSE_PROJECT_NAME:-nestbox}-sandbox-direct
+      # The deployment CA. Mounted into a sandbox only when that sandbox's
+      # egress mode reads TLS; the runner never reads its key. The path is the
+      # host path, and the same directory is mounted at the same path below, so
+      # the bind source the runner validates is the path Docker mounts.
+      NESTBOX_EGRESS_CA: ${NESTBOX_EGRESS_CA_DIR:-/opt/nestbox/site/deploy/secrets/egress}/ca.crt
       # OpenShell sandboxes (runtime "openshell") are driven through the gateway.
       OPENSHELL_GATEWAY: openshell
     volumes:
@@ -293,8 +368,16 @@ services:
       - /var/lib/nestbox/models:/var/lib/nestbox/models
       # Backups of persistent roots: one tar.gz each, written and read only by the runner.
       - /var/lib/nestbox/backups:/var/lib/nestbox/backups
+      # The snapshot server's files, so the control plane can prune what the append-only server keeps.
+      - ./data/restic:/var/lib/nestbox/restic
       - /proc:/host/proc:ro
       - ./secrets/node:/run/node:ro
+      # The public CA copy the runner writes for sandboxes; same path in and out.
+      - /var/lib/nestbox/egress:/var/lib/nestbox/egress
+      # The deployment's egress CA directory, at the same path inside and out so
+      # a sandbox bind source is the path Docker resolves on the host. Read-only:
+      # the runner only passes the public certificate on.
+      - ${NESTBOX_EGRESS_CA_DIR:-/opt/nestbox/site/deploy/secrets/egress}:${NESTBOX_EGRESS_CA_DIR:-/opt/nestbox/site/deploy/secrets/egress}:ro
       # The client bundle for the OpenShell gateway on the host (written by
       # deploy/openshell/install-openshell.sh): CA certificate, client certificate
       # and key. Writable only because the CLI keeps its "last sandbox" note there.
@@ -332,6 +415,8 @@ services:
       # every request is denied. The id is the seeded local node.
       NESTBOX_NODE_ID: ${NESTBOX_NODE_ID:-00000000-0000-0000-0000-000000000003}
       NESTBOX_NODE_TOKEN_FILE: /run/node/node-token
+      NESTBOX_EGRESS_CA_CERT: /run/node/egress-ca.crt
+      NESTBOX_EGRESS_CA_KEY: /run/node/egress-ca.key
     volumes:
       # A copy of the node token that only the proxy's user can read (made by
       # init-data). The proxy never sees the database URLs or the SSH keys.

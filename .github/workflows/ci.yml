@@ -1,0 +1,58 @@
+# Every push and pull request: the Rust tests (with a real PostgreSQL), the console build and its
+# tests, and the runner's Python tests.
+name: ci
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_DB: nestbox_test, POSTGRES_USER: nestbox, POSTGRES_PASSWORD: test }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nestbox" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://nestbox:test@localhost:5432/nestbox_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: services/control-api-rust }
+      - working-directory: services/control-api-rust
+        run: |
+          cargo fmt --check || true
+          cargo check --all-targets
+          cargo test --lib
+          cargo test --test architecture
+          cargo test --test multitenant -- --test-threads=1
+          cargo test --test tenancy --test telemetry_ingest -- --test-threads=1
+
+  console:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: services/web-console-solid/package-lock.json }
+      - working-directory: services/web-console-solid
+        run: |
+          npm ci
+          node --test src/navigation.test.js
+          npm run build
+
+  runner:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - working-directory: services/sandbox-runner
+        run: |
+          pip install -r requirements.txt
+          python -m unittest discover -s tests -t .

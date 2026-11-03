@@ -121,6 +121,9 @@ pub struct ProviderProfile {
     pub node_id: Option<Uuid>,
     pub model_install_id: Option<Uuid>,
     pub last_probed_at: Option<DateTime<Utc>>,
+    /// The exit this provider is called through, when one is chosen. `None`
+    /// is the node's own route.
+    pub proxy_id: Option<Uuid>,
 }
 
 impl ProviderProfile {
@@ -255,6 +258,7 @@ mod tests {
             node_id: None,
             model_install_id: None,
             last_probed_at: None,
+        proxy_id: None,
         };
         assert!(profile.is_usable());
     }
@@ -279,6 +283,7 @@ mod tests {
             node_id: None,
             model_install_id: None,
             last_probed_at: None,
+        proxy_id: None,
         };
         assert!(!profile.is_usable());
     }
@@ -304,6 +309,7 @@ mod tests {
             node_id: None,
             model_install_id: None,
             last_probed_at: None,
+        proxy_id: None,
         };
         assert!(profile.needs_refresh(now));
         profile.credential_expiry = Some(now + chrono::Duration::hours(2));

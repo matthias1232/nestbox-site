@@ -231,6 +231,17 @@ pub async fn install(
     ))
 }
 
+/// Install a model on many nodes as one job (package B04).
+pub async fn install_bulk(
+    State(state): State<AppState>,
+    auth: Auth,
+    Path(key): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
+    let value = crate::services::model_bulk_service::install_bulk(&state.services, &auth.principal, &key, body).await?;
+    Ok((axum::http::StatusCode::ACCEPTED, Json(value)))
+}
+
 /// Uninstall a model from a node.
 pub async fn uninstall(
     State(state): State<AppState>,

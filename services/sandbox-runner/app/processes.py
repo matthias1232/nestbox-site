@@ -7,6 +7,7 @@ never from the request, because `ps` accepts a format string and that is enough
 to read a file the caller should not see.
 """
 from __future__ import annotations
+from app.gateway_exec import exec_run
 from app.workload import get_container
 
 import time
@@ -52,7 +53,7 @@ def _rows(item: Any) -> list[dict[str, Any]]:
     container exec, especially for OpenShell workloads. A fixed `ps` command
     yields the PID namespace the operator sees and the action endpoint targets.
     """
-    result = item.exec_run(["ps", "-eo", "pid=,ppid=,user=,%cpu=,%mem=,etime=,args="], stdout=True, stderr=True)
+    result = exec_run(item, ["ps", "-eo", "pid=,ppid=,user=,%cpu=,%mem=,etime=,args="])
     if result.exit_code != 0:
         raise HTTPException(409, "the sandbox process table is unavailable")
     entries = []
@@ -112,7 +113,7 @@ def process_action(name: str, pid: int, request: ProcessAction) -> dict[str, Any
             raise HTTPException(422, "action must be terminate, kill, pause, resume, or set_nice")
         command = ["kill", f"-{signal}", str(pid)]
         message = f"Sent SIG{signal} to PID {pid}."
-    result = item.exec_run(command, stdout=True, stderr=True)
+    result = exec_run(item, command)
     if result.exit_code != 0:
         raise HTTPException(409, (result.output or b"process action failed").decode(errors="replace")[:512])
     return {"pid": pid, "action": request.action, "message": message}

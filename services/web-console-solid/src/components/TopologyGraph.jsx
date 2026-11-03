@@ -17,18 +17,19 @@
 
 import { For, Show, createMemo } from 'solid-js';
 
-const COLUMN = { supervisor: 0, gateway: 1, sandbox: 2, egress: 3 };
+const COLUMN = { supervisor: 0, gateway: 1, sandbox: 2, egress: 3, destination: 4 };
 
 const COLUMN_TITLE = {
   supervisor: 'Cluster',
   gateway: 'OpenShell gateway',
   sandbox: 'Sandbox',
   egress: 'Egress',
+  destination: 'Destinations',
 };
 
-const COLUMN_ORDER = ['supervisor', 'gateway', 'sandbox', 'egress'];
+const COLUMN_ORDER = ['supervisor', 'gateway', 'sandbox', 'egress', 'destination'];
 
-const WIDTH = 940;
+const WIDTH = 1140;
 const COLUMN_WIDTH = 190;
 const NODE_HEIGHT = 46;
 const NODE_GAP = 14;
@@ -38,7 +39,7 @@ const CAPTION = 20;
 
 export default function TopologyGraph(props) {
   const columns = createMemo(() => {
-    const buckets = { gateway: [], supervisor: [], sandbox: [], egress: [] };
+    const buckets = { gateway: [], supervisor: [], sandbox: [], egress: [], destination: [] };
     for (const node of props.nodes || []) {
       const column = COLUMN[node.kind];
       if (column === undefined) continue;
@@ -127,7 +128,7 @@ export default function TopologyGraph(props) {
   const height = createMemo(() => {
     const tallest = Math.max(
       1,
-      ...['gateway', 'supervisor', 'egress'].map((kind) => columns()[kind].length),
+      ...['gateway', 'supervisor', 'egress', 'destination'].map((kind) => columns()[kind].length),
     );
     return Math.max(
       HEADER + tallest * (NODE_HEIGHT + NODE_GAP),
@@ -164,7 +165,7 @@ export default function TopologyGraph(props) {
               return (
                 <Show when={from() && to()}>
                   <path
-                    class={`edge ${edge.kind || ''}`}
+                    class={`edge ${edge.kind || ''}${edge.blocked ? ' blocked' : ''}`}
                     d={curve(from(), to())}
                   />
                 </Show>
@@ -185,22 +186,43 @@ export default function TopologyGraph(props) {
           </For>
 
           <For each={[...positions().values()]}>
-            {(placed) => (
-              <g
-                class={`node ${placed.node.kind} ${tone(placed.node)}`}
-                transform={`translate(${placed.x}, ${placed.y})`}
-                onClick={() => props.onSelect?.(placed.node)}
-                role="button"
-                tabindex="0"
-              >
-                <rect width={COLUMN_WIDTH - 46} height={NODE_HEIGHT} rx="6" />
-                <text class="node-name" x="12" y="19">{truncate(placed.node.name, 22)}</text>
-                <text class="node-meta" x="12" y="35">
-                  {placed.node.status || placed.node.kind}
-                  {placed.node.drifted ? ' · drift' : ''}
-                </text>
-              </g>
-            )}
+            {(placed) => {
+              // A destination node carries no counts of its own; the edge that
+              // reaches it does. One number, one place.
+              const link = () =>
+                (props.edges || []).find(
+                  (edge) => edge.kind === 'egress' && edge.to === placed.node.id,
+                );
+              const isDestination = () => placed.node.kind === 'destination';
+              const label = () =>
+                isDestination() && placed.node.port
+                  ? placed.node.name + ':' + placed.node.port
+                  : placed.node.name;
+              const toneOf = () =>
+                isDestination() ? (link() && link().blocked ? 'bad' : 'ok') : tone(placed.node);
+              return (
+                <g
+                  class={'node ' + placed.node.kind + ' ' + toneOf()}
+                  transform={'translate(' + placed.x + ', ' + placed.y + ')'}
+                  onClick={() =>
+                    isDestination()
+                      ? props.onDestination?.(placed.node)
+                      : props.onSelect?.(placed.node)
+                  }
+                  role="button"
+                  tabindex="0"
+                >
+                  <rect width={COLUMN_WIDTH - 46} height={NODE_HEIGHT} rx="6" />
+                  <text class="node-name" x="12" y="19">{truncate(label(), 22)}</text>
+                  <text class="node-meta" x="12" y="35">
+                    {isDestination()
+                      ? (link() ? link().requests : 0) + ' req · ' + (link() ? link().denied : 0) + ' blocked'
+                      : placed.node.status || placed.node.kind}
+                    {placed.node.drifted ? ' · drift' : ''}
+                  </text>
+                </g>
+              );
+            }}
           </For>
         </svg>
       </Show>

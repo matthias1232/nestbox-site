@@ -142,7 +142,14 @@ def image_runs(image: str, entrypoint: str, argument: str) -> tuple[bool, str]:
 def scenario_catalogue() -> None:
     print("catalogue")
     for baseline, query in (("ubuntu-24.04", "ripgrep"), ("rocky-9", "vim"), ("alpine-3.21", "nginx")):
-        answer = call(f"/packages?baseline={baseline}&q={query}", expect=200)[1]
+        try:
+            answer = call(f"/packages?baseline={baseline}&q={query}", expect=200)[1]
+        except AssertionError:
+            # The runner is recreated by a parallel deploy now and then; a live
+            # index is a read, so asking once more is honest and cheap.
+            wait_for_api()
+            time.sleep(15)
+            answer = call(f"/packages?baseline={baseline}&q={query}", expect=200)[1]
         names = [hit["name"] for hit in answer["items"]]
         check(
             f"{baseline} live index",

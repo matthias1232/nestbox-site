@@ -22,6 +22,7 @@ import time
 from typing import Any
 
 import docker
+from app.gateway_exec import exec_run
 from docker.errors import APIError, NotFound
 from fastapi import APIRouter, HTTPException
 
@@ -139,7 +140,7 @@ def probe(name: str) -> dict[str, Any]:
     """Run the fixed script in the container and parse the answer."""
     item = container(name)
     try:
-        exit_code, output = item.exec_run(["/bin/sh", "-c", script_text()], demux=False, tty=False)
+        exit_code, output = exec_run(item, ["/bin/sh", "-c", script_text()], timeout=60)
     except APIError as exc:
         raise HTTPException(409, f"the sandbox cannot be inspected: {exc}") from exc
 

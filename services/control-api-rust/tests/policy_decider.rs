@@ -98,6 +98,16 @@ fn config(secret_dir: PathBuf) -> Config {
         body_limit_bytes: 1_048_576,
         rate_limit_per_minute: 600,
         terminal_idle_seconds: 30 * 60,
+        deploy_mode: nestbox_control_api::config::DeployMode::SelfHosted,
+        public_url: String::new(),
+        oidc: Vec::new(),
+        overlay: nestbox_control_api::config::OverlayConfig {
+            dir: Default::default(),
+            endpoint: String::new(),
+            hub_ip: "10.77.0.1".into(),
+            registry: "10.77.0.1:5000".into(),
+            control_url: "http://10.77.0.1:8080".into(),
+        },
     }
 }
 

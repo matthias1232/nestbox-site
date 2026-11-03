@@ -83,6 +83,42 @@ pub struct SandboxSpec {
     pub mounts: Vec<crate::domain::persist::MountSpec>,
     /// GPUs to hand to the container. Zero on a node without `container_gpu`.
     pub gpu_count: u32,
+    /// How deeply this sandbox's egress is observed (`direct`,
+    /// `forward_proxy`, `transparent`, `hybrid`). The adapter needs it before
+    /// the container exists: `direct` puts the container on a network with a
+    /// route out, and the two TLS-reading modes need the node CA mounted.
+    pub egress_mode: String,
+    /// The node the sandbox is placed on. `None` means the local node. The dispatcher needs it
+    /// at creation, before the sandbox row is committed and a lookup by name could find it.
+    pub node_id: Option<uuid::Uuid>,
+    /// Soft memory floor (`512m`); `None` leaves the engine's default.
+    pub memory_reservation: Option<String>,
+    /// Relative CPU weight for the scheduler; `None` leaves the engine's default.
+    pub cpu_shares: Option<i64>,
+}
+
+/// A script run over SSH on a machine that is not a node yet.
+///
+/// The credentials are used once, for this call, and are never stored (ADR 0057).
+/// There is deliberately no `Debug`, so a password cannot end up in a log line.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RemoteSshRun {
+    /// Host or IP.
+    pub host: String,
+    /// SSH port.
+    pub port: u16,
+    /// SSH user.
+    pub user: String,
+    /// Password, when no key is given.
+    pub password: Option<String>,
+    /// Private key text, when no password is given.
+    pub private_key: Option<String>,
+    /// The shell script, sent on stdin to `sh -s`.
+    pub script: String,
+    /// Environment for the script.
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Overall timeout in seconds.
+    pub timeout_seconds: u32,
 }
 
 /// What the runner found on its own host, as raw text the control plane parses.
@@ -214,6 +250,9 @@ pub struct ModelDownload {
     /// Refuse an artefact larger than this, so a mistyped repository cannot
     /// fill the node's disk before anyone notices.
     pub max_bytes: i64,
+    /// The node to download on; `None` means the local runner.
+    #[serde(default)]
+    pub node_id: Option<uuid::Uuid>,
 }
 
 /// Where a download left the artefact, and whether it had to fetch it.
@@ -239,6 +278,9 @@ pub struct ModelServe {
     pub memory_limit_bytes: i64,
     pub cpu_cores: f64,
     pub port: u16,
+    /// The node to serve on; `None` means the local runner.
+    #[serde(default)]
+    pub node_id: Option<uuid::Uuid>,
 }
 
 /// A started model server.
@@ -248,6 +290,9 @@ pub struct ModelServeResult {
     #[serde(default)]
     pub container_id: Option<String>,
     pub status: String,
+    /// Address `ip:port` the server is published on, on a joined node.
+    #[serde(default)]
+    pub published: Option<String>,
 }
 
 /// Convert an operator-facing memory limit into the form Docker accepts.
@@ -476,4 +521,28 @@ mod tests {
     fn an_absurd_value_is_refused_rather_than_sent_to_the_runtime() {
         assert!(normalize_memory_limit("2000g").is_err());
     }
+}
+
+/// One tagged image on a node, as its runner reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NodeImageFact {
+    pub image: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub size: i64,
+}
+
+/// What a snapshot of a persistent root produced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct SnapshotFact {
+    pub snapshot: String,
+    #[serde(default)]
+    pub bytes_added: i64,
+    #[serde(default)]
+    pub bytes_total: i64,
+    #[serde(default)]
+    pub files: i64,
+    #[serde(default)]
+    pub seconds: f64,
 }

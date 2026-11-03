@@ -77,6 +77,12 @@ pub struct InstantiateRequest {
     /// The sandbox to create. A recipe is a template, so the name is per
     /// sandbox and not stored on the recipe.
     pub name: String,
+    /// How much of the sandbox's traffic the proxy may read: `direct`,
+    /// `forward_proxy`, `transparent` or `hybrid`. Fixed when the container is
+    /// created, because a recipe sandbox cannot be recreated later. Omitted:
+    /// `transparent` for a recipe with a desktop, `forward_proxy` otherwise.
+    #[serde(default)]
+    pub egress_mode: Option<String>,
 }
 
 /// List recipes.
@@ -184,6 +190,7 @@ pub async fn instantiate(
         &auth.principal,
         id,
         &body.name,
+        body.egress_mode.as_deref(),
     )
     .await?;
     Ok((StatusCode::CREATED, Json(sandbox)))

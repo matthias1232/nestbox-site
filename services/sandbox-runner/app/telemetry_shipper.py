@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import os
 import time
 import urllib.error
@@ -31,6 +32,10 @@ logger = logging.getLogger("nestbox.runner.telemetry")
 
 POLL_SECONDS = float(os.getenv("NESTBOX_TELEMETRY_POLL_SECONDS", "2"))
 MAX_BATCH = 400
+# The control API refuses a request body over 1 MiB (it closes the connection, which
+# the shipper sees as a broken pipe). Bodies of chat requests are large, so a batch
+# is cut by size as well as by count.
+MAX_BATCH_BYTES = 800_000
 SEEN_LIMIT = 2000
 
 #: Envoy prints "-" for a field it has no value for.
@@ -76,6 +81,9 @@ def split_host(authority: str | None) -> tuple[str | None, int | None]:
     return (host or text), _int(port)
 
 
+TIMESTAMP_INSIDE = re.compile(r"(?<=[A-Za-z0-9+/=])\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?")
+
+
 def record_from_line(line: str) -> dict[str, Any] | None:
     """One access-log line as the control API's traffic entry, or `None`.
 
@@ -85,8 +93,13 @@ def record_from_line(line: str) -> dict[str, Any] | None:
     start = line.find("{")
     if start < 0:
         return None
+    # Docker cuts a long line into 16 KiB pieces and puts a timestamp in front of
+    # each piece, so a recorded body arrives with timestamps inside its base64.
+    # Neither base64 nor JSON ever contains this shape, so removing it restores
+    # the line exactly as the proxy wrote it.
+    body = TIMESTAMP_INSIDE.sub("", line[start:])
     try:
-        raw = json.loads(line[start:])
+        raw = json.loads(body)
     except ValueError:
         return None
     if not isinstance(raw, dict) or "target_host" not in raw and "host" not in raw:
@@ -117,8 +130,14 @@ def record_from_line(line: str) -> dict[str, Any] | None:
         "sni": _text(raw.get("sni")),
         "app_protocol": _text(raw.get("app_protocol")),
         "user_agent": _text(raw.get("user_agent")),
+        "request_body": _text(raw.get("request_body")),
+        "response_body": _text(raw.get("response_body")),
+        "usage": _text(raw.get("usage")),
+        "cache_markers": _text(raw.get("cache_markers")),
+        "llm_auth": _text(raw.get("llm_auth")),
         "request_id": _text(raw.get("request_id")),
         "decision": _text(raw.get("decision")),
+        "would_deny": _text(raw.get("would_deny")),
         "reason": _text(raw.get("reason")),
         "rule_id": _uuid(raw.get("rule_id")),
         "mcp_session_id": _text(raw.get("mcp_session_id")),
@@ -139,8 +158,8 @@ def node_token() -> str:
     return os.getenv("NESTBOX_NODE_TOKEN", "").strip()
 
 
-def post_batch(entries: list[dict[str, Any]]) -> bool:
-    """Send one batch. `True` when the control API stored it."""
+def post_batch(entries: list[dict[str, Any]]) -> str:
+    """Send one batch: `ok`, `refused` (a 4xx: this content will never be accepted), or `retry`."""
     base = os.getenv("NESTBOX_CONTROL_API_URL", "http://control-api:8000")
     body = json.dumps(
         {
@@ -160,12 +179,57 @@ def post_batch(entries: list[dict[str, Any]]) -> bool:
     )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310 - internal URL
-            return 200 <= response.status < 300
+            return "ok" if 200 <= response.status < 300 else "retry"
     except urllib.error.HTTPError as failure:
         logger.warning("telemetry batch refused: %s %s", failure.code, failure.read()[:200])
+        # A 4xx says the content is wrong (an unknown sandbox, a bad body), not
+        # that the server is down; sending it again changes nothing. 429 and 408
+        # are the exceptions: those are "later".
+        return "refused" if 400 <= failure.code < 500 and failure.code not in (408, 429) else "retry"
     except OSError as failure:
         logger.warning("telemetry batch not delivered: %s", failure)
-    return False
+    return "retry"
+
+
+def take_batch(pending: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The next entries to send: up to `MAX_BATCH`, and up to `MAX_BATCH_BYTES` of JSON.
+
+    At least one entry is always taken, so a single large one still goes out alone.
+    """
+    batch: list[dict[str, Any]] = []
+    size = 0
+    for entry in pending[:MAX_BATCH]:
+        cost = len(json.dumps(entry))
+        if batch and size + cost > MAX_BATCH_BYTES:
+            break
+        batch.append(entry)
+        size += cost
+    return batch
+
+
+def ship(entries: list[dict[str, Any]]) -> int:
+    """Deliver as much of `entries` as can be delivered; how many were dealt with.
+
+    A refused batch is split in halves until the entry the control API objects to
+    stands alone, and only that one is dropped. Without this, a single line about
+    a sandbox that no longer exists is resent forever and holds back everything
+    behind it, and the console shows no traffic at all.
+    """
+    if not entries:
+        return 0
+    result = post_batch(entries)
+    if result == "ok":
+        return len(entries)
+    if result == "retry":
+        return 0
+    if len(entries) == 1:
+        logger.warning("dropping a telemetry entry the control API refuses: host=%s", entries[0].get("host"))
+        return 1
+    middle = len(entries) // 2
+    done = ship(entries[:middle])
+    if done < middle:
+        return done
+    return middle + ship(entries[middle:])
 
 
 def post_json(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -228,10 +292,11 @@ async def run() -> None:
                 if record is not None:
                     pending.append(record)
             while pending:
-                batch = pending[:MAX_BATCH]
-                if not await asyncio.to_thread(post_batch, batch):
+                batch = take_batch(pending)
+                done = await asyncio.to_thread(ship, batch)
+                del pending[:done]
+                if done < len(batch):
                     break
-                del pending[: len(batch)]
             # A control API that stays down must not grow memory without bound.
             if len(pending) > 20_000:
                 del pending[: len(pending) - 20_000]

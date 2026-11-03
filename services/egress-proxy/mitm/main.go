@@ -27,6 +27,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -112,6 +113,10 @@ func main() {
 		},
 	}
 
+	// The hop that leaves for the internet, verified here (see upstream.go).
+	go serveUpstream(envOr("NESTBOX_EGRESS_UPSTREAM_LISTEN", defaultUpstream),
+		loadRoots(envOr("NESTBOX_UPSTREAM_ROOTS", "/etc/envoy/mozilla-ca.pem")))
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -126,6 +131,17 @@ func main() {
 func handle(conn net.Conn, cfg *tls.Config, innerAddr string) {
 	defer conn.Close()
 
+	// Envoy sends the sandbox's address ahead of the TLS bytes (PROXY protocol
+	// v1). Without it the inner hop would see 127.0.0.1 and the control API could
+	// not tell which sandbox is asking. A connection that does not start with the
+	// header is not from Envoy and is dropped: this port is loopback only, and
+	// guessing an identity would be worse than refusing.
+	origin, err := readProxyHeader(conn)
+	if err != nil {
+		log.Printf("egress-mitm: no PROXY header from %s: %v", conn.RemoteAddr(), err)
+		return
+	}
+
 	// The handshake is where the certificate is chosen. A failure here is a
 	// client that cannot use this tunnel (no SNI, a name we cannot sign); it
 	// is not a reason to keep the connection open.
@@ -136,7 +152,18 @@ func handle(conn net.Conn, cfg *tls.Config, innerAddr string) {
 	}
 	sni := client.ConnectionState().ServerName
 
-	inner, err := tls.Dial("tcp", innerAddr, &tls.Config{
+	raw, err := net.DialTimeout("tcp", innerAddr, 3*time.Second)
+	if err != nil {
+		log.Printf("egress-mitm: connect to the inner listener for %q: %v", sni, err)
+		return
+	}
+	defer raw.Close()
+	// Hand the sandbox's address on, before the first TLS byte.
+	if _, err := fmt.Fprintf(raw, "PROXY TCP4 %s 127.0.0.1 %d 10000\r\n", origin.ip, origin.port); err != nil {
+		log.Printf("egress-mitm: write PROXY header: %v", err)
+		return
+	}
+	inner := tls.Client(raw, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		// The inner hop is loopback and its certificate is generated at image
 		// build time; the peer is authenticated by the address, not by PKI.
@@ -144,8 +171,8 @@ func handle(conn net.Conn, cfg *tls.Config, innerAddr string) {
 		ServerName:         sni,
 		InsecureSkipVerify: true,
 	})
-	if err != nil {
-		log.Printf("egress-mitm: connect to the inner listener for %q: %v", sni, err)
+	if err := inner.Handshake(); err != nil {
+		log.Printf("egress-mitm: inner handshake for %q: %v", sni, err)
 		return
 	}
 	defer inner.Close()
@@ -285,4 +312,43 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// origin is the sandbox's address as Envoy saw it.
+type origin struct {
+	ip   string
+	port int
+}
+
+// readProxyHeader reads one PROXY protocol v1 line and nothing after it.
+//
+// One byte at a time on purpose: a buffered reader would swallow the start of
+// the TLS ClientHello that follows, and the handshake would then hang.
+func readProxyHeader(conn net.Conn) (origin, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
+	var line bytes.Buffer
+	one := make([]byte, 1)
+	for line.Len() < 108 {
+		if _, err := io.ReadFull(conn, one); err != nil {
+			return origin{}, err
+		}
+		line.WriteByte(one[0])
+		if bytes.HasSuffix(line.Bytes(), []byte("\r\n")) {
+			break
+		}
+	}
+	fields := strings.Fields(strings.TrimSpace(line.String()))
+	if len(fields) != 6 || fields[0] != "PROXY" || fields[1] != "TCP4" {
+		return origin{}, fmt.Errorf("unexpected header %q", strings.TrimSpace(line.String()))
+	}
+	ip := net.ParseIP(fields[2])
+	if ip == nil || ip.To4() == nil {
+		return origin{}, fmt.Errorf("bad source address %q", fields[2])
+	}
+	port := 0
+	if _, err := fmt.Sscanf(fields[4], "%d", &port); err != nil || port < 1 || port > 65535 {
+		return origin{}, fmt.Errorf("bad source port %q", fields[4])
+	}
+	return origin{ip: ip.String(), port: port}, nil
 }

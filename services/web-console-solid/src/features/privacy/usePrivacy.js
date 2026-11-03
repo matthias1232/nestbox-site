@@ -23,6 +23,7 @@ const ACTIONS = [
   { id: 'block', label: 'block' },
   { id: 'redact', label: 'redact' },
   { id: 'replace', label: 'replace' },
+  { id: 'pseudonymize', label: 'pseudonymize (the model sees a placeholder, the agent gets the value back)' },
   { id: 'allow', label: 'allow' },
 ];
 
@@ -40,6 +41,7 @@ function draftFrom(settings) {
     actions: { ...(settings?.actions || {}) },
     block_cloud_egress: Boolean(settings?.block_cloud_egress),
     retention_days: Number.isFinite(settings?.retention_days) ? settings.retention_days : 30,
+    enforce_hosts: [...(settings?.enforce_hosts || [])],
   };
 }
 
@@ -129,6 +131,15 @@ export function usePrivacy() {
     setDraft({ ...draft(), block_cloud_egress: Boolean(value) });
 
   const setRetentionDays = (value) => setDraft({ ...draft(), retention_days: value });
+  // One host per line, blank lines dropped: the server checks the shape.
+  const setEnforceHosts = (value) =>
+    setDraft({
+      ...draft(),
+      enforce_hosts: String(value)
+        .split(/[\s,]+/)
+        .map((host) => host.trim())
+        .filter(Boolean),
+    });
 
   /// The action a detector carries: this sandbox's saved choice, else the
   /// server's default. An unknown detector falls back to `block`, never to a
@@ -157,6 +168,7 @@ export function usePrivacy() {
         actions: draft().actions,
         block_cloud_egress: draft().block_cloud_egress,
         retention_days: Number(draft().retention_days),
+        enforce_hosts: draft().enforce_hosts,
       };
       const known = detectors();
       const answer = await api.saveSettings(body);
@@ -251,6 +263,7 @@ export function usePrivacy() {
     result,
     pendingPurge,
     load,
+    setEnforceHosts,
     setMode,
     toggleDetector,
     setAction,

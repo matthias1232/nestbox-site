@@ -590,7 +590,15 @@ pub fn build(input: &StackInput) -> StackTopology {
             server.name.clone(),
             format!("An MCP server ({}) the agent can call as a tool.", server.transport),
             status,
-            if server.enabled { server.status.clone() } else { "disabled".to_string() },
+            if !server.enabled {
+                "disabled".to_string()
+            } else if server.transport == "stdio" && server.status == "unknown" {
+                // A stdio server is started by the agent inside the sandbox, so
+                // nothing outside can probe it. "unknown" read like a fault.
+                "runs in the sandbox".to_string()
+            } else {
+                server.status.clone()
+            },
         );
         item.sandbox_id = Some(server.sandbox_id);
         item.facts.push(fact("Transport", server.transport.clone()));

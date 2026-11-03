@@ -36,7 +36,24 @@ impl FromRequestParts<AppState> for Auth {
         let headers = &parts.headers;
 
         if let Some(token) = bearer_token(headers) {
-            let principal = auth_service::principal_from_token(state.pool(), &token).await?;
+            let mut principal = auth_service::principal_from_token(state.pool(), &token).await?;
+
+            // A token names the environment it works in through the same header a
+            // browser uses, so a script can address a data center other than the
+            // one that sorts first. The membership check is the same one the
+            // cookie branch runs, so the header can never widen a credential: a
+            // data center the token has no role in is a 403, an unknown id a 404.
+            if let Some(requested) = requested_environment(parts, principal.environment_id) {
+                principal = auth_service::principal_for_environment(
+                    state.pool(),
+                    principal.user_id,
+                    &principal.display_name,
+                    requested,
+                    principal.via,
+                )
+                .await?;
+            }
+
             // A token request is not a browser request, so CSRF does not apply:
             // there is no ambient credential for a cross-site form to ride on.
             return Ok(Self {
@@ -58,17 +75,15 @@ impl FromRequestParts<AppState> for Auth {
 
         // A browser may name the environment it is working in. It is honoured
         // only if the user is actually a member, which the service checks.
-        if let Some(requested) = environment_header(headers) {
-            if requested != principal.environment_id {
-                principal = auth_service::principal_for_environment(
-                    state.pool(),
-                    principal.user_id,
-                    &principal.display_name,
-                    requested,
-                    principal.via,
-                )
-                .await?;
-            }
+        if let Some(requested) = requested_environment(parts, principal.environment_id) {
+            principal = auth_service::principal_for_environment(
+                state.pool(),
+                principal.user_id,
+                &principal.display_name,
+                requested,
+                principal.via,
+            )
+            .await?;
         }
 
         if is_mutating(&parts.method) {
@@ -127,6 +142,42 @@ fn environment_header(headers: &HeaderMap) -> Option<uuid::Uuid> {
         .and_then(|value| uuid::Uuid::parse_str(value.trim()).ok())
 }
 
+/// The environment named in the query string of a GET request.
+///
+/// The browser cannot put a header on a `WebSocket` upgrade or on an
+/// `EventSource` request, so the terminal, the desktop and every live stream
+/// carry the chosen data center here instead. Only GET is accepted: a mutating
+/// request keeps using the header, so a link cannot move a write into another
+/// data center.
+fn environment_query(parts: &Parts) -> Option<uuid::Uuid> {
+    if parts.method != Method::GET {
+        return None;
+    }
+    let query = parts.uri.query()?;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=')?;
+        if key == "environment" {
+            return uuid::Uuid::parse_str(value.trim()).ok();
+        }
+    }
+    None
+}
+
+/// The environment a request asks for, when it differs from the one the
+/// credential resolved to.
+///
+/// `None` means "no switch", and it covers three cases that must behave the
+/// same: nothing named, a value that does not parse, and a value naming the
+/// environment the credential is already acting in. A malformed value is
+/// therefore never a failure — the request simply runs where it would have run
+/// without it. The header wins over the query, both branches call this one
+/// function, so a script, a browser and a WebSocket cannot drift apart.
+fn requested_environment(parts: &Parts, current: uuid::Uuid) -> Option<uuid::Uuid> {
+    environment_header(&parts.headers)
+        .or_else(|| environment_query(parts))
+        .filter(|requested| *requested != current)
+}
+
 /// Read one cookie without pulling in a cookie crate.
 ///
 /// The parsing is small and total: a malformed header yields `None` rather than
@@ -153,6 +204,71 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+
+    /// Build the parts of a GET without a body, for the environment tests.
+    fn get_parts(uri: &str) -> Parts {
+        axum::http::Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .body(())
+            .expect("a request")
+            .into_parts()
+            .0
+    }
+
+    #[test]
+    fn a_get_may_name_its_environment_in_the_query() {
+        let parts = get_parts("/api/v1/sandboxes/1/terminal?tab=t1&environment=00000000-0000-0000-0000-000000000002");
+        assert_eq!(
+            environment_query(&parts),
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").ok()
+        );
+    }
+
+    #[test]
+    fn a_malformed_query_environment_is_ignored() {
+        assert_eq!(environment_query(&get_parts("/x?environment=not-a-uuid")), None);
+        assert_eq!(environment_query(&get_parts("/x?tab=1")), None);
+        assert_eq!(environment_query(&get_parts("/x")), None);
+    }
+
+    #[test]
+    fn a_write_ignores_the_query_environment() {
+        let (parts, _) = axum::http::Request::builder()
+            .method(Method::POST)
+            .uri("/x?environment=00000000-0000-0000-0000-000000000002")
+            .body(())
+            .expect("a request")
+            .into_parts();
+        assert_eq!(environment_query(&parts), None);
+    }
+
+    #[test]
+    fn the_header_wins_over_the_query() {
+        let mut parts = get_parts("/x?environment=00000000-0000-0000-0000-000000000003");
+        parts.headers.insert(
+            "x-nestbox-environment",
+            HeaderValue::from_static("00000000-0000-0000-0000-000000000002"),
+        );
+        let current = uuid::Uuid::nil();
+        assert_eq!(
+            requested_environment(&parts, current),
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").ok()
+        );
+    }
+
+    #[test]
+    fn naming_the_current_environment_is_no_switch() {
+        let parts = get_parts("/x?environment=00000000-0000-0000-0000-000000000002");
+        assert_eq!(
+            requested_environment(
+                &parts,
+                uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("a uuid")
+            ),
+            None
+        );
+    }
 
     #[test]
     fn a_cookie_is_found_among_several() {
@@ -215,6 +331,106 @@ mod tests {
         assert!(is_mutating(&Method::DELETE));
         assert!(!is_mutating(&Method::GET));
         assert!(!is_mutating(&Method::HEAD));
+    }
+
+    const FIRST: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const SECOND: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+    fn with_environment_header(value: &'static str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-nestbox-environment", HeaderValue::from_static(value));
+        headers
+    }
+
+    #[test]
+    fn the_environment_header_is_parsed_and_surrounding_space_ignored() {
+        let headers = with_environment_header(" aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa ");
+        assert_eq!(
+            environment_header(&headers),
+            Some(uuid::Uuid::parse_str(FIRST).expect("valid uuid"))
+        );
+    }
+
+    #[test]
+    fn the_environment_header_is_read_regardless_of_case() {
+        let name = axum::http::header::HeaderName::from_bytes(b"X-Nestbox-Environment")
+            .expect("valid header name");
+        let mut headers = HeaderMap::new();
+        headers.insert(name, HeaderValue::from_static(SECOND));
+        assert_eq!(
+            environment_header(&headers),
+            Some(uuid::Uuid::parse_str(SECOND).expect("valid uuid"))
+        );
+    }
+
+    /// The parts of a GET that carries `headers`, for the switch tests.
+    fn parts_with(headers: HeaderMap) -> Parts {
+        let (mut parts, _) = axum::http::Request::builder()
+            .method(Method::GET)
+            .uri("/x")
+            .body(())
+            .expect("a request")
+            .into_parts();
+        parts.headers = headers;
+        parts
+    }
+
+    #[test]
+    fn an_unparseable_environment_header_is_not_a_request() {
+        for value in ["", "default", "not-a-uuid", "00000000-0000-0000-0000"] {
+            let headers = with_environment_header(value);
+            assert_eq!(environment_header(&headers), None, "header {value:?}");
+            assert_eq!(
+                requested_environment(&parts_with(headers), uuid::Uuid::parse_str(FIRST).expect("valid uuid")),
+                None,
+                "header {value:?} must not switch the data center"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_without_the_environment_header_does_not_switch() {
+        assert_eq!(
+            requested_environment(&parts_with(HeaderMap::new()), uuid::Uuid::parse_str(FIRST).expect("valid uuid")),
+            None
+        );
+    }
+
+    #[test]
+    fn the_header_switches_only_to_a_different_environment() {
+        let first = uuid::Uuid::parse_str(FIRST).expect("valid uuid");
+        let second = uuid::Uuid::parse_str(SECOND).expect("valid uuid");
+
+        // Naming the environment the credential already resolved to is a no-op,
+        // so a client may send the header unconditionally without a second
+        // membership lookup.
+        let same = parts_with(with_environment_header(FIRST));
+        assert_eq!(requested_environment(&same, first), None);
+
+        let different = parts_with(with_environment_header(SECOND));
+        assert_eq!(requested_environment(&different, first), Some(second));
+    }
+
+    /// The token branch asks the same question the session branch asks.
+    ///
+    /// A token resolves to the environment that sorts first by name, and the
+    /// header only replaces it when it names another one; the id that comes back
+    /// is what `auth_service::principal_for_environment` receives together with
+    /// `principal.via` (`Token`), so membership is checked exactly as for a
+    /// browser session and CSRF stays out of the token path.
+    #[test]
+    fn a_token_switches_only_when_it_names_another_data_center() {
+        let resolved = uuid::Uuid::parse_str(FIRST).expect("valid uuid");
+
+        assert_eq!(requested_environment(&parts_with(HeaderMap::new()), resolved), None);
+        assert_eq!(
+            requested_environment(&parts_with(with_environment_header(FIRST)), resolved),
+            None
+        );
+        assert_eq!(
+            requested_environment(&parts_with(with_environment_header(SECOND)), resolved),
+            Some(uuid::Uuid::parse_str(SECOND).expect("valid uuid"))
+        );
     }
 }
 

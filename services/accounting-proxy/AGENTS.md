@@ -33,9 +33,55 @@ upstream as it would without this proxy.
 | `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings` | `NESTBOX_OPENAI_UPSTREAM` |
 | `/v1beta/models/...` (Gemini), anything else | `NESTBOX_DEFAULT_UPSTREAM` |
 | any path, with `X-Nestbox-Upstream: https://…` | that URL, overriding the table |
+| any path under `/s/<sandbox>/r/…` | the granted model's `upstream_base` (see below) |
+
+**Identity in the path.** The egress proxy between a sandbox and this service
+drops `X-Nestbox-*` headers, so the sandbox rides in the path:
+`/s/<sandbox-name>/…` names it, and an optional `/u/<http|https>/<host[:port]>`
+right after names the upstream (the gateway the agent was configured for). Both
+are stripped before forwarding. A malformed prefix counts as no prefix. The
+control API writes these URLs into the agent environment when
+`NESTBOX_ACCOUNTING_PROXY_URL` is set (`agent_config::route_through_accounting`).
 
 `GET /healthz` answers `{"status":"ok","service":"accounting-proxy"}` and needs
 no token. Every other method on every other path is forwarded.
+
+**The model router.** `/s/<sandbox>/r/<rest>` is the sandbox's model router: the
+control plane grants models per sandbox, and the grant named in the request body
+decides where the request goes. The proxy asks
+`GET /api/v1/internal/accounting/models/<sandbox>` (same `Authorization: Bearer
+$NESTBOX_ACCOUNTING_TOKEN`, same header as the record call) and gets
+`{"default": "name", "models": [{"model_name", "upstream_base",
+"upstream_model", "authorization"}]}`. The answer is cached for 10 s per sandbox
+(`routes_for`); a failed refresh keeps the last known grants, so a control API
+blip does not stop a working agent. With nothing cached, the grant list is empty
+and every model request gets `404 model_not_granted`.
+
+- `GET …/r/v1/models` is answered here, in the OpenAI list shape, with the
+  **granted** names (`{"object": "list", "data": [{"id", "object", "owned_by"}]}`).
+  It is not forwarded and no row is written.
+- Any other request: `model` from the body, else the sandbox default. No grant
+  for that name → `404 {"error": {"type": "model_not_granted", "message": "Model
+  <name> is not granted to this sandbox."}}`, nothing forwarded.
+- `upstream_model` different from the granted name renames `body["model"]` before
+  inspection (so the bytes inspected are the bytes forwarded); `Content-Length`
+  follows the new body.
+- Upstream is `upstream_base + rest`; the dialect for the row still comes from
+  the rest path. A grant's `authorization` replaces the caller's `Authorization`
+  header when it is not null, otherwise the caller's header is forwarded as
+  usual. `X-Nestbox-Upstream` is ignored on this path: the grant decides.
+- The routes document and its `authorization` values are never logged.
+
+**Model clusters.** `/c/<cluster_id>/<rest>` forwards to one healthy member of a
+cluster. `cluster_view` fetches `GET /api/v1/internal/accounting/clusters/<id>`
+(`{"id","strategy","model_key","members":[{"install_id","endpoint","weight","healthy"}]}`),
+cached 10 s with a stale fallback; none at all is `503 cluster.unavailable`.
+`choose_member` picks by strategy: `round_robin` (weighted, counter per cluster),
+`least_loaded` (fewest in-flight here), `failover` (first healthy). A connection
+error or timeout before any byte marks the member down for 30 s and the next is
+tried once. The answer carries `x-nestbox-cluster-member: <install_id>`; the
+accounting row's `detail` holds `{"cluster_id","install_id"}`. Content inspection
+runs as on every other path.
 
 The forwarded request carries the client's headers, minus hop-by-hop headers,
 `Host`, `Content-Length` (recomputed) and `X-Nestbox-Upstream` (ours, not the
@@ -63,8 +109,8 @@ so a restart loses nothing and a container can be replaced freely.
 
 ## What the control API is asked, and what it answers
 
-Both calls use `Authorization: Bearer $NESTBOX_ACCOUNTING_TOKEN`. That is a node
-token for the internal endpoints, not a provider credential.
+All three calls use `Authorization: Bearer $NESTBOX_ACCOUNTING_TOKEN`. That is a
+node token for the internal endpoints, not a provider credential.
 
 **Inspect, before forwarding** — `POST /api/v1/internal/privacy/inspect`:
 
@@ -102,11 +148,24 @@ counters are normalised: OpenAI `prompt_tokens`/`completion_tokens`/
 `cache_read_input_tokens`, and Gemini `promptTokenCount`/`candidatesTokenCount`/
 `cachedContentTokenCount` all land in the same four keys.
 
+**Model grants, for the router** — `GET /api/v1/internal/accounting/models/<sandbox>`:
+
+```json
+{"default": "fast", "models": [{"model_name": "fast", "upstream_base": "http://10.90.92.30:20128", "upstream_model": "qwen3:1.7b", "authorization": "Bearer ..."}]}
+```
+
+`upstream_base` has no trailing `/v1`; `authorization` is a whole header value or
+`null`. This document is cached for 10 s per sandbox and is never logged, because
+it carries credentials.
+
 ## Rules
 
 1. **Credentials are forwarded, not stored.** No provider key is read from the
    environment, and none is added or rewritten. `Authorization` and `x-api-key`
-   are copied as they arrived.
+   are copied as they arrived. The single exception is a granted model on the
+   router path whose grant carries its own `authorization`: that header is set
+   from the grant, and the caller's own `Authorization` is dropped for that
+   request. A grant value never enters a log line, a row, or an error.
 2. **No content is logged or stored.** The row carries a digest; the inspect
    call carries the text it must judge and nothing else. `log_message` prints the
    path, the status and the duration — never a header, never a body.
@@ -129,7 +188,8 @@ counters are normalised: OpenAI `prompt_tokens`/`completion_tokens`/
    has it; a failure prints one line and is dropped. Metadata may be lost, an
    answer may not be corrupted.
 8. **The upstream override is validated.** Only `http` and `https` are accepted,
-   so `X-Nestbox-Upstream: file:///etc/passwd` is a `400`, not a file read.
+   so `X-Nestbox-Upstream: file:///etc/passwd` is a `400`, not a file read. A
+   grant's `upstream_base` is checked the same way (`route_base`).
 9. **Streams are relayed, not reassembled.** A `stream: true` request (or an
    `text/event-stream` answer) is copied in chunks with a flush per chunk, on a
    closing connection, and accounted for status and latency only.
@@ -155,6 +215,14 @@ blocked request not being forwarded, a replaced body (single and per-message),
 the exact usage numbers in a row, the digest, `not_inspectable` for a binary
 body, streaming with `usage: null`, and both sides of the fail-closed switch.
 
+The router has its own class: a granted model is renamed to its `upstream_model`
+and sent with the grant's own key, the caller's key stays when the grant has
+none, the default model is used when the body names none, an ungranted model is
+a 404 that is never forwarded, `X-Nestbox-Upstream` cannot override a grant,
+`/v1/models` lists the granted names, and a routed request still writes a row
+with the sandbox from the path. `routes_for` is tested for its 10 s cache, its
+stale-on-error fallback and its empty answer without a control API.
+
 Because a row is posted after the answer, each test names its own row by model,
 endpoint or privacy action instead of assuming the first row it sees is its own.
 
@@ -170,5 +238,9 @@ endpoint or privacy action instead of assuming the first row it sees is its own.
   reading it would mean parsing the stream, which the byte-for-byte rule forbids.
 - A queue for accounting rows, so a slow control API cannot slow a request
   thread. Today the post is synchronous after the answer.
-- Per-sandbox upstream selection from the control store, instead of env plus a
-  header.
+- A model request that is routed still runs the normal content inspection
+  against the destination host, but a grant that renames the model does not
+  rename the `model` field of the row: the row names what the upstream ran, not
+  the name the agent asked for.
+- No invalidation: a changed grant reaches a running proxy within 10 s. There is
+  no push from the control API and no per-request bypass.

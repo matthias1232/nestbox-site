@@ -93,3 +93,13 @@ export function logs(key, node, tail = 200) {
 export function metrics(key, node, limit = 120) {
   return request(`models/${key}/metrics${query({ node, limit })}`);
 }
+
+/**
+ * Install one model on many nodes as a job (contract C6).
+ *
+ * `body`: { nodes, site_id, environment_wide, force, make_cluster: { name, strategy } }.
+ * The answer is `{ job_id, targets }`.
+ */
+export function installBulk(key, body) {
+  return request(`models/${encodeURIComponent(key)}/install-bulk`, { method: 'POST', body });
+}

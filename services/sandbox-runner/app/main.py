@@ -18,7 +18,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from app import inventory as inventory_probe
+from app import remote_ssh
 from app import processes as process_table
+from app import connections as socket_table
+from app import vnc as desktop_stream
+from app import commands as command_feed
 from app import stats as resource_stats
 from app import terminal as terminal_transport
 from app import forwards as published_ports
@@ -27,6 +31,9 @@ from app import telemetry_shipper
 from app import host as host_load
 from app import backups as root_backups
 from app import catalogue as package_catalogue
+from app import registry_images
+from app import snapshots as root_snapshots
+from app import ca_bundle
 from app.model_metrics import parse_prometheus
 from app import openshell_backend as osh
 from app.images import image_allowed
@@ -34,6 +41,38 @@ from app.workload import get_container, list_workloads, openshell_name, sandbox_
 
 app = FastAPI(title="Nestbox Sandbox Runtime", version="1.0.0")
 client = docker.from_env()
+
+
+def _expected_token() -> str:
+    path = os.getenv("NESTBOX_NODE_TOKEN_FILE", "")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError:
+            return ""
+    return os.getenv("NESTBOX_NODE_TOKEN", "").strip()
+
+
+@app.middleware("http")
+async def require_node_token(request, call_next):
+    """On a node reached over the network, every request carries the node token.
+
+    The appliance's own runner sits on a private compose network and does not set this. A joined
+    node does (ADR 0047): its runner holds the Docker socket, so an unauthenticated port on any
+    network is a root shell. No token configured is a refusal, never an open door. WebSockets
+    (terminal, desktop) check the token themselves in their handshake.
+    """
+    if os.getenv("NESTBOX_RUNNER_REQUIRE_TOKEN") == "1" and request.url.path != "/healthz":
+        import hmac
+        from fastapi.responses import JSONResponse
+
+        expected = _expected_token()
+        header = request.headers.get("authorization", "")
+        presented = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        if not expected or not presented or not hmac.compare_digest(expected, presented):
+            return JSONResponse({"detail": "The node token was refused."}, status_code=401)
+    return await call_next(request)
 
 # Uvicorn configures its own loggers and leaves the root logger bare, so a module
 # logger's `info` would be dropped and only its warnings would reach the console
@@ -53,6 +92,9 @@ logger = logging.getLogger("nestbox.runner")
 # exists; `inventory`, `processes`, and `stats` answer real data today.
 app.include_router(resource_stats.router)
 app.include_router(process_table.router)
+app.include_router(socket_table.router)
+app.include_router(desktop_stream.router)
+app.include_router(command_feed.router)
 app.include_router(inventory_probe.router)
 app.include_router(terminal_transport.router)
 app.include_router(published_ports.router)
@@ -60,6 +102,9 @@ app.include_router(appliance_components.router)
 app.include_router(host_load.router)
 app.include_router(root_backups.router)
 app.include_router(package_catalogue.router)
+app.include_router(remote_ssh.router)
+app.include_router(registry_images.router)
+app.include_router(root_snapshots.router)
 
 
 def adopt_restart_policy() -> None:
@@ -110,6 +155,16 @@ REDIRECT_PORTS = (80, 443, 8080)
 # so `..` and symlinks cannot escape it. Empty disables mounts entirely.
 PERSISTENT_BASE = os.path.realpath(os.getenv("NESTBOX_PERSISTENT_BASE", "/var/lib/nestbox/persistent"))
 HOST_PROC = os.getenv("NESTBOX_HOST_PROC", "/proc")
+# The network a sandbox with `direct` egress joins: an ordinary bridge with a
+# default route, which is what "no proxy" means. It is separate from the stack's
+# `control` network on purpose — a sandbox must not reach the database or the
+# control API just because it may reach the internet.
+DIRECT_NETWORK = os.getenv("NESTBOX_DIRECT_NETWORK", "nestbox-sandbox-direct")
+# The deployment CA, as this container sees it. Mounted into a sandbox in every
+# mode that uses the proxy; the file itself is never in an image. The target is
+# owned by `app/ca_bundle.py`, which mounts it together with the bundle.
+EGRESS_CA_HOST = os.getenv("NESTBOX_EGRESS_CA", "/run/egress/ca.crt")
+EGRESS_CA_TARGET = ca_bundle.EGRESS_CA_TARGET
 
 
 
@@ -151,11 +206,21 @@ class SandboxRequest(BaseModel):
     tool_profile: str = "development-default"
     environment: dict[str, str] = Field(default_factory=dict)
     memory_limit: str = "1g"
+    # A reservation is not a limit: it is what the scheduler may count on, so a
+    # sandbox is placed where that much memory is really free without being
+    # capped at it. `cpu_shares` is relative weight, not a quota, and it only
+    # matters when the node is contended.
+    memory_reservation: str | None = None
+    cpu_shares: int | None = None
     cpu_limit: float = Field(default=1.0, gt=0, le=8)
     pids_limit: int = Field(default=256, ge=32, le=4096)
     ports: dict[str, int] = Field(default_factory=dict)
     mounts: list[MountSpec] = Field(default_factory=list)
     gpu_count: int = Field(default=0, ge=0, le=8)
+    # `direct`, `forward_proxy`, `transparent` or `hybrid`. Two of them change
+    # how the container is placed: `direct` needs a route out, the TLS-reading
+    # ones need the node CA.
+    egress_mode: str = "forward_proxy"
 
 
 def container_name(name: str) -> str:
@@ -196,6 +261,50 @@ def ensure_network() -> Any:
             "with no default route; nothing on an open network is policed.",
         )
     return network
+
+
+EGRESS_CA_PUBLIC_DIR = os.getenv("NESTBOX_EGRESS_CA_PUBLIC", "/var/lib/nestbox/egress")
+
+
+def publish_egress_ca() -> str | None:
+    """Copy the public CA to a world-readable file a sandbox can bind-mount.
+
+    The deployment keeps `secrets/` at 0600 for its own user, which a sandbox
+    user cannot read, and a deploy resets that mode. The certificate is public;
+    the key is never copied. The same path inside and out, like every bind
+    source the runner hands to Docker.
+    """
+    if not os.path.exists(EGRESS_CA_HOST):
+        return None
+    os.makedirs(EGRESS_CA_PUBLIC_DIR, mode=0o755, exist_ok=True)
+    target = os.path.join(EGRESS_CA_PUBLIC_DIR, "ca.crt")
+    with open(EGRESS_CA_HOST, "rb") as source, open(target, "wb") as out:
+        out.write(source.read())
+    os.chmod(target, 0o644)
+    return target
+
+
+def ensure_direct_network() -> Any:
+    """Return the bridge a `direct` sandbox leaves through, creating it once.
+
+    The sandbox network is `internal`: no gateway, no NAT, no external DNS. That
+    is what makes the egress proxy the only way out. A sandbox whose operator
+    chose `direct` is supposed to have a route of its own, so it gets this
+    second bridge instead — a normal one, with Docker's NAT and the node's
+    resolver — and is then attached to the sandbox network as well so it keeps
+    reaching its model and the MCP hub by name.
+
+    Deliberately not the stack's `control` network: a sandbox that may reach the
+    internet has no business reaching PostgreSQL.
+    """
+    try:
+        return client.networks.get(DIRECT_NETWORK)
+    except NotFound:
+        return client.networks.create(
+            DIRECT_NETWORK,
+            driver="bridge",
+            labels={"nestbox.managed": "true", "nestbox.egress": "direct"},
+        )
 
 
 def find_egress_proxy() -> Any | None:
@@ -440,7 +549,9 @@ def set_openshell_policy(name: str, body: OpenShellPolicy) -> dict[str, Any]:
     except NotFound as exc:
         raise HTTPException(404, "sandbox not found") from exc
     if not openshell_name(container.name):
-        raise HTTPException(409, "this sandbox is not on the OpenShell gateway")
+        # Nothing to push: a Docker-runtime sandbox is governed by the egress
+        # proxy, not by a gateway policy. Answering 200 keeps the sync quiet.
+        return {"name": name, "applied": False, "reason": "not on the OpenShell gateway"}
     try:
         osh.set_policy(name, body.document)
     except osh.OpenShellError as exc:
@@ -568,19 +679,77 @@ def redirect_missing(proxy: Any) -> str:
     return ""
 
 
+def sandbox_runtime_of(container: Any) -> str:
+    """Which runtime a container or gateway workload belongs to."""
+    if openshell_name(container.name):
+        return "openshell"
+    return container.labels.get("nestbox.runtime") or "docker-development"
+
+
+def drop_if_other_runtime(name: str, requested: str) -> None:
+    """Remove a sandbox that exists on the *other* runtime than the one asked for.
+
+    A create for a name that already exists returns the existing sandbox, which is
+    what a retried create should do. The exception is a change of runtime: an egress
+    mode that reads TLS runs on Docker, `forward_proxy` on the gateway, and the
+    stored mode may switch from one to the other. Keeping the old workload would
+    leave the sandbox on the runtime its mode no longer uses.
+    """
+    try:
+        existing = get_container(client, name)
+    except NotFound:
+        return
+    if sandbox_runtime_of(existing) == requested:
+        return
+    logger.info("sandbox %s moves from %s to %s; removing the old workload",
+                name, sandbox_runtime_of(existing), requested)
+    if sandbox_runtime_of(existing) == "openshell":
+        try:
+            osh.lifecycle(name, "delete")
+        except osh.OpenShellError as exc:
+            logger.warning("could not delete gateway sandbox %s: %s", name, exc)
+    else:
+        try:
+            existing.remove(force=True)
+        except DockerException as exc:
+            logger.warning("could not remove container for %s: %s", name, exc)
+
+
 @app.post("/v1/sandboxes", status_code=201)
 def create_sandbox(body: SandboxRequest) -> dict[str, Any]:
     if not image_allowed(body.image):
         raise HTTPException(422, "image is not in the approved phase-1 catalog")
     network = ensure_network()
-    if body.runtime == "openshell":
+    requested = "openshell" if body.runtime == "openshell" and body.egress_mode != "direct" else "docker-development"
+    drop_if_other_runtime(body.name, requested)
+    # `direct` means "no proxy, own route to the internet". A gateway sandbox has no
+    # route of its own (its supervisor decides every connection), so that one mode
+    # stays on the Docker runtime instead of being silently turned into another.
+    if body.runtime == "openshell" and body.egress_mode != "direct":
         return create_openshell_sandbox(body)
+    registry_images.ensure_image(client, body.image)
     name = container_name(body.name)
     try:
         return details(client.containers.get(name))
     except NotFound:
         pass
     mounts = [validate_mount(m) for m in body.mounts]
+    direct = body.egress_mode == "direct"
+    if direct:
+        # Before the container exists: `network=` with a name Docker does not
+        # know is a create that fails with a message about a network.
+        ensure_direct_network()
+    # Every mode that uses the proxy gets the CA and the bundle beside it; the
+    # file is public, but trusting it is a decision, and the decision is the
+    # mode. `direct` has no proxy, so it is given neither.
+    public_ca = publish_egress_ca()
+    if not direct and not public_ca:
+        logger.warning(
+            "egress mode %s needs the node CA, but %s does not exist",
+            body.egress_mode,
+            EGRESS_CA_HOST,
+        )
+    mounts.extend(ca_bundle.ca_mounts(body.egress_mode, public_ca, ca_bundle.publish_ca_bundle(public_ca)))
     extra: dict[str, Any] = {}
     if mounts:
         from docker.types import Mount as DockerMount
@@ -589,6 +758,14 @@ def create_sandbox(body: SandboxRequest) -> dict[str, Any]:
             DockerMount(target=m["target"], source=m["source"], type="bind", read_only=m["read_only"])
             for m in mounts
         ]
+    # A reservation lets the scheduler count this sandbox without capping it, and
+    # shares decide who wins when the node is contended. Both are optional; a
+    # request without them keeps Docker's defaults, which is what every sandbox
+    # created before this field existed already has.
+    if body.memory_reservation:
+        extra["mem_reservation"] = body.memory_reservation
+    if body.cpu_shares:
+        extra["cpu_shares"] = body.cpu_shares
     if body.gpu_count > 0:
         if not container_gpu_available():
             raise HTTPException(422, "this node cannot give a container a GPU: no NVIDIA container runtime")
@@ -610,7 +787,10 @@ def create_sandbox(body: SandboxRequest) -> dict[str, Any]:
             body.command,
             name=name,
             detach=True,
-            network=NETWORK,
+            # The first network is the one Docker takes the default route from.
+            # A direct sandbox gets it from the bridge with NAT; every other
+            # sandbox is on the internal network, which has no gateway at all.
+            network=DIRECT_NETWORK if direct else NETWORK,
             hostname=body.name,
             environment=body.environment,
             mem_limit=body.memory_limit,
@@ -629,6 +809,13 @@ def create_sandbox(body: SandboxRequest) -> dict[str, Any]:
                 "nestbox.tool_profile": body.tool_profile,
             },
         )
+        if direct:
+            # Keep the internal network too: the model on this node and the MCP
+            # hub are only reachable there, and neither is egress.
+            try:
+                ensure_network().connect(container)
+            except DockerException as exc:
+                logger.warning("direct sandbox %s could not join %s: %s", body.name, NETWORK, exc)
         return details(container)
     except DockerException as exc:
         raise HTTPException(400, f"sandbox creation failed: {exc}") from exc
@@ -642,11 +829,27 @@ def create_openshell_sandbox(body: SandboxRequest) -> dict[str, Any]:
     except NotFound:
         pass
     mounts = [validate_mount(mount) for mount in body.mounts]
+    # A mode that uses the proxy needs the node CA inside the sandbox, as on
+    # Docker: every such mode, and only then, and only the public half plus the
+    # bundle built from it.
+    public_ca = publish_egress_ca()
+    if body.egress_mode != "direct" and not public_ca:
+        logger.warning("egress mode %s needs the node CA, but %s does not exist", body.egress_mode, EGRESS_CA_HOST)
+    mounts.extend(ca_bundle.ca_mounts(body.egress_mode, public_ca, ca_bundle.publish_ca_bundle(public_ca)))
+    # The gateway runs the command it is given *instead of* the image's entrypoint
+    # (Docker would pass it as arguments to it). A recipe image's entrypoint is the
+    # script that starts its supervisor and agents, so it has to be named, or the
+    # sandbox comes up with nothing running in it.
+    command = body.command
+    if body.image.startswith("nestbox-recipe/"):
+        command = ["/usr/local/bin/nestbox-entrypoint"]
+    # `memory_reservation` and `cpu_shares` are not passed on: OpenShell 0.1.6 has
+    # no reservation or shares, only the hard `--memory` and `--cpu` limits below.
     try:
         osh.create(
             name=body.name,
             image=body.image,
-            command=body.command,
+            command=command,
             environment=body.environment,
             memory_limit=body.memory_limit,
             cpu_limit=body.cpu_limit,
@@ -729,9 +932,17 @@ def hardware() -> dict[str, Any]:
     }
 
 
+# The Dockerfile is generated by the control API, never typed by a person, and
+# the desktop pack carries its start, display and desktop-control scripts inside
+# it as base64 (about 120 KB together, and they grow with every new tool). The
+# cap is therefore a guard against a runaway body, not against a real one: a
+# smaller cap silently refused the desktop image while the pack still built.
+MAX_DOCKERFILE_BYTES = 1_048_576
+
+
 class BuildRequest(BaseModel):
     tag: str = Field(pattern=r"^nestbox-recipe/[a-z0-9-]{1,63}:[a-f0-9]{8,64}$")
-    dockerfile: str = Field(min_length=1, max_length=65536)
+    dockerfile: str = Field(min_length=1, max_length=MAX_DOCKERFILE_BYTES)
     files: list[tuple[str, str]] = Field(default_factory=list)
 
 
@@ -973,6 +1184,84 @@ def install_cudax(body: CudaxInstallRequest) -> dict[str, Any]:
         pulled.append(image)
     return {"component": body.component, "pulled": pulled}
 
+MODEL_SERVER_CONTAINER_PORT = 8080
+
+
+def publish_target() -> tuple[str, int, int] | None:
+    """Where and in which range this runner publishes a model server, if at all.
+
+    A joined node serves a model on its own overlay address, because the control
+    plane is on another machine and reaches it through WireGuard; it never joins
+    the node's runtime network, so the container name means nothing there. The
+    appliance's own runner leaves the publish variables unset and keeps the
+    server reachable by name, as before. A malformed value is also "do not
+    publish" rather than a crash: a model that serves only locally is still
+    usable, and the install reports that it has no published address.
+    """
+    bind = os.getenv("NESTBOX_FORWARD_BIND", "").strip()
+    raw = os.getenv("NESTBOX_MODEL_PUBLISH_RANGE", "").strip()
+    if not bind or not raw:
+        return None
+    try:
+        start, end = (int(part) for part in raw.split("-", 1))
+    except ValueError:
+        return None
+    if not 1 <= start <= end <= 65535:
+        return None
+    return bind, start, end
+
+
+def pick_port(bind: str, start: int, end: int, is_free) -> int | None:
+    """The first port in `start..end` for which `is_free(bind, port)` holds.
+
+    The choice is a pure function of the predicate, so a test can drive it
+    without a socket, and `port_is_free` is what the runner passes in. `None`
+    means the range is exhausted, which the caller reports instead of silently
+    choosing a port the node does not publish.
+    """
+    for port in range(start, end + 1):
+        if is_free(bind, port):
+            return port
+    return None
+
+
+def port_is_free(bind: str, port: int) -> bool:
+    """Whether this process can bind `bind:port` right now.
+
+    Binding and closing is the only answer Docker itself would accept, and it
+    catches a port the runner's own forward listeners already hold as well as
+    one another process took on the host.
+    """
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((bind, port))
+        except OSError:
+            return False
+    return True
+
+
+def published_address(item) -> str | None:
+    """The overlay address a running model container is published on, if any.
+
+    Read from Docker's record rather than from memory: a re-serve after a runner
+    restart finds a container whose port this process never chose, and a
+    container started before a node gained a publish range has no mapping at
+    all, which is `None` and not an invented address.
+    """
+    ports = (item.attrs.get("NetworkSettings") or {}).get("Ports") or {}
+    for spec, bindings in ports.items():
+        if not spec.startswith(f"{MODEL_SERVER_CONTAINER_PORT}/") or not bindings:
+            continue
+        binding = bindings[0] or {}
+        host_ip = str(binding.get("HostIp") or "")
+        host_port = str(binding.get("HostPort") or "")
+        if host_ip and host_ip not in ("0.0.0.0", "::") and host_port.isdigit():
+            return f"{host_ip}:{host_port}"
+    return None
+
+
 @app.post("/v1/models/serve")
 def serve_model(body: ModelServeRequest) -> dict[str, Any]:
     """Start the server container for one installed artefact.
@@ -1005,10 +1294,31 @@ def serve_model(body: ModelServeRequest) -> dict[str, Any]:
         existing = client.containers.get(name)
         existing.reload()
         if existing.status == "running":
-            return {"name": name, "container_id": existing.id, "status": existing.status}
+            return {
+                "name": name,
+                "container_id": existing.id,
+                "status": existing.status,
+                "published": published_address(existing),
+            }
         existing.remove(force=True)
     except NotFound:
         pass
+
+    # A joined node publishes the server on its overlay address, because that is
+    # the only way the control plane can reach it. The mapping goes into the
+    # container at creation, so the first answer can already carry the address
+    # the provider profile needs; an appliance-local server is not published and
+    # stays reachable by container name on the runtime network.
+    published: str | None = None
+    ports: dict[str, Any] | None = None
+    target = publish_target()
+    if target is not None:
+        bind, low, high = target
+        chosen = pick_port(bind, low, high, port_is_free)
+        if chosen is None:
+            raise HTTPException(409, f"no free model port in {low}-{high} on {bind}")
+        ports = {f"{MODEL_SERVER_CONTAINER_PORT}/tcp": (bind, chosen)}
+        published = f"{bind}:{chosen}"
 
     ensure_network()
     try:
@@ -1024,6 +1334,7 @@ def serve_model(body: ModelServeRequest) -> dict[str, Any]:
             detach=True,
             network=NETWORK,
             volumes={directory: {"bind": MODEL_CONTAINER_PATH, "mode": "ro"}},
+            ports=ports,
             mem_limit=str(body.memory_limit_bytes),
             nano_cpus=int(body.cpu_cores * 1_000_000_000),
             pids_limit=256,
@@ -1039,7 +1350,12 @@ def serve_model(body: ModelServeRequest) -> dict[str, Any]:
     except DockerException as exc:
         raise HTTPException(400, f"the model server did not start: {exc}") from exc
     MODEL_PORTS[key] = body.port
-    return {"name": name, "container_id": container.id, "status": container.status}
+    return {
+        "name": name,
+        "container_id": container.id,
+        "status": container.status,
+        "published": published,
+    }
 
 
 @app.get("/v1/models/serve/{key}")

@@ -295,6 +295,162 @@ pub async fn traffic(
     })
 }
 
+/// One page of the environment-wide traffic list.
+///
+/// The same shape as `TrafficPage` minus the single sandbox id: this is the
+/// view that answers "what is happening right now, everywhere", and every row
+/// names its sandbox instead.
+#[derive(Debug, serde::Serialize)]
+pub struct EnvironmentTrafficPage {
+    pub window: String,
+    pub window_seconds: i64,
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
+    pub limit: i64,
+    pub filter: String,
+    pub host: Option<String>,
+    pub sandbox_id: Option<Uuid>,
+    pub items: Vec<TrafficEvent>,
+    pub next_cursor: Option<String>,
+    pub summary: store::Summary,
+}
+
+/// The filters one environment-wide traffic read takes.
+pub struct EnvironmentTrafficRequest {
+    pub window: Option<String>,
+    pub filter: Option<String>,
+    pub host: Option<String>,
+    pub sandbox_id: Option<Uuid>,
+    pub cursor: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// Read one page of traffic across every sandbox of the caller's environment.
+///
+/// This is the console's live list, and it is deliberately the same store and the
+/// same window rules as the per-sandbox read: a second query shape would let the
+/// two disagree about what counts as a request. The row cap is the environment
+/// one because a single sandbox's day of traffic is already a lot of rows.
+pub async fn environment_traffic(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    request: EnvironmentTrafficRequest,
+) -> Result<EnvironmentTrafficPage, ApiError> {
+    require(principal, Permission::TelemetryRead)?;
+    let window = parse_window(request.window.as_deref())?.capped(MAX_WINDOW_SECONDS);
+    let filter = parse_filter(request.filter.as_deref());
+    let limit = page_size(request.limit, 200);
+    let host = request
+        .host
+        .as_deref()
+        .map(str::trim)
+        .filter(|host| !host.is_empty());
+    let after = cursor_of(request.cursor.as_deref());
+
+    let (from, to) = window.bounds();
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+
+    // A named sandbox that is not this tenant's is a 404, not an empty page: the
+    // two must not look the same, here as everywhere else.
+    if let Some(sandbox_id) = request.sandbox_id {
+        ensure_sandbox(&mut scope, sandbox_id).await?;
+    }
+
+    let query = store::EnvironmentRowQuery {
+        since: from,
+        until: to,
+        filter,
+        host,
+        sandbox_id: request.sandbox_id,
+        after,
+        limit,
+    };
+
+    let items = store::rows_environment(&mut scope, query)
+        .await
+        .map_err(ApiError::from)?;
+
+    let summary = store::summary_environment(&mut scope, query)
+        .await
+        .map_err(ApiError::from)?;
+
+    scope.commit().await.map_err(ApiError::from)?;
+
+    // A country is filled in the background, never in this request, for the same
+    // reason as the per-sandbox read: the page has rows to draw now.
+    let unresolved: Vec<String> = items
+        .iter()
+        .filter(|item| item.country.is_none())
+        .map(|item| item.host.clone())
+        .collect();
+    geography_service::spawn_fill(ctx.pool.clone(), unresolved);
+
+    Ok(EnvironmentTrafficPage {
+        window: window.label(),
+        window_seconds: window.seconds,
+        from,
+        to,
+        limit,
+        filter: filter.as_str().to_string(),
+        host: host.map(str::to_string),
+        sandbox_id: request.sandbox_id,
+        next_cursor: next_cursor(&items, limit),
+        items,
+        summary,
+    })
+}
+
+/// What the decisions view asks for: a window, and optionally one sandbox.
+pub struct DecisionsRequest {
+    pub window: Option<String>,
+    pub sandbox_id: Option<Uuid>,
+}
+
+/// The denied destinations in one window, worst first.
+///
+/// The decisions view is deliberately narrower than the traffic list: only what
+/// was stopped, grouped by what a person can allow. Default window is one hour,
+/// because a decision that is a day old is usually already resolved, and the cap
+/// stays at a day for the same reason as the traffic list.
+pub async fn decisions(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    request: DecisionsRequest,
+) -> Result<serde_json::Value, ApiError> {
+    require(principal, Permission::TelemetryRead)?;
+    let window = parse_window(request.window.as_deref().or(Some("1h")))?
+        .capped(MAX_WINDOW_SECONDS);
+    let (from, to) = window.bounds();
+
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    if let Some(sandbox_id) = request.sandbox_id {
+        ensure_sandbox(&mut scope, sandbox_id).await?;
+    }
+    let items = store::denied_targets(&mut scope, from, to, request.sandbox_id, store::MAX_EDGES)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+
+    let unresolved: Vec<String> = items
+        .iter()
+        .filter(|item| item.reason.is_none())
+        .map(|item| item.host.clone())
+        .collect();
+    geography_service::spawn_fill(ctx.pool.clone(), unresolved);
+
+    Ok(serde_json::json!({
+        "window": window.label(),
+        "window_seconds": window.seconds,
+        "from": from,
+        "to": to,
+        "items": items,
+    }))
+}
+
 /// One request and response body, after the redactor.
 #[derive(Debug, serde::Serialize)]
 pub struct BodyView {
@@ -859,6 +1015,7 @@ mod tests {
         let event = |ts: DateTime<Utc>| TrafficEvent {
             id: Uuid::new_v4(),
             sandbox_id: None,
+            sandbox_name: None,
             node_id: None,
             ts,
             host: "example.com".into(),

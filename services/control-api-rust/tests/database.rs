@@ -180,7 +180,7 @@ async fn the_local_node_and_builder_catalogs_are_seeded() {
         .fetch_one(&pool)
         .await
         .expect("query");
-    assert_eq!(baselines, 3);
+    assert_eq!(baselines, 5, "ubuntu, debian, rocky, fedora and alpine");
 
     let recommended: String =
         sqlx::query_scalar("SELECT key FROM baselines WHERE recommended LIMIT 1")

@@ -13,13 +13,19 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-/// The three roles. Coarse on purpose: finer permissions would need a table,
+/// The roles of one environment. Coarse on purpose: finer permissions would need a table,
 /// and these cover the real cases without weakening the model.
+///
+/// `Member` (ADR 0045) is the employee role: everything inside the sandboxes the person
+/// owns or was granted, nothing outside them. The "nothing outside" is row-level security on
+/// `sandboxes`, not a check here, so a forgotten check cannot widen it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     /// Read-only, including telemetry.
     Viewer,
+    /// Works in the sandboxes it owns or was granted: lifecycle, shell, its own rules.
+    Member,
     /// Lifecycle, policy edits, exec, model install.
     Operator,
     /// Everything operator can do, plus gateway settings and global policy.
@@ -30,6 +36,7 @@ impl Role {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Viewer => "viewer",
+            Self::Member => "member",
             Self::Operator => "operator",
             Self::Admin => "admin",
         }
@@ -38,6 +45,7 @@ impl Role {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "viewer" => Some(Self::Viewer),
+            "member" => Some(Self::Member),
             "operator" => Some(Self::Operator),
             "admin" => Some(Self::Admin),
             _ => None,
@@ -46,7 +54,7 @@ impl Role {
 
     /// Whether this role includes at least the privilege of `other`.
     ///
-    /// Ordering is the whole model: admin ⊇ operator ⊇ viewer. A permission set
+    /// Ordering is the whole model: admin ⊇ operator ⊇ member ⊇ viewer. A permission set
     /// per role would be more flexible and considerably harder to reason about
     /// at three roles.
     pub fn includes(self, other: Role) -> bool {
@@ -60,6 +68,9 @@ impl Role {
 pub enum Permission {
     SandboxRead,
     SandboxWrite,
+    /// Rules, drafts and traffic windows of one sandbox. A member holds this; the policies
+    /// that every sandbox shares stay `PolicyWrite`.
+    SandboxPolicy,
     /// Shell access into a sandbox. Separate from write because it is the most
     /// powerful action in the product, and a deployment may want to grant
     /// lifecycle without granting a shell.
@@ -116,12 +127,14 @@ impl Permission {
 
             Self::SandboxWrite
             | Self::SandboxExec
-            | Self::PolicyWrite
+            | Self::SandboxPolicy
+            | Self::PersistWrite
+            | Self::JobWrite => Role::Member,
+
+            Self::PolicyWrite
             | Self::ModelInstall
             | Self::RecipeWrite
-            | Self::PersistWrite
-            | Self::NodeManage
-            | Self::JobWrite => Role::Operator,
+            | Self::NodeManage => Role::Operator,
 
             Self::MediaConfigure => Role::Admin,
 
@@ -143,6 +156,7 @@ impl Permission {
         match self {
             Self::SandboxRead => "sandbox.read",
             Self::SandboxWrite => "sandbox.write",
+            Self::SandboxPolicy => "sandbox.policy",
             Self::SandboxExec => "sandbox.exec",
             Self::PolicyRead => "policy.read",
             Self::PolicyWrite => "policy.write",
@@ -237,6 +251,23 @@ mod tests {
         assert!(viewer.can(Permission::SandboxRead));
         assert!(!viewer.can(Permission::SandboxWrite));
         assert!(!viewer.can(Permission::SandboxExec));
+    }
+
+    #[test]
+    fn a_member_works_in_a_sandbox_but_changes_nothing_shared() {
+        let member = principal(Role::Member);
+        assert!(member.can(Permission::SandboxWrite));
+        assert!(member.can(Permission::SandboxExec));
+        assert!(member.can(Permission::SandboxPolicy));
+        assert!(member.can(Permission::TelemetryRead));
+        assert!(!member.can(Permission::PolicyWrite));
+        assert!(!member.can(Permission::ModelInstall));
+        assert!(!member.can(Permission::NodeManage));
+        assert!(!member.can(Permission::ProviderWrite));
+        assert!(!member.can(Permission::SecretManage));
+        assert!(!member.can(Permission::UserManage));
+        assert!(Role::Operator.includes(Role::Member));
+        assert!(Role::Member.includes(Role::Viewer));
     }
 
     #[test]

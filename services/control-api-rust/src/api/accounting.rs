@@ -46,6 +46,71 @@ pub async fn overview(
     ))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UsageQuery {
+    #[serde(default)]
+    pub timeframe: Option<String>,
+    #[serde(default)]
+    pub sandbox_id: Option<Uuid>,
+    /// provider, model, sandbox, auth, day, owner, site, organization, agent,
+    /// conversation. Default: model.
+    #[serde(default)]
+    pub group_by: Option<String>,
+}
+
+/// Usage by one dimension: tokens, cache split, hit rate, cost and account estimate.
+pub async fn usage(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(query): Query<UsageQuery>,
+) -> Result<Json<accounting_service::UsageReport>, ApiError> {
+    let timeframe = parse_timeframe(query.timeframe.as_deref())?;
+    Ok(Json(
+        accounting_service::usage(
+            &state.services,
+            &auth.principal,
+            timeframe,
+            query.group_by.as_deref().unwrap_or("model"),
+            query.sandbox_id,
+        )
+        .await?,
+    ))
+}
+
+/// The price list and the used models that have no price.
+pub async fn prices(
+    State(state): State<AppState>,
+    auth: Auth,
+) -> Result<Json<accounting_service::PriceList>, ApiError> {
+    Ok(Json(accounting_service::prices(&state.services, &auth.principal).await?))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetPriceRequest {
+    pub model: String,
+    /// Micros per million tokens.
+    pub input_per_mtok: i64,
+    pub output_per_mtok: i64,
+    #[serde(default)]
+    pub cached_per_mtok: Option<i64>,
+}
+
+/// Set one model's price for the environment; earlier unpriced calls are priced.
+pub async fn put_price(
+    State(state): State<AppState>,
+    auth: Auth,
+    Json(body): Json<SetPriceRequest>,
+) -> Result<Json<crate::domain::accounting::Price>, ApiError> {
+    let price = crate::domain::accounting::Price {
+        input_per_mtok: body.input_per_mtok,
+        output_per_mtok: body.output_per_mtok,
+        cached_per_mtok: body.cached_per_mtok,
+    };
+    Ok(Json(
+        accounting_service::set_price(&state.services, &auth.principal, &body.model, price).await?,
+    ))
+}
+
 /// Recent requests, newest first.
 pub async fn requests(
     State(state): State<AppState>,
@@ -64,7 +129,7 @@ pub async fn requests(
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
-fn parse_timeframe(raw: Option<&str>) -> Result<Timeframe, ApiError> {
+pub(crate) fn parse_timeframe(raw: Option<&str>) -> Result<Timeframe, ApiError> {
     match raw {
         None => Ok(Timeframe::H24),
         Some(value) => Timeframe::parse(value)
@@ -140,7 +205,7 @@ fn ingest_token() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn authorised(headers: &HeaderMap) -> Result<(), ApiError> {
+pub(crate) fn authorised(headers: &HeaderMap) -> Result<(), ApiError> {
     use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
 
@@ -191,6 +256,10 @@ pub struct RecordBody {
     pub privacy_action: Option<String>,
     #[serde(default)]
     pub privacy_detector: Option<String>,
+    /// Extra identifiers the proxy attaches to the row, such as the cluster and
+    /// the member that answered. Identifiers only: the proxy never sends content.
+    #[serde(default)]
+    pub detail: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
@@ -214,7 +283,10 @@ pub async fn ingest(
     Json(body): Json<RecordBody>,
 ) -> Result<(StatusCode, Json<RecordedRequest>), ApiError> {
     authorised(&headers)?;
-    let environment = crate::services::media_service::bridge_environment(&state.services).await?;
+    // The tenant comes from the sandbox the proxy named, not from a guess about
+    // how many data centers the appliance holds.
+    let environment =
+        crate::services::media_service::sandbox_environment(&state.services, &body.sandbox).await?;
     let sandbox_id = sandbox_id_by_name(&state.services, environment, &body.sandbox).await?;
     let usage = body.usage.unwrap_or_default();
     let row = NewAccountingRow {
@@ -241,20 +313,78 @@ pub async fn ingest(
         reported_cost_micros: None,
         privacy_action: body.privacy_action,
         privacy_detector: body.privacy_detector,
+        detail: body.detail,
     };
     let recorded = accounting_service::record(&state.services, row).await?;
     Ok((StatusCode::CREATED, Json(recorded)))
 }
 
-/// Inspect one outbound body for the proxy.
+/// Who may call the inspect endpoint: the appliance, in either of its two
+/// shapes.
+///
+/// The accounting proxy holds the ingest token; the egress broker holds the
+/// node's own token, which the control API already verifies for every policy
+/// check. Accepting both is not a second trust boundary — both are processes on
+/// this appliance, and neither is reachable from a sandbox.
+pub(crate) async fn ingest_authorised(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+    if authorised(headers).is_ok() {
+        return Ok(());
+    }
+    let node_id = headers
+        .get("x-nestbox-node")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| Uuid::parse_str(value.trim()).ok())
+        .ok_or_else(|| ApiError::unauthenticated("The ingest token is not valid."))?;
+    let presented = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .unwrap_or("")
+        .trim();
+    if presented.is_empty() {
+        return Err(ApiError::unauthenticated("The ingest token is not valid."));
+    }
+    crate::services::policy_service::authenticate_node(&state.services, node_id, presented).await
+}
+
+/// Inspect one body for a proxy.
+///
+/// Two callers, one endpoint. The accounting proxy knows the sandbox by name,
+/// because the agent's SDK names it in its route. The egress broker knows it by
+/// id, because Envoy copies the id out of the policy answer into the upstream
+/// request. Both are the appliance speaking, and both are authenticated with the
+/// ingest token, so the difference is only how the sandbox is found.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct InspectBody {
-    pub sandbox: String,
+    /// The sandbox's name; used when no id is given.
+    #[serde(default)]
+    pub sandbox: Option<String>,
+    /// The sandbox's id; used by the egress broker.
+    #[serde(default)]
+    pub sandbox_id: Option<Uuid>,
     #[serde(default)]
     pub direction: Option<String>,
     pub content: String,
     #[serde(default)]
     pub destination: Option<String>,
+    /// `egress`, `accounting_proxy`, `mcp` or `test`. Defaults to the accounting
+    /// proxy, because that is the caller that predates this field.
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub mcp_tool: Option<String>,
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    /// The proxy's `x-request-id` for this request. What joins the finding to
+    /// its stored turn and to the live "chat started" event.
+    #[serde(default)]
+    pub request_ref: Option<String>,
 }
 
 /// The privacy decision the proxy acts on.
@@ -263,32 +393,76 @@ pub async fn inspect(
     headers: HeaderMap,
     Json(body): Json<InspectBody>,
 ) -> Result<Json<InspectResult>, ApiError> {
-    authorised(&headers)?;
-    let environment = crate::services::media_service::bridge_environment(&state.services).await?;
-    let sandbox_id = sandbox_id_by_name(&state.services, environment, &body.sandbox).await?;
+    use crate::domain::auth::{CredentialSource, Principal, Role};
+    use crate::domain::privacy::IncidentSource;
+
+    ingest_authorised(&state, &headers).await?;
+    // Which tenant: from the id when the broker sent one, otherwise from the
+    // data center the named sandbox lives in — never from a guess about which
+    // data center exists.
+    let (environment, sandbox_id) = match (body.sandbox_id, body.sandbox.as_deref()) {
+        (Some(id), _) => {
+            let environment =
+                crate::store::postgres::egress::sandbox_environment(&state.services.pool, id)
+                    .await
+                    .map_err(ApiError::from)?
+                    .ok_or_else(|| {
+                        ApiError::not_found(
+                            ErrorCode::NOT_FOUND,
+                            "No such sandbox in this environment.",
+                        )
+                    })?;
+            (environment, id)
+        }
+        (None, Some(name)) => {
+            let environment =
+                crate::services::media_service::sandbox_environment(&state.services, name).await?;
+            let id = sandbox_id_by_name(&state.services, environment, name).await?;
+            (environment, id)
+        }
+        (None, None) => {
+            return Err(ApiError::validation(
+                "The inspection names a sandbox by name or by id.",
+            ));
+        }
+    };
     let direction = body
         .direction
         .as_deref()
         .and_then(privacy_service::Direction::parse)
         .unwrap_or(privacy_service::Direction::Inbound);
-    use crate::domain::auth::{CredentialSource, Principal, Role};
+    let source = body
+        .source
+        .as_deref()
+        .and_then(IncidentSource::parse)
+        .unwrap_or(IncidentSource::AccountingProxy);
     // The proxy speaks for the appliance, not for a person: a system principal in
     // the sandbox's own environment, with no user id.
     let system = Principal {
         user_id: Uuid::nil(),
         environment_id: environment,
         role: Role::Admin,
-        display_name: "accounting proxy".into(),
+        display_name: "egress proxy".into(),
         via: CredentialSource::Token,
     };
+    let context = privacy_service::InspectContext {
+        destination: body.destination,
+        source,
+        method: body.method,
+        path: body.path,
+        model: body.model,
+        mcp_tool: body.mcp_tool,
+        conversation_id: body.conversation_id,
+        request_ref: body.request_ref,
+    };
     Ok(Json(
-        privacy_service::inspect(
+        privacy_service::inspect_with(
             &state.services,
             &system,
             sandbox_id,
             direction,
             &body.content,
-            body.destination.as_deref(),
+            &context,
         )
         .await?,
     ))
@@ -308,5 +482,31 @@ async fn sandbox_id_by_name(
         .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
     id.ok_or_else(|| ApiError::not_found(ErrorCode::NOT_FOUND, "No such sandbox in this environment."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_body_keeps_the_detail_object() {
+        let body: RecordBody = serde_json::from_value(serde_json::json!({
+            "sandbox": "sb-1",
+            "provider": "anthropic",
+            "status": 200,
+            "detail": { "cluster_id": "c1", "install_id": "i1" }
+        }))
+        .expect("the record body should deserialise");
+        let detail = body.detail.expect("the detail object should be kept");
+        assert_eq!(detail["cluster_id"], "c1");
+        assert_eq!(detail["install_id"], "i1");
+    }
+
+    #[test]
+    fn a_record_body_without_detail_has_none() {
+        let body: RecordBody = serde_json::from_value(serde_json::json!({ "sandbox": "sb-1" }))
+            .expect("the record body should deserialise");
+        assert!(body.detail.is_none());
+    }
 }
 

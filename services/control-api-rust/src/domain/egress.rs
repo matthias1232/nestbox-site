@@ -8,12 +8,19 @@
 //!
 //! The order is the rule:
 //!
-//! 1. an open traffic window for the sandbox or the environment → allow;
-//! 2. the first enabled rule, by ascending priority, whose matchers (host,
-//!    suffix, CIDR, port range, protocol, method, binary) all match → its
-//!    action (or `audit` when the rule is
-//!    audit-only);
-//! 3. nothing matched → deny.
+//! 1. the rules are evaluated: the first enabled rule, by ascending priority,
+//!    whose matchers (host, suffix, CIDR, port range, protocol, method, binary)
+//!    all match → its action (or `audit` when the rule is audit-only);
+//! 2. an open traffic window covering the request overrides that answer: a
+//!    bypass window allows, an audit window allows and is recorded as a block,
+//!    and `would_deny` keeps the rule verdict either way;
+//! 3. a sandbox whose proxy is off (`off_allow_all`) turns a deny into an allow
+//!    with the reason `allow_all`, again recording `would_deny`;
+//! 4. nothing matched → deny.
+//!
+//! The rules go first so a window can state what would have happened without it;
+//! that is what makes "allow everything for a while" evidence for the next rule
+//! instead of a blind spot.
 //!
 //! Default deny is the property that makes the policy screen true: a sandbox
 //! with no rule and no window reaches nothing.
@@ -78,6 +85,8 @@ pub enum DecisionReason {
     DefaultDeny,
     /// The proxy could not reach the control API and failed closed.
     BackendUnavailable,
+    /// The sandbox runs with the proxy off: everything is allowed and recorded.
+    AllowAll,
 }
 
 impl DecisionReason {
@@ -87,6 +96,7 @@ impl DecisionReason {
             Self::Window => "window",
             Self::DefaultDeny => "default_deny",
             Self::BackendUnavailable => "backend_unavailable",
+            Self::AllowAll => "allow_all",
         }
     }
 }
@@ -103,8 +113,27 @@ pub struct CheckResponse {
     /// The hash of the rule set this decision came from, so the proxy can tell
     /// whether it is enforcing the current policy.
     pub policy_hash: String,
+    /// How deeply this sandbox's egress may be observed: `forward_proxy`,
+    /// `transparent` or `hybrid`. The proxy must know before it answers a
+    /// CONNECT, because that answer decides tunnel versus TLS termination.
+    #[serde(default = "default_egress_mode")]
+    pub egress_mode: String,
     /// How long the proxy may cache this answer for the same key.
     pub cache_ttl_seconds: u32,
+    /// True when the rules would have blocked this connection while a bypass
+    /// or audit window (or the `off_allow_all` mode) let it through. It is what
+    /// turns "allow everything for a while" into evidence for new rules.
+    #[serde(default)]
+    pub would_deny: bool,
+}
+
+/// The mode a response carries when the sandbox has no setting of its own.
+///
+/// `forward_proxy` is the safe default: the proxy sees the destination and
+/// nothing inside the tunnel, which is what the operator gets unless they
+/// deliberately asked for inspection.
+pub fn default_egress_mode() -> String {
+    "forward_proxy".to_string()
 }
 
 /// An open traffic window, as the decision function needs it.
@@ -112,20 +141,144 @@ pub struct CheckResponse {
 pub struct OpenWindow {
     pub id: Uuid,
     pub sandbox_id: Option<Uuid>,
-    pub expires_at: DateTime<Utc>,
+    /// When the window closes; `None` means it stays open until it is closed by
+    /// hand (ADR 0053: an evaluation the user ends themselves).
+    pub expires_at: Option<DateTime<Utc>>,
     pub reason: String,
+    /// How the window treats a request it covers.
+    #[serde(default)]
+    pub mode: WindowMode,
+    /// Which traffic the window covers.
+    #[serde(default)]
+    pub channel: WindowChannel,
+}
+
+/// How a window treats a request it covers.
+///
+/// Two modes, because they answer two different operational questions. `Bypass`
+/// is "let me work for fifteen minutes". `Audit` is "show me what would be
+/// blocked while nothing breaks", which is how a policy is developed against
+/// real traffic instead of against guesses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowMode {
+    #[default]
+    Bypass,
+    Audit,
+}
+
+impl WindowMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bypass => "bypass",
+            Self::Audit => "audit",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "bypass" => Some(Self::Bypass),
+            "audit" => Some(Self::Audit),
+            _ => None,
+        }
+    }
+}
+
+/// The firewall a window belongs to.
+///
+/// `All` is the broad switch; the others let an operator open one firewall
+/// without opening the rest. `Openshell` exists as a word even though its switch
+/// is never off: the supervisor carries the API and MCP forwarding, and a
+/// sandbox with it disabled has no way to reach its tools at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowChannel {
+    #[default]
+    All,
+    Proxy,
+    Dns,
+    Mcp,
+    Gateway,
+    Openshell,
+}
+
+impl WindowChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Proxy => "proxy",
+            Self::Dns => "dns",
+            Self::Mcp => "mcp",
+            Self::Gateway => "gateway",
+            Self::Openshell => "openshell",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "all" => Some(Self::All),
+            "proxy" => Some(Self::Proxy),
+            "dns" => Some(Self::Dns),
+            "mcp" => Some(Self::Mcp),
+            "gateway" => Some(Self::Gateway),
+            "openshell" => Some(Self::Openshell),
+            _ => None,
+        }
+    }
+
+    /// Whether a window on this channel covers a request on `other`.
+    ///
+    /// `All` covers everything; a specific channel covers only itself. The
+    /// reverse is deliberately false: a DNS window must not open the web.
+    pub fn covers(self, other: Self) -> bool {
+        self == Self::All || self == other
+    }
+
+    /// Whether this is a channel an operator may switch at all.
+    ///
+    /// Every channel is switchable now: an OpenShell window is compiled into
+    /// the sandbox's own policy in audit mode (ADR 0053), so the supervisor
+    /// records instead of blocking without cutting the sandbox off.
+    pub fn switchable(self) -> bool {
+        true
+    }
+}
+
+/// The channel a request belongs to, from what the proxy reported.
+///
+/// A DNS request is a name lookup, JSON-RPC is MCP, and everything else is a
+/// forward-proxy request. The mapping lives here so the decider, the console and
+/// a test use one vocabulary.
+pub fn channel_of_request(protocol: Option<&str>) -> WindowChannel {
+    match protocol.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("dns") => WindowChannel::Dns,
+        Some("mcp") | Some("jsonrpc") => WindowChannel::Mcp,
+        _ => WindowChannel::Proxy,
+    }
 }
 
 impl OpenWindow {
     /// Whether this window covers the request now.
     pub fn covers(&self, sandbox: Option<Uuid>, now: DateTime<Utc>) -> bool {
-        if self.expires_at <= now {
-            return false;
+        if let Some(expires_at) = self.expires_at {
+            if expires_at <= now {
+                return false;
+            }
         }
         match self.sandbox_id {
             None => true,
             Some(scoped) => sandbox == Some(scoped),
         }
+    }
+
+    /// Whether this window covers one request: the sandbox and the channel.
+    pub fn covers_request(
+        &self,
+        sandbox: Option<Uuid>,
+        channel: WindowChannel,
+        now: DateTime<Utc>,
+    ) -> bool {
+        self.covers(sandbox, now) && self.channel.covers(channel)
     }
 }
 
@@ -141,11 +294,84 @@ pub struct CompiledPolicy {
 }
 
 /// Decide what happens to one request.
+///
+/// The order is the rule: the rules decide first (so a window can say what the
+/// answer *would* have been), then a covering window overrides that answer, and
+/// a sandbox whose proxy is off allows whatever the rules would have blocked.
+/// The `would_deny` flag records the rule verdict either way.
 pub fn decide(
     request: &CheckRequest,
     policy: &CompiledPolicy,
     now: DateTime<Utc>,
 ) -> CheckResponse {
+    let verdict = rule_verdict(request, policy);
+
+    // A window is scoped to a channel: a DNS window must not open the web. The
+    // mode decides whether the request passes as a bypass or passes *and* is
+    // recorded as a block, which is what observation mode is for.
+    let channel = channel_of_request(request.protocol.as_deref());
+    if let Some(window) = policy
+        .windows
+        .iter()
+        .find(|window| window.covers_request(request.sandbox_id, channel, now))
+    {
+        let decision = match window.mode {
+            WindowMode::Bypass => Decision::Allow,
+            WindowMode::Audit => Decision::Audit,
+        };
+        let open_until = match window.expires_at {
+            Some(expires_at) => expires_at.format("%H:%M:%S UTC").to_string(),
+            None => "until it is closed".to_string(),
+        };
+        let mut response = CheckResponse {
+            decision,
+            reason: DecisionReason::Window,
+            rule_id: verdict.rule_id,
+            window_id: Some(window.id),
+            explanation: format!(
+                "{} by a temporary {} window ({}), open {}.",
+                match window.mode {
+                    WindowMode::Bypass => "Allowed",
+                    WindowMode::Audit => "Observation mode: allowed and recorded as a block",
+                },
+                window.channel.as_str(),
+                window.reason,
+                open_until
+            ),
+            policy_hash: policy.hash.clone(),
+            cache_ttl_seconds: match window.expires_at {
+                // A window is time-bounded; cache no longer than its remaining life.
+                Some(expires_at) => ((expires_at - now).num_seconds().max(0) as u32).min(5),
+                None => 5,
+            },
+            egress_mode: default_egress_mode(),
+            would_deny: verdict.decision == Decision::Deny,
+        };
+        response.window_id = Some(window.id);
+        return response;
+    }
+
+    verdict
+}
+
+/// Let everything through and record it: the answer for a sandbox whose proxy is
+/// switched off (`off_allow_all`). A deny becomes an allow whose reason says so,
+/// and `would_deny` remembers that the rules would have blocked it.
+pub fn allow_everything(mut response: CheckResponse) -> CheckResponse {
+    if response.decision == Decision::Deny {
+        response.would_deny = true;
+        response.decision = Decision::Allow;
+        response.reason = DecisionReason::AllowAll;
+        response.explanation = format!(
+            "Proxy is off: everything is allowed and only recorded. {}",
+            response.explanation
+        );
+    }
+    response
+}
+
+/// The answer of the rules alone, without windows.
+fn rule_verdict(request: &CheckRequest, policy: &CompiledPolicy) -> CheckResponse {
     let base = |decision: Decision, reason: DecisionReason, explanation: String| CheckResponse {
         decision,
         reason,
@@ -154,28 +380,9 @@ pub fn decide(
         explanation,
         policy_hash: policy.hash.clone(),
         cache_ttl_seconds: 5,
+        egress_mode: default_egress_mode(),
+        would_deny: false,
     };
-
-    if let Some(window) = policy
-        .windows
-        .iter()
-        .find(|window| window.covers(request.sandbox_id, now))
-    {
-        let mut response = base(
-            Decision::Allow,
-            DecisionReason::Window,
-            format!(
-                "Allowed by a temporary window ({}), open until {}.",
-                window.reason,
-                window.expires_at.format("%H:%M:%S UTC")
-            ),
-        );
-        response.window_id = Some(window.id);
-        // A window is time-bounded; cache no longer than its remaining life.
-        let remaining = (window.expires_at - now).num_seconds().max(0) as u32;
-        response.cache_ttl_seconds = remaining.min(5);
-        return response;
-    }
 
     let mut candidates: Vec<&NetworkRule> = policy
         .rules
@@ -328,6 +535,11 @@ fn glob(pattern: &str, text: &str) -> bool {
 pub struct TrafficEvent {
     pub id: Uuid,
     pub sandbox_id: Option<Uuid>,
+    /// The sandbox's name, so the environment-wide table can say which sandbox a
+    /// row belongs to without a second request per row. Absent on a read that
+    /// did not join `sandboxes`.
+    #[serde(default)]
+    pub sandbox_name: Option<String>,
     pub node_id: Option<Uuid>,
     pub ts: DateTime<Utc>,
     pub host: String,
@@ -393,6 +605,10 @@ pub enum TrafficChannel {
     Inbound,
     /// The caller arrived over a tunnel interface (WireGuard, `tun0`).
     Vpn,
+    /// A name lookup. It never opened a connection, so it is not one of the
+    /// connection channels above; the console badges it separately because it is
+    /// a different kind of event, not a different way of connecting.
+    Dns,
 }
 
 impl TrafficChannel {
@@ -403,6 +619,7 @@ impl TrafficChannel {
             Self::Inspected => "inspected",
             Self::Inbound => "inbound",
             Self::Vpn => "vpn",
+            Self::Dns => "dns",
         }
     }
 
@@ -414,6 +631,7 @@ impl TrafficChannel {
             Self::Inspected => "Inspected",
             Self::Inbound => "Inbound",
             Self::Vpn => "VPN",
+            Self::Dns => "DNS",
         }
     }
 
@@ -424,18 +642,20 @@ impl TrafficChannel {
             "inspected" => Self::Inspected,
             "inbound" => Self::Inbound,
             "vpn" => Self::Vpn,
+            "dns" => Self::Dns,
             _ => return None,
         })
     }
 
     /// All channels, in the order the legend shows them.
-    pub fn all() -> [Self; 5] {
+    pub fn all() -> [Self; 6] {
         [
             Self::Proxy,
             Self::Tunnel,
             Self::Inspected,
             Self::Inbound,
             Self::Vpn,
+            Self::Dns,
         ]
     }
 }
@@ -590,6 +810,64 @@ mod tests {
         }
     }
 
+    fn window(mode: WindowMode, channel: WindowChannel, expires_at: Option<DateTime<Utc>>) -> OpenWindow {
+        OpenWindow {
+            id: Uuid::new_v4(),
+            sandbox_id: None,
+            expires_at,
+            reason: "testing".into(),
+            mode,
+            channel,
+        }
+    }
+
+    #[test]
+    fn an_audit_window_records_what_the_rules_would_have_done() {
+        let now = Utc::now();
+        let out = decide(
+            &request("blocked.example", 443),
+            &policy(vec![], vec![window(WindowMode::Audit, WindowChannel::All, Some(now + Duration::minutes(10)))]),
+            now,
+        );
+        assert_eq!(out.decision, Decision::Audit);
+        assert!(out.would_deny, "no rule allows the host, so it would have been denied");
+    }
+
+    #[test]
+    fn a_bypass_window_over_an_allowed_host_is_not_a_would_deny() {
+        let now = Utc::now();
+        let r = rule("allowed.example", Some(443), RuleAction::Allow, 10);
+        let rule_id = r.id;
+        let out = decide(
+            &request("allowed.example", 443),
+            &policy(vec![r], vec![window(WindowMode::Bypass, WindowChannel::All, Some(now + Duration::minutes(5)))]),
+            now,
+        );
+        assert_eq!(out.decision, Decision::Allow);
+        assert!(!out.would_deny);
+        // The window answered, but the rule that also allowed it is still named,
+        // so the traffic view can say why the request was never at risk.
+        assert_eq!(out.rule_id, Some(rule_id));
+    }
+
+    #[test]
+    fn an_unlimited_window_stays_open_and_an_expired_one_does_not_cover() {
+        let now = Utc::now();
+        let unlimited = window(WindowMode::Bypass, WindowChannel::All, None);
+        assert!(unlimited.covers(Some(Uuid::nil()), now + Duration::days(365)));
+        let expired = window(WindowMode::Bypass, WindowChannel::All, Some(now - Duration::minutes(1)));
+        assert!(!expired.covers(Some(Uuid::nil()), now));
+    }
+
+    #[test]
+    fn proxy_off_turns_a_deny_into_a_recorded_allow() {
+        let out = decide(&request("anything.example", 443), &policy(vec![], vec![]), Utc::now());
+        let allowed = allow_everything(out);
+        assert_eq!(allowed.decision, Decision::Allow);
+        assert_eq!(allowed.reason, DecisionReason::AllowAll);
+        assert!(allowed.would_deny);
+    }
+
     #[test]
     fn nothing_matching_is_denied_by_default() {
         let out = decide(&request("example.com", 443), &policy(vec![], vec![]), Utc::now());
@@ -627,19 +905,85 @@ mod tests {
     #[test]
     fn a_window_beats_every_rule_until_it_expires() {
         let deny = rule("*", None, RuleAction::Deny, 1);
+        let deny_id = deny.id;
         let now = Utc::now();
         let window = OpenWindow {
             id: Uuid::new_v4(),
             sandbox_id: Some(Uuid::nil()),
-            expires_at: now + Duration::minutes(10),
+            expires_at: Some(now + Duration::minutes(10)),
             reason: "debugging".into(),
+            mode: WindowMode::Bypass,
+            channel: WindowChannel::All,
         };
+        let window_id = window.id;
         let out = decide(&request("anything.net", 80), &policy(vec![deny.clone()], vec![window.clone()]), now);
         assert_eq!(out.decision, Decision::Allow);
         assert_eq!(out.reason, DecisionReason::Window);
+        assert_eq!(out.window_id, Some(window_id));
+        // The rule said no and the window said yes: that is what `would_deny`
+        // records, and the deny rule it came from is still named.
+        assert!(out.would_deny);
+        assert_eq!(out.rule_id, Some(deny_id));
 
         let later = decide(&request("anything.net", 80), &policy(vec![deny], vec![window]), now + Duration::minutes(11));
         assert_eq!(later.decision, Decision::Deny);
+    }
+
+    #[test]
+    fn a_dns_window_does_not_open_the_web() {
+        // The master switches are per firewall. A window that covers name
+        // lookups must not also allow an HTTPS request, or "open DNS for five
+        // minutes" would be "open everything".
+        let now = Utc::now();
+        let window = OpenWindow {
+            id: Uuid::new_v4(),
+            sandbox_id: Some(Uuid::nil()),
+            expires_at: Some(now + Duration::minutes(5)),
+            reason: "resolver check".into(),
+            mode: WindowMode::Bypass,
+            channel: WindowChannel::Dns,
+        };
+        let mut dns = request("example.com", 0);
+        dns.protocol = Some("dns".into());
+        let covered = decide(&dns, &policy(vec![], vec![window.clone()]), now);
+        assert_eq!(covered.decision, Decision::Allow);
+        assert_eq!(covered.reason, DecisionReason::Window);
+
+        let https = decide(&request("example.com", 443), &policy(vec![], vec![window]), now);
+        assert_eq!(https.decision, Decision::Deny, "a DNS window must not cover HTTPS");
+    }
+
+    #[test]
+    fn an_observation_window_allows_but_is_recorded_as_a_block() {
+        // Observation mode is the point of a policy review: nothing breaks and
+        // the console still shows what would have been denied.
+        let now = Utc::now();
+        let window = OpenWindow {
+            id: Uuid::new_v4(),
+            sandbox_id: None,
+            expires_at: Some(now + Duration::minutes(30)),
+            reason: "policy review".into(),
+            mode: WindowMode::Audit,
+            channel: WindowChannel::All,
+        };
+        let out = decide(&request("example.com", 443), &policy(vec![], vec![window]), now);
+        assert_eq!(out.decision, Decision::Audit);
+        assert!(out.decision.passes(), "observation must not stop the workload");
+        assert!(out.explanation.contains("Observation mode"));
+    }
+
+    #[test]
+    fn a_channel_covers_itself_and_all_covers_everything() {
+        assert!(WindowChannel::All.covers(WindowChannel::Dns));
+        assert!(WindowChannel::Dns.covers(WindowChannel::Dns));
+        assert!(!WindowChannel::Dns.covers(WindowChannel::Proxy));
+        // Every channel is switchable now: an OpenShell window is compiled into
+        // the sandbox's own policy in audit mode (ADR 0053).
+        assert!(WindowChannel::Openshell.switchable());
+        assert_eq!(channel_of_request(Some("dns")), WindowChannel::Dns);
+        assert_eq!(channel_of_request(Some("mcp")), WindowChannel::Mcp);
+        assert_eq!(channel_of_request(Some("https")), WindowChannel::Proxy);
+        assert_eq!(channel_of_request(None), WindowChannel::Proxy);
     }
 
     #[test]
@@ -648,8 +992,10 @@ mod tests {
         let window = OpenWindow {
             id: Uuid::new_v4(),
             sandbox_id: Some(Uuid::new_v4()),
-            expires_at: now + Duration::minutes(10),
+            expires_at: Some(now + Duration::minutes(10)),
             reason: "x".into(),
+            mode: WindowMode::Bypass,
+            channel: WindowChannel::All,
         };
         let out = decide(&request("a.b", 1), &policy(vec![], vec![window]), now);
         assert_eq!(out.decision, Decision::Deny);
@@ -701,5 +1047,95 @@ mod tests {
         assert_eq!(agent_hint(Some("claude-code/1.0")).as_deref(), Some("claude-code"));
         assert_eq!(agent_hint(Some("Mozilla/5.0")), None);
         assert_eq!(agent_hint(None), None);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// "Agents only" inspection
+// ---------------------------------------------------------------------------
+
+/// Hosts an agent talks to when it signs in with an account or calls a model
+/// directly, so a key cannot be put on the request by the gateway.
+const AGENT_HOSTS: &[&str] = &[
+    "api.anthropic.com",
+    "claude.ai",
+    "platform.claude.com",
+    "console.anthropic.com",
+    "mcp-proxy.anthropic.com",
+    "api.openai.com",
+    "chatgpt.com",
+    "chat.openai.com",
+    "auth.openai.com",
+    "generativelanguage.googleapis.com",
+    "openrouter.ai",
+    "api.mistral.ai",
+    "api.groq.com",
+    "api.x.ai",
+    "api.deepseek.com",
+    "api.cohere.com",
+    "api.perplexity.ai",
+];
+
+/// Suffixes that are agent hosts as a family.
+const AGENT_SUFFIXES: &[&str] = &[".openai.azure.com", ".anthropic.com", ".openai.com"];
+
+/// Whether a destination is a model provider the agents-only mode reads.
+///
+/// The built-in list plus any hosts named in `NESTBOX_AGENT_HOSTS` (comma
+/// separated; a leading dot is a suffix), so an operator can add a self-hosted
+/// gateway without a release.
+pub fn is_agent_host(host: &str) -> bool {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    let host = host.split(':').next().unwrap_or("");
+    if host.is_empty() {
+        return false;
+    }
+    if AGENT_HOSTS.contains(&host) || AGENT_SUFFIXES.iter().any(|suffix| host.ends_with(suffix)) {
+        return true;
+    }
+    std::env::var("NESTBOX_AGENT_HOSTS").is_ok_and(|extra| {
+        extra.split(',').map(str::trim).filter(|item| !item.is_empty()).any(|item| {
+            match item.strip_prefix('.') {
+                Some(suffix) => host.ends_with(&format!(".{suffix}")) || host == suffix,
+                None => host == item.to_ascii_lowercase(),
+            }
+        })
+    })
+}
+
+/// The mode the proxy should act on for one destination.
+///
+/// `hybrid` reads TLS only towards model providers; for any other destination the
+/// proxy gets `forward_proxy` and keeps a blind tunnel. The other modes are
+/// unchanged.
+pub fn mode_for_host(mode: &str, host: &str) -> String {
+    if mode == "hybrid" && !is_agent_host(host) {
+        "forward_proxy".to_string()
+    } else {
+        mode.to_string()
+    }
+}
+
+#[cfg(test)]
+mod agent_host_tests {
+    use super::*;
+
+    #[test]
+    fn model_providers_are_agent_hosts_and_the_rest_is_not() {
+        for host in ["api.anthropic.com", "claude.ai", "CHATGPT.com:443", "mine.openai.azure.com", "statsig.anthropic.com"] {
+            assert!(is_agent_host(host), "{host}");
+        }
+        for host in ["github.com", "registry.npmjs.org", "evil-anthropic.com", ""] {
+            assert!(!is_agent_host(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn only_hybrid_is_narrowed() {
+        assert_eq!(mode_for_host("hybrid", "github.com"), "forward_proxy");
+        assert_eq!(mode_for_host("hybrid", "api.anthropic.com"), "hybrid");
+        assert_eq!(mode_for_host("transparent", "github.com"), "transparent");
+        assert_eq!(mode_for_host("forward_proxy", "api.anthropic.com"), "forward_proxy");
     }
 }

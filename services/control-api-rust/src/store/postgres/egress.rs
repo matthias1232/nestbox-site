@@ -31,7 +31,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::TenantScope;
-use crate::domain::egress::OpenWindow;
+use crate::domain::egress::{OpenWindow, WindowChannel, WindowMode};
 use crate::error::StoreError;
 
 /// Which environment a sandbox belongs to, and which node runs it.
@@ -49,6 +49,26 @@ pub struct SandboxScope {
 /// Used to turn "the container at 172.30.0.5" into a sandbox row: the runner
 /// knows addresses and names, the database knows ids. Names are unique within an
 /// environment, and the appliance has one, so the first match is the answer.
+/// The environment a sandbox belongs to, by id.
+///
+/// The egress broker knows the sandbox id (Envoy copies it out of the policy
+/// answer) and needs the tenant to write an incident. A missing row is `None`,
+/// not an error: a sandbox deleted a moment ago is the normal race.
+pub async fn sandbox_environment(
+    pool: &sqlx::PgPool,
+    sandbox_id: Uuid,
+) -> Result<Option<Uuid>, StoreError> {
+    // Through the function, not the table: `sandboxes` is under tenant
+    // isolation and this process has no tenant yet — the whole question is which
+    // one it is. `nb_sandbox_environment` (migration 0080) answers that one
+    // question and nothing else.
+    let found: Option<Uuid> = sqlx::query_scalar("SELECT nb_sandbox_environment($1)")
+        .bind(sandbox_id)
+        .fetch_one(pool)
+        .await?;
+    Ok(found)
+}
+
 pub async fn sandbox_id_by_name(
     pool: &sqlx::PgPool,
     name: &str,
@@ -136,13 +156,13 @@ pub async fn open_windows(
     sandbox_id: Option<Uuid>,
 ) -> Result<Vec<OpenWindow>, StoreError> {
     let rows = sqlx::query(
-        "SELECT id, sandbox_id, expires_at, reason
+        "SELECT id, sandbox_id, expires_at, reason, mode, channel
            FROM traffic_windows
           WHERE environment_id = $1
             AND revoked_at IS NULL
-            AND expires_at > now()
+            AND (expires_at IS NULL OR expires_at > now())
             AND (sandbox_id IS NULL OR sandbox_id = $2)
-          ORDER BY expires_at DESC",
+          ORDER BY expires_at DESC NULLS FIRST",
     )
     .bind(scope.environment_id())
     .bind(sandbox_id)
@@ -151,11 +171,17 @@ pub async fn open_windows(
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
+        let mode: String = row.try_get("mode")?;
+        let channel: String = row.try_get("channel")?;
         out.push(OpenWindow {
             id: row.try_get("id")?,
             sandbox_id: row.try_get("sandbox_id")?,
             expires_at: row.try_get("expires_at")?,
             reason: row.try_get("reason")?,
+            // A word this build does not know is the conservative default: a
+            // bypass would be a wider permission than the row asked for.
+            mode: WindowMode::parse(&mode).unwrap_or_default(),
+            channel: WindowChannel::parse(&channel).unwrap_or_default(),
         });
     }
     Ok(out)

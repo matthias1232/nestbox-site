@@ -78,6 +78,45 @@ def memory_quantity(value: str) -> str:
     return value
 
 
+# The filesystem rules of every sandbox this runner creates. The gateway's own
+# default allows writing only /tmp and /dev/null, which is too little for what
+# Nestbox puts in a sandbox: a terminal that survives a reload needs a
+# pseudo-terminal (/dev/ptmx, /dev/pts), Chrome and the VNC server need shared
+# memory (/dev/shm), and /dev/tty and /dev/zero are read by ordinary tools. This
+# section is read once, when the sandbox starts, so it has to be given here.
+FILESYSTEM_POLICY: dict[str, Any] = {
+    "include_workdir": True,
+    "read_only": [
+        "/bin", "/usr", "/lib", "/proc", "/dev/urandom", "/dev/random", "/etc", "/var/log",
+        # Tools installed under /opt, the keyboard data and dbus machine id, what
+        # Chrome reads from /sys, and the node CA Nestbox mounts for inspecting modes.
+        "/opt", "/var/lib", "/sys", "/run/secrets",
+    ],
+    "read_write": [
+        "/tmp", "/var/tmp", "/dev/null", "/dev/zero", "/dev/tty",
+        "/dev/ptmx", "/dev/pts", "/dev/shm",
+        # The X server compiles the keyboard map here; without it Xtigervnc dies
+        # with "Failed to activate virtual core keyboard".
+        "/var/lib/xkb",
+    ],
+}
+
+
+def base_policy_file() -> str:
+    """Write the startup policy to a private temp file and return its path."""
+    import tempfile
+
+    document = {
+        "version": 1,
+        "filesystem_policy": FILESYSTEM_POLICY,
+        "landlock": {"compatibility": "best_effort"},
+        "network_policies": {},
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        json.dump(document, handle)  # JSON is YAML
+        return handle.name
+
+
 def create(
     *,
     name: str,
@@ -111,7 +150,18 @@ def create(
     for provider in providers or []:
         args += ["--provider", provider]
     args += ["--", *command]
-    out = run(args, timeout=300, env=env)
+    created_policy = None
+    if not policy_file:
+        created_policy = policy_file = base_policy_file()
+        args[args.index("--") : args.index("--")] = ["--policy", policy_file]
+    try:
+        out = run(args, timeout=300, env=env)
+    finally:
+        if created_policy:
+            try:
+                os.unlink(created_policy)
+            except OSError:
+                pass
     try:
         return json.loads(out)
     except ValueError:

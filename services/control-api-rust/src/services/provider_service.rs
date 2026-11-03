@@ -96,7 +96,18 @@ pub async fn create_for_install(
     // 8080 is the port `model_server_images` starts the server on. The profile
     // is created before the container exists, so the number lives in two
     // places; the install probe is what proves they agree.
-    let endpoint = format!("http://model-{host}:8080/v1");
+    //
+    // On a joined node the container name means nothing: the control plane is
+    // on another machine and reaches the node through the overlay, where the
+    // server is published. That port is chosen when the server starts, so the
+    // endpoint carries `0` until the install writes the real one
+    // (`providers::set_endpoint`).
+    let endpoint = if node.is_local {
+        format!("http://model-{host}:8080/v1")
+    } else {
+        let address = overlay_ip(scope, node.id).await?;
+        format!("http://{address}:0/v1")
+    };
     store::insert_pending_for_install(
         scope,
         &name,
@@ -106,6 +117,25 @@ pub async fn create_for_install(
         install.id,
     )
     .await
+}
+
+/// The overlay address of a joined node.
+///
+/// `domain::node::Node` carries what a node is, not where it sits in the
+/// overlay; the address lives in the row the join service wrote and nothing but
+/// the WireGuard setup reads it back. Reading it here keeps the node type from
+/// growing a field for one caller. A node without an address cannot be reached,
+/// so that is an error rather than a placeholder.
+async fn overlay_ip(scope: &mut TenantScope<'_>, node_id: Uuid) -> Result<String, StoreError> {
+    let address: Option<String> = sqlx::query_scalar(
+        "SELECT overlay_ip FROM nodes WHERE environment_id = $1 AND id = $2",
+    )
+    .bind(scope.environment_id())
+    .bind(node_id)
+    .fetch_optional(scope.connection())
+    .await?
+    .flatten();
+    address.filter(|value| !value.trim().is_empty()).ok_or(StoreError::NotFound)
 }
 
 /// Remove the profile an uninstall leaves behind.
@@ -403,6 +433,38 @@ pub async fn probe_all(
 /// HTTP answer counts as reachable even when it is a 401: the server is up and
 /// the credential is the problem, which is a different fix from "nothing is
 /// listening".
+/// The exit a provider profile is called through, when one is chosen.
+///
+/// Resolved from the row, not from the caller: a probe and a media render both
+/// call a provider, and both must leave from the country the operator chose. A
+/// disabled exit is not used — an operator who switched it off expects traffic
+/// to stop going through it.
+pub async fn exit_url(ctx: &ServiceContext, profile: &ProviderProfile) -> Option<String> {
+    let mut scope = crate::store::TenantScope::begin(&ctx.pool, profile.environment_id)
+        .await
+        .ok()?;
+    let proxy = crate::store::postgres::proxies::for_provider(&mut scope, profile.id)
+        .await
+        .ok()
+        .flatten();
+    let _ = scope.commit().await;
+    proxy.filter(|proxy| proxy.enabled).map(|proxy| proxy.url())
+}
+
+/// A client that leaves through the profile's exit, when it has one.
+pub async fn client_for(
+    ctx: &ServiceContext,
+    profile: &ProviderProfile,
+    timeout: std::time::Duration,
+) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().timeout(timeout);
+    if let Some(url) = exit_url(ctx, profile).await {
+        let proxy = reqwest::Proxy::all(&url).map_err(|error| format!("exit proxy: {error}"))?;
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(|error| format!("client: {error}"))
+}
+
 pub(crate) async fn measure(ctx: &ServiceContext, profile: &ProviderProfile) -> ProbeResult {
     let credential = match profile.secret_ref.as_deref() {
         Some(locator) => match crate::services::secret_service::credential(ctx, profile.environment_id, locator).await {
@@ -421,10 +483,7 @@ pub(crate) async fn measure(ctx: &ServiceContext, profile: &ProviderProfile) -> 
     };
 
     let url = format!("{}/models", profile.endpoint.trim_end_matches('/'));
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-    {
+    let client = match client_for(ctx, profile, Duration::from_secs(10)).await {
         Ok(client) => client,
         Err(error) => {
             return ProbeResult {
@@ -537,6 +596,126 @@ pub async fn inference_environment(
     }
 
     Ok(environment)
+}
+
+/// Where agents reach the accounting proxy, when the deployment routes model
+/// traffic through it. Unset means agents talk to their gateway directly.
+pub fn accounting_proxy_url() -> Option<String> {
+    std::env::var("NESTBOX_ACCOUNTING_PROXY_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// `environment_for_pack`, plus the routing a named sandbox needs: when the
+/// deployment sets `NESTBOX_ACCOUNTING_PROXY_URL`, the agent's model base URLs
+/// go through the accounting proxy with the sandbox named in the path.
+pub async fn environment_for_sandbox(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    pack_key: &str,
+    sandbox_name: &str,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    let mut environment = environment_for_pack(ctx, environment_id, pack_key).await?;
+    apply_model_grants(ctx, environment_id, sandbox_name, &mut environment).await;
+    if let Some(proxy) = accounting_proxy_url() {
+        // The granted models decide which dialect an agent is offered before the
+        // base URLs are rewritten: `NESTBOX_MODEL_ROUTER=1` makes the accounting
+        // proxy choose the upstream from the request's model (ADR 0057).
+        let models = crate::services::model_grant_service::effective_by_name(ctx, environment_id, sandbox_name)
+            .await
+            .unwrap_or_default();
+        if !models.is_empty() {
+            let names: Vec<&str> = models.iter().map(|model| model.model_name.as_str()).collect();
+            let default = models
+                .iter()
+                .find(|model| model.is_default)
+                .map(|model| model.model_name.clone())
+                .unwrap_or_else(|| models[0].model_name.clone());
+            environment.insert("NESTBOX_MODEL_ROUTER".into(), "1".into());
+            environment.insert("NESTBOX_MODEL_LIST".into(), names.join(","));
+            environment.insert("NESTBOX_MODEL_DEFAULT".into(), default);
+            // A placeholder, because an OpenAI client refuses to start without one.
+            // The router replaces the header with the granted model's credential.
+            environment.insert("OPENAI_API_KEY".into(), "nestbox".into());
+            environment.insert("ANTHROPIC_AUTH_TOKEN".into(), "nestbox".into());
+            if !environment.contains_key("OPENAI_BASE_URL") {
+                environment.insert("OPENAI_BASE_URL".into(), proxy.clone());
+            }
+            if !environment.contains_key("ANTHROPIC_BASE_URL") {
+                environment.insert("ANTHROPIC_BASE_URL".into(), proxy.clone());
+            }
+        }
+        crate::domain::agent_config::route_through_accounting(&mut environment, &proxy, sandbox_name);
+    }
+    Ok(environment)
+}
+
+/// Point an agent at the model router when the sandbox has been granted models.
+///
+/// The grants decide *which* models exist and which one is the default; the
+/// proxy decides where each of them is served. So the agent's base URLs become
+/// the router's path (`…/s/<sandbox>/r`, with `/v1` for the OpenAI family) and
+/// the old gateway endpoint is replaced rather than kept: two base URLs would
+/// mean some traffic bypasses the router and the grant list would be a
+/// suggestion. Without a proxy URL there is nothing to route through, so only
+/// the three `NESTBOX_MODEL_*` keys are set for an agent that wants the list.
+///
+/// A grant read that fails leaves the sandbox with its mapped model
+/// environment rather than without one: a sandbox that cannot start is worse
+/// than one running on the gateway's default.
+async fn apply_model_grants(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    sandbox_name: &str,
+    environment: &mut BTreeMap<String, String>,
+) {
+    let models = match super::model_grant_service::effective_by_name(ctx, environment_id, sandbox_name)
+        .await
+    {
+        Ok(models) => models,
+        Err(error) => {
+            tracing::warn!(code = error.code.0, "model grants could not be read for a sandbox");
+            return;
+        }
+    };
+    let Some(first) = models.first() else {
+        return;
+    };
+
+    let names = models
+        .iter()
+        .map(|model| model.model_name.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    let default = models
+        .iter()
+        .find(|model| model.is_default)
+        .unwrap_or(first)
+        .model_name
+        .clone();
+
+    environment.insert("NESTBOX_MODEL_ROUTER".into(), "1".into());
+    environment.insert("NESTBOX_MODEL_LIST".into(), names);
+    environment.insert("NESTBOX_MODEL_DEFAULT".into(), default);
+    let Some(proxy) = accounting_proxy_url() else {
+        return;
+    };
+    let router = format!("{}/s/{}/r", proxy.trim_end_matches('/'), sandbox_name);
+    environment.insert("ANTHROPIC_BASE_URL".into(), router.clone());
+    environment.insert("OPENAI_BASE_URL".into(), format!("{router}/v1"));
+    // Kept equal to the OpenAI base, as the mapped environment does: some agents
+    // read one name and some the other.
+    environment.insert("OPENAI_API_BASE".into(), format!("{router}/v1"));
+    // Placeholders, not credentials: the router sets the real authorization from
+    // the profile the chosen model points at, and an agent refuses to start
+    // without a value.
+    environment
+        .entry("OPENAI_API_KEY".into())
+        .or_insert_with(|| "nestbox".into());
+    environment
+        .entry("ANTHROPIC_AUTH_TOKEN".into())
+        .or_insert_with(|| "nestbox".into());
 }
 
 /// The environment for a pack, by what it speaks.
@@ -753,6 +932,7 @@ mod tests {
             node_id: None,
             model_install_id: None,
             last_probed_at: None,
+        proxy_id: None,
         }
     }
 
@@ -880,6 +1060,11 @@ mod tests {
 pub fn media_mcp_url() -> String {
     match std::env::var("NESTBOX_MEDIA_MCP_URL") {
         Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
+        // A gateway sandbox has no route on the runtime network; its supervisor
+        // reaches the host, where the server's port is published (ADR 0035).
+        _ if crate::services::sandbox_service::openshell_runtime() => {
+            "http://host.openshell.internal:18089/mcp".to_string()
+        }
         _ => "http://media-mcp:8080/mcp".to_string(),
     }
 }
@@ -887,6 +1072,9 @@ pub fn media_mcp_url() -> String {
 pub fn mcp_hub_url() -> String {
     match std::env::var("NESTBOX_MCP_HUB_URL") {
         Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ if crate::services::sandbox_service::openshell_runtime() => {
+            "http://host.openshell.internal:18088/mcp".to_string()
+        }
         _ => "http://mcp-hub:8080/mcp".to_string(),
     }
 }

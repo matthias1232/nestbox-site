@@ -1,0 +1,77 @@
+/* Help: docs page, help drawer, shortcuts sheet and first-run tour (F18). Tokens only. */
+
+.docs-page { display: block; }
+.docs-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr) 220px; gap: var(--space-5); padding: var(--space-4) var(--space-5); align-items: start; }
+.docs-list, .docs-toc { position: sticky; top: 76px; max-height: calc(100vh - 120px); overflow: auto; }
+.docs-search { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
+.docs-search input { width: 100%; }
+.docs-group { margin-bottom: var(--space-3); }
+.docs-group ul, .docs-toc ul, .docs-hits { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
+.docs-group li a, .docs-toc li a, .docs-hits li a { display: block; padding: 4px var(--space-2); color: var(--fg-muted); text-decoration: none; border-left: 1px solid var(--border); }
+.docs-group li a:hover, .docs-toc li a:hover, .docs-hits li a:hover { color: var(--fg); background: var(--bg-hover); }
+.docs-group li a[aria-current="page"] { color: var(--accent); border-left-color: var(--accent); }
+.docs-toc li.sub a { padding-left: var(--space-4); }
+.docs-edit { color: var(--fg-muted); font-size: 0.8rem; }
+.docs-article { min-width: 0; max-width: 780px; }
+.docs-overview { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }
+.docs-card { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg); text-decoration: none; }
+.docs-card:hover { border-color: var(--border-strong); }
+.docs-prevnext { display: flex; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-6); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+
+/* Rendered markdown */
+.md { line-height: 1.6; font-size: 0.9rem; overflow-wrap: anywhere; }
+.md h1 { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 var(--space-3); }
+.md h2 { font-size: 1.05rem; font-weight: 700; margin: var(--space-5) 0 var(--space-2); scroll-margin-top: 80px; }
+.md h3 { font-size: 0.95rem; font-weight: 700; margin: var(--space-4) 0 var(--space-2); scroll-margin-top: 80px; }
+.md p, .md ul, .md ol, .md table, .md pre, .md blockquote { margin: 0 0 var(--space-3); }
+.md ul, .md ol { padding-left: var(--space-5); }
+.md a { color: var(--accent); }
+.md code { font-family: var(--mono); font-size: 0.85em; background: var(--bg-inset); padding: 1px 4px; }
+.md pre { background: var(--bg-inset); border: 1px solid var(--border); padding: var(--space-3); overflow: auto; }
+.md pre code { background: none; padding: 0; }
+.md blockquote { border-left: 2px solid var(--accent-line); padding-left: var(--space-3); color: var(--fg-muted); }
+.md blockquote > :last-child { margin-bottom: 0; }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-4) 0; }
+.md img { max-width: 100%; border: 1px solid var(--border-strong); }
+.md table { border-collapse: collapse; width: 100%; }
+.md th, .md td { text-align: left; padding: 6px var(--space-2); border-bottom: 1px solid var(--border); vertical-align: top; }
+.md th { font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-muted); }
+.md td:first-child { white-space: nowrap; }
+.md table { table-layout: auto; }
+
+/* Drawer */
+.help-drawer { display: flex; flex-direction: column; gap: var(--space-3); }
+.help-results { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); }
+.help-results li { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-bottom: 1px solid var(--border); }
+.help-results li:last-child { border-bottom: 0; }
+.help-results li span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.help-footer { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+
+/* Dialogs: shortcuts sheet and tour */
+.help-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 40; }
+.help-dialog { position: fixed; z-index: 42; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--bg-raised); border: 1px solid var(--border-strong); padding: var(--space-4); }
+.help-dialog header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3); }
+.help-dialog h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.shortcuts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+.shortcuts-grid dl { display: grid; grid-template-columns: 1fr auto; gap: var(--space-2) var(--space-3); margin: var(--space-2) 0 0; align-items: center; }
+.shortcuts-grid dt { color: var(--fg-muted); }
+.shortcuts-grid dd { margin: 0; }
+/* The tour dims and marks a region but does not take the console away: the shade and the
+   spotlight never catch a click, so the page under them stays usable and Escape ends the
+   tour. The spotlight is the region's own box, drawn with its border inside it. */
+.tour-shade { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+.tour-spot { position: fixed; z-index: 41; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); pointer-events: none; }
+.tour-card { width: min(340px, 92vw); pointer-events: auto; }
+.tour-card h2 { margin: var(--space-1) 0 var(--space-2); }
+.tour-card p { margin: 0 0 var(--space-3); color: var(--fg-muted); }
+.tour-actions { display: flex; justify-content: space-between; gap: var(--space-2); }
+
+@media (max-width: 1100px) {
+  .docs-layout { grid-template-columns: 200px minmax(0, 1fr); }
+  .docs-toc { display: none; }
+}
+@media (max-width: 720px) {
+  .docs-layout { grid-template-columns: 1fr; }
+  .docs-list { position: static; max-height: none; }
+  .shortcuts-grid { grid-template-columns: 1fr; }
+}

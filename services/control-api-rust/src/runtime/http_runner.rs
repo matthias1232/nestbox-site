@@ -77,11 +77,30 @@ impl From<RunnerSandbox> for RuntimeFacts {
     }
 }
 
+/// The bound every runner call shares.
+///
+/// A hung runner must not hold an API worker forever. Docker's own stop grace
+/// period is 10 s and an exec may run for minutes, so the bound is generous but
+/// finite.
+const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(660);
+
+/// The bound of one recipe build.
+///
+/// A build is not an ordinary call: it runs `apt-get`, Chrome and the desktop
+/// pack inside Docker and took about eleven minutes on the appliance, which is
+/// longer than [`CLIENT_TIMEOUT`]. The API answers the operator the moment the
+/// job starts, so a long wait here holds no request open, only the job.
+const BUILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
+
 /// Adapter, der einen HTTP-fähigen Runtime-Dienst anspricht.
 pub struct HttpRunner {
     base_url: String,
     network: String,
     client: reqwest::Client,
+    /// The remote node's own token. The local runner is reached on a private compose network
+    /// and uses the node token file instead; a runner on another machine is reached over the
+    /// overlay and demands its token on every request (ADR 0047).
+    token: Option<String>,
 }
 
 impl HttpRunner {
@@ -91,13 +110,27 @@ impl HttpRunner {
             network: network.into(),
             // A hung runner must not hold an API worker forever. Docker's own
             // stop grace period is 10 s and an exec may run for minutes, so the
-            // bound is generous but finite.
+            // bound is generous but finite. A build gets its own, longer one
+            // (see `send_with_timeout` and [`BUILD_TIMEOUT`]).
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(660))
+                .timeout(CLIENT_TIMEOUT)
                 .connect_timeout(std::time::Duration::from_secs(5))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
+            token: None,
         }
+    }
+
+    /// The same runner, authenticated with the token of the node it runs on.
+    pub fn with_token(mut self, token: impl Into<String>) -> Self {
+        let token = token.into();
+        self.token = Some(token).filter(|t| !t.trim().is_empty());
+        self
+    }
+
+    /// The token to present to this runner: its own if it has one, else the local node token.
+    fn node_token(&self) -> Option<String> {
+        self.token.clone().or_else(read_node_token)
     }
 
     /// The same host and port, with the WebSocket scheme.
@@ -117,8 +150,28 @@ impl HttpRunner {
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<T, RuntimeError> {
+        self.send_with_timeout(method, path, body, CLIENT_TIMEOUT).await
+    }
+
+    /// The same call with its own bound instead of the client-wide one.
+    ///
+    /// Only a recipe build needs this: it installs apt packages, Chrome and the
+    /// desktop pack inside Docker, which took about eleven minutes on the
+    /// appliance and would be cut off by the 660 s bound every other call
+    /// shares. The API has already answered the operator by then, so waiting
+    /// here holds no request open.
+    async fn send_with_timeout<T: for<'de> Deserialize<'de>>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        timeout: std::time::Duration,
+    ) -> Result<T, RuntimeError> {
         let url = format!("{}{}", self.base_url, path);
-        let mut request = self.client.request(method, url);
+        let mut request = self.client.request(method, url).timeout(timeout);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
         if let Some(payload) = body {
             request = request.json(payload);
         }
@@ -171,12 +224,7 @@ impl RuntimeAdapter for HttpRunner {
             "name": spec.name,
             "image": spec.image,
             "command": spec.command,
-            // `openshell` puts the sandbox on the OpenShell gateway; anything else is
-            // the development Docker adapter. One value per deployment.
-            "runtime": std::env::var("NESTBOX_SANDBOX_RUNTIME")
-                .ok()
-                .filter(|value| value == "openshell")
-                .unwrap_or_else(|| "docker-development".to_string()),
+            "runtime": runtime_for(&spec.egress_mode),
             "pack_key": spec.pack_key,
             "tool_profile": spec.tool_profile,
             "environment": environment,
@@ -185,6 +233,7 @@ impl RuntimeAdapter for HttpRunner {
             "pids_limit": spec.pids_limit,
             "mounts": spec.mounts,
             "gpu_count": spec.gpu_count,
+            "egress_mode": spec.egress_mode,
         });
         let facts: RunnerSandbox = self
             .send(reqwest::Method::POST, "/v1/sandboxes", Some(&payload))
@@ -220,9 +269,11 @@ impl RuntimeAdapter for HttpRunner {
 
     async fn remove(&self, name: &str) -> Result<(), RuntimeError> {
         let url = format!("{}/v1/sandboxes/{name}/remove", self.base_url);
-        let response = self
-            .client
-            .post(url)
+        let mut request = self.client.post(url);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
@@ -271,6 +322,24 @@ impl RuntimeAdapter for HttpRunner {
         Ok(result)
     }
 
+    async fn remote_ssh_run(
+        &self,
+        request: crate::domain::runtime::RemoteSshRun,
+    ) -> Result<ExecResult, RuntimeError> {
+        let payload = serde_json::json!({
+            "host": request.host,
+            "port": request.port,
+            "user": request.user,
+            "password": request.password,
+            "private_key": request.private_key,
+            "script": request.script,
+            "env": request.env,
+            "timeout_seconds": request.timeout_seconds,
+        });
+        self.send(reqwest::Method::POST, "/v1/remote/ssh-run", Some(&payload))
+            .await
+    }
+
     async fn hardware(&self) -> Result<HardwareReport, RuntimeError> {
         self.send(reqwest::Method::GET, "/v1/hardware", None).await
     }
@@ -278,8 +347,13 @@ impl RuntimeAdapter for HttpRunner {
     async fn build(&self, request: BuildRequest) -> Result<BuildResult, RuntimeError> {
         let payload = serde_json::to_value(&request)
             .map_err(|error| RuntimeError::Rejected(error.to_string()))?;
-        self.send(reqwest::Method::POST, "/v1/builds", Some(&payload))
-            .await
+        self.send_with_timeout(
+            reqwest::Method::POST,
+            "/v1/builds",
+            Some(&payload),
+            BUILD_TIMEOUT,
+        )
+        .await
     }
 
     async fn catalogue(&self, request: CatalogueRequest) -> Result<CatalogueAnswer, RuntimeError> {
@@ -297,6 +371,15 @@ impl RuntimeAdapter for HttpRunner {
             .map_err(|error| RuntimeError::Rejected(error.to_string()))?;
         self.send(reqwest::Method::POST, "/v1/images/verify", Some(&payload))
             .await
+    }
+
+    async fn live_view(&self, name: &str, kind: &str) -> Result<serde_json::Value, RuntimeError> {
+        self.send(
+            reqwest::Method::GET,
+            &format!("/v1/sandboxes/{name}/live/{kind}"),
+            None,
+        )
+        .await
     }
 
     async fn processes(&self, name: &str) -> Result<ProcessTable, RuntimeError> {
@@ -611,10 +694,105 @@ impl RuntimeAdapter for HttpRunner {
         Ok(answer.logs)
     }
 
-    async fn open_terminal(&self, name: &str, tab_id: &str) -> Result<BoxTerminal, RuntimeError> {
+    async fn snapshot_backup(
+        &self,
+        repo: &str,
+        password: &str,
+        path: &str,
+        tags: &[String],
+    ) -> Result<crate::domain::runtime::SnapshotFact, RuntimeError> {
+        let body = serde_json::json!({ "repo": repo, "password": password, "path": path, "tags": tags });
+        self.send(reqwest::Method::POST, "/v1/snapshots/backup", Some(&body)).await
+    }
+
+    async fn snapshot_restore(
+        &self,
+        repo: &str,
+        password: &str,
+        snapshot: &str,
+        source_path: &str,
+        path: &str,
+    ) -> Result<serde_json::Value, RuntimeError> {
+        let body = serde_json::json!({
+            "repo": repo, "password": password, "snapshot": snapshot, "source_path": source_path, "path": path
+        });
+        self.send(reqwest::Method::POST, "/v1/snapshots/restore", Some(&body)).await
+    }
+
+    async fn prune_snapshots(&self, name: &str, password: &str, keep_last: i32, keep_daily: i32) -> Result<serde_json::Value, RuntimeError> {
+        let body = serde_json::json!({ "name": name, "password": password, "keep_last": keep_last, "keep_daily": keep_daily });
+        self.send(reqwest::Method::POST, "/v1/snapshots/prune", Some(&body)).await
+    }
+
+    async fn images(&self) -> Result<Vec<crate::domain::runtime::NodeImageFact>, RuntimeError> {
+        #[derive(Deserialize)]
+        struct Listing {
+            items: Vec<crate::domain::runtime::NodeImageFact>,
+        }
+        let listing: Listing = self.send(reqwest::Method::GET, "/v1/images", None).await?;
+        Ok(listing.items)
+    }
+
+    async fn pull_image(&self, image: &str) -> Result<crate::domain::runtime::NodeImageFact, RuntimeError> {
+        let body = serde_json::json!({ "image": image });
+        self.send(reqwest::Method::POST, "/v1/images/pull", Some(&body)).await
+    }
+
+    async fn open_vnc(&self, name: &str, view_only: bool) -> Result<super::VncStream, RuntimeError> {
+        // The runner drops keyboard, pointer and clipboard messages when asked
+        // for a view-only stream, so the bound is enforced server side.
+        let suffix = if view_only { "?view=1" } else { "" };
+        let url = format!("{}/v1/sandboxes/{}/vnc{suffix}", self.ws_base_url(), name);
+        let mut request = url
+            .as_str()
+            .into_client_request()
+            .map_err(|error| RuntimeError::Rejected(format!("invalid desktop URL: {error}")))?;
+        // Same rule as the terminal: the node token rides in the subprotocol
+        // header, never in a URL that a log would keep.
+        let protocol = match self.node_token() {
+            Some(token) => format!("nestbox-vnc, {token}"),
+            None => "nestbox-vnc".to_string(),
+        };
+        request.headers_mut().insert(
+            "sec-websocket-protocol",
+            reqwest::header::HeaderValue::from_str(&protocol).map_err(|_| {
+                RuntimeError::Rejected("the node token is not a valid header value".to_string())
+            })?,
+        );
+        let upgrade = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio_tungstenite::connect_async(request),
+        )
+        .await
+        .map_err(|_| RuntimeError::Unavailable("the runner did not answer the upgrade".into()))?
+        .map_err(|error| match error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => match response.status().as_u16() {
+                404 => RuntimeError::NotFound(name.to_string()),
+                401 | 403 => RuntimeError::Rejected("the runner refused the node token".to_string()),
+                status => RuntimeError::Rejected(format!("the runner refused the desktop ({status})")),
+            },
+            other => RuntimeError::Unavailable(other.to_string()),
+        })?;
+        Ok(upgrade.0)
+    }
+
+    async fn terminal_sessions(&self, name: &str) -> Result<serde_json::Value, RuntimeError> {
+        self.send(reqwest::Method::GET, &format!("/v1/sandboxes/{name}/terminal/sessions"), None).await
+    }
+
+    async fn open_terminal(&self, name: &str, tab_id: &str, who: &str) -> Result<BoxTerminal, RuntimeError> {
         // `tab_id` is validated to ASCII alphanumerics, `_`, and `-` before it
         // reaches the runtime, so it is already safe as this path's query value.
-        let url = format!("{}/v1/sandboxes/{}/terminal?tab={tab_id}", self.ws_base_url(), name);
+        // `who` is a label; it is percent-encoded so a name with a space or an
+        // accent cannot break the query.
+        let who_encoded: String = who
+            .bytes()
+            .map(|byte| match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+                other => format!("%{other:02X}"),
+            })
+            .collect();
+        let url = format!("{}/v1/sandboxes/{}/terminal?tab={tab_id}&who={who_encoded}", self.ws_base_url(), name);
         let mut request = url
             .as_str()
             .into_client_request()
@@ -627,7 +805,7 @@ impl RuntimeAdapter for HttpRunner {
         // file takes effect for the next session instead of requiring a restart
         // of the API, and a token never sits in the process longer than the
         // handshake that needs it.
-        let token = read_node_token();
+        let token = self.node_token();
         let protocol = match &token {
             Some(token) => format!("{TERMINAL_SUBPROTOCOL}, {token}"),
             None => TERMINAL_SUBPROTOCOL.to_string(),
@@ -676,6 +854,31 @@ impl RuntimeAdapter for HttpRunner {
     }
 }
 
+/// Which runtime a sandbox with this egress mode runs on.
+///
+/// The gateway decides every connection itself and parses anything sent to another
+/// proxy as HTTP, so a `CONNECT` to the egress proxy is refused there. Reading TLS
+/// (chats, token use, method and path rules) therefore needs the Docker runtime;
+/// `direct` needs a route of its own, which a gateway sandbox does not have. Only
+/// the mode that just allows or blocks by host — `forward_proxy` — runs on the
+/// gateway, which is also the one whose decisions the gateway already makes.
+pub fn runtime_for(egress_mode: &str) -> String {
+    let openshell_default = std::env::var("NESTBOX_SANDBOX_RUNTIME")
+        .ok()
+        .filter(|value| value == "openshell")
+        .is_some();
+    runtime_choice(openshell_default, egress_mode).to_string()
+}
+
+/// The decision itself, so it can be tested without touching the process environment.
+fn runtime_choice(openshell_default: bool, egress_mode: &str) -> &'static str {
+    if openshell_default && !matches!(egress_mode, "direct" | "transparent" | "hybrid") {
+        "openshell"
+    } else {
+        "docker-development"
+    }
+}
+
 /// The subprotocol the terminal speaks. Named so both ends agree, and so a
 /// proxy that inspects the upgrade sees a protocol rather than a bare socket.
 const TERMINAL_SUBPROTOCOL: &str = "nestbox-terminal";
@@ -714,3 +917,27 @@ impl HttpRunner {
         Ok(facts.into())
     }
 }
+
+#[cfg(test)]
+mod runtime_choice_tests {
+    use super::runtime_choice;
+
+    #[test]
+    fn only_the_host_only_mode_stays_on_the_gateway() {
+        assert_eq!(runtime_choice(true, "forward_proxy"), "openshell");
+        for mode in ["transparent", "hybrid", "direct"] {
+            assert_eq!(runtime_choice(true, mode), "docker-development", "{mode}");
+        }
+        assert_eq!(runtime_choice(false, "forward_proxy"), "docker-development");
+    }
+
+    #[test]
+    fn a_build_is_allowed_to_take_longer_than_a_normal_call() {
+        // The desktop image needs about eleven minutes; the bound every other
+        // call shares is shorter than that, which is why a build carries its
+        // own. Sharing it again would fail a real build while the runner works.
+        assert!(super::BUILD_TIMEOUT > super::CLIENT_TIMEOUT);
+    }
+}
+
+// (rebuild marker: the runtime is chosen per egress mode)

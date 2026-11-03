@@ -29,9 +29,17 @@ use crate::store::TenantScope;
 use crate::store::postgres::audit::{self as audit_store, NewAuditEvent};
 use crate::store::postgres::sandboxes as sandbox_store;
 use crate::store::postgres::terminal_sessions as session_store;
+use crate::store::postgres::terminal_tabs as tab_store;
 
 /// Terminals allowed in one sandbox at the same time.
-pub const MAX_PER_SANDBOX: usize = 4;
+/// Open terminals in one sandbox across everybody. One sandbox is a machine with
+/// one owner and, usually, one administrator watching: four was a limit that two
+/// people working together reached by accident.
+pub const MAX_PER_SANDBOX: usize = 12;
+
+/// Open terminals one person may keep in one sandbox: the number a person can
+/// actually watch, small enough that one tab strip stays readable.
+pub const MAX_PER_USER_IN_SANDBOX: usize = 4;
 
 /// Terminals one user may hold open across all sandboxes.
 pub const MAX_PER_USER: usize = 20;
@@ -308,6 +316,29 @@ pub async fn open(
         })));
     }
 
+    let mine_in_sandbox = session_store::count_open_for_user_in_sandbox(
+        &mut scope,
+        sandbox_id,
+        principal.user_id,
+        limits.stale_after(),
+    )
+    .await
+    .map_err(ApiError::from)?;
+    if mine_in_sandbox >= MAX_PER_USER_IN_SANDBOX as i64 {
+        scope.commit().await.map_err(ApiError::from)?;
+        return Err(ApiError::too_many(
+            ErrorCode::SANDBOX_TERMINAL_LIMIT,
+            format!(
+                "You already have {mine_in_sandbox} terminals in this sandbox (limit {MAX_PER_USER_IN_SANDBOX}). Close one and try again."
+            ),
+        )
+        .with_details(serde_json::json!({
+            "limit": MAX_PER_USER_IN_SANDBOX,
+            "open": mine_in_sandbox,
+            "scope": "user_in_sandbox",
+        })));
+    }
+
     let for_user =
         session_store::count_open_for_user(&mut scope, principal.user_id, limits.stale_after())
             .await
@@ -328,9 +359,18 @@ pub async fn open(
         })));
     }
 
-    let session_id = session_store::open(&mut scope, sandbox_id, principal.user_id)
-        .await
-        .map_err(ApiError::from)?;
+    // The row is presence as well as quota: it names the tab, so the console can
+    // say who is in which shell (ADR 0056).
+    let session_id = crate::store::postgres::presence::open_session(
+        &mut scope,
+        sandbox_id,
+        Some(principal.user_id),
+        "terminal",
+        Some(&tab_id),
+        false,
+    )
+    .await
+    .map_err(ApiError::from)?;
 
     let opened_at = chrono::Utc::now();
     audit_store::record(
@@ -361,6 +401,7 @@ pub async fn open(
     .await
     .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
+    crate::services::presence_service::announce(ctx, principal.environment_id, sandbox_id);
 
     Ok(Ticket {
         session_id,
@@ -385,7 +426,7 @@ pub async fn attach(
     ticket: &Ticket,
     client: &mut dyn ClientSocket,
 ) -> Result<SessionOutcome, ApiError> {
-    let mut terminal = match ctx.runtime.open_terminal(&ticket.sandbox_name, &ticket.tab_id).await {
+    let mut terminal = match ctx.runtime.open_terminal(&ticket.sandbox_name, &ticket.tab_id, &ticket.actor_label).await {
         Ok(terminal) => terminal,
         Err(error) => {
             let failure = runtime_failure(error);
@@ -581,6 +622,226 @@ fn dimension(value: Option<&serde_json::Value>, default: u16) -> u16 {
         return default;
     };
     number.clamp(1, MAX_DIMENSION as u64) as u16
+}
+
+/// One stored terminal tab, with whether its shell is still there.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TerminalTab {
+    pub tab_id: String,
+    pub title: String,
+    /// Who created the tab, for the shared strip (absent in the old shape).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by_name: Option<String>,
+    /// Who is in the tab right now.
+    #[serde(default)]
+    pub viewers: Vec<serde_json::Value>,
+    /// Whether the named tmux session exists in the sandbox right now. A tab
+    /// whose shell ended is still listed: it is a place to reconnect to, and
+    /// hiding it would look like the tab had been closed.
+    pub alive: bool,
+}
+
+/// A sandbox's terminal tab list.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TerminalTabs {
+    pub items: Vec<TerminalTab>,
+    /// Whether the image has tmux. `None` when the runtime could not be asked,
+    /// which must not be displayed as "not durable".
+    pub durable: Option<bool>,
+    /// How many tabs may be kept. The console uses it to disable "+".
+    pub limit: usize,
+}
+
+/// What the sandbox reports about tmux: whether it exists, and its sessions.
+///
+/// One command, so the two answers cannot come from two different moments. The
+/// command is a fixed vector, never built from a request.
+async fn tmux_state(ctx: &ServiceContext, sandbox_name: &str) -> Option<(bool, Vec<String>)> {
+    let script = "if command -v tmux >/dev/null 2>&1; then echo NESTBOX_TMUX=1; \
+                  tmux list-sessions -F '#{session_name}' 2>/dev/null; \
+                  else echo NESTBOX_TMUX=0; fi";
+    let command = vec!["sh".to_string(), "-lc".to_string(), script.to_string()];
+    let result = ctx.runtime.exec(sandbox_name, &command, 10).await.ok()?;
+    let mut durable = None;
+    let mut sessions = Vec::new();
+    for line in result.output.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if let Some(value) = line.strip_prefix("NESTBOX_TMUX=") {
+            durable = Some(value == "1");
+        } else {
+            sessions.push(line.to_string());
+        }
+    }
+    Some((durable?, sessions))
+}
+
+/// The tabs one user keeps in one sandbox, with the state of their shells.
+///
+/// The list is the server's, not the browser's: that is what makes a reload
+/// reopen the same shells on any machine instead of whatever `localStorage`
+/// remembered.
+pub async fn tabs(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+    all: bool,
+) -> Result<TerminalTabs, ApiError> {
+    require(principal, Permission::SandboxExec)?;
+
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    let sandbox = load_sandbox(&mut scope, sandbox_id).await?;
+    // With `all` the strip is the sandbox's, not the caller's: an owner and an
+    // administrator see the same tabs and can join the same shell (ADR 0056).
+    let stored = if all {
+        tab_store::list_all(&mut scope, sandbox_id)
+            .await
+            .map_err(ApiError::from)?
+            .into_iter()
+            .map(|tab| tab_store::TabRow {
+                tab_id: tab.tab_id,
+                title: tab.title,
+                position: 0,
+                last_seen_at: chrono::Utc::now(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        tab_store::list(&mut scope, sandbox_id, principal.user_id)
+            .await
+            .map_err(ApiError::from)?
+    };
+    let shared = if all {
+        tab_store::list_all(&mut scope, sandbox_id)
+            .await
+            .map_err(ApiError::from)?
+    } else {
+        Vec::new()
+    };
+    let presence = crate::store::postgres::presence::list_open(&mut scope, sandbox_id, 35 * 60)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+
+    let state = if sandbox.status == SandboxStatus::Running {
+        tmux_state(ctx, &sandbox.name).await
+    } else {
+        None
+    };
+    let (durable, sessions) = match state {
+        Some((durable, sessions)) => (Some(durable), sessions),
+        None => (None, Vec::new()),
+    };
+
+    let items = stored
+        .into_iter()
+        .map(|row| {
+            let creator = shared
+                .iter()
+                .find(|tab| tab.tab_id == row.tab_id)
+                .and_then(|tab| tab.created_by_name.clone());
+            let viewers: Vec<serde_json::Value> = presence
+                .iter()
+                .filter(|entry| entry.tab_id.as_deref() == Some(row.tab_id.as_str()))
+                .map(|entry| {
+                    serde_json::json!({
+                        "user_name": entry.user_name,
+                        "kind": entry.kind,
+                        "view_only": entry.view_only,
+                    })
+                })
+                .collect();
+            TerminalTab {
+                alive: sessions.iter().any(|name| name == &format!("nestbox-{}", row.tab_id)),
+                tab_id: row.tab_id,
+                title: row.title,
+                created_by_name: creator,
+                viewers,
+            }
+        })
+        .collect();
+
+    Ok(TerminalTabs {
+        items,
+        durable,
+        limit: tab_store::MAX_TABS,
+    })
+}
+
+/// Replace the tab list one user keeps in one sandbox.
+///
+/// The console sends what it is showing; a tab it closed is absent here and
+/// therefore gone. Validation is the same shape the WebSocket route enforces,
+/// because the id becomes a tmux session name.
+pub async fn save_tabs(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+    tabs: Vec<(String, String)>,
+) -> Result<TerminalTabs, ApiError> {
+    require(principal, Permission::SandboxExec)?;
+    if tabs.len() > tab_store::MAX_TABS {
+        return Err(ApiError::validation(format!(
+            "A sandbox keeps at most {} terminal tabs.",
+            tab_store::MAX_TABS
+        )));
+    }
+    for (tab_id, title) in &tabs {
+        let shaped = !tab_id.is_empty()
+            && tab_id.len() <= 64
+            && tab_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+        if !shaped {
+            return Err(ApiError::validation(
+                "A terminal tab id is 1-64 letters, digits, dashes or underscores.",
+            ));
+        }
+        if title.trim().is_empty() || title.chars().count() > 120 {
+            return Err(ApiError::validation(
+                "A terminal tab title is 1-120 characters.",
+            ));
+        }
+    }
+
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    load_sandbox(&mut scope, sandbox_id).await?;
+    let stored = tab_store::replace(&mut scope, sandbox_id, principal.user_id, &tabs)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+
+    Ok(TerminalTabs {
+        items: stored
+            .into_iter()
+            .map(|row| TerminalTab {
+                alive: false,
+                tab_id: row.tab_id,
+                title: row.title,
+                created_by_name: None,
+                viewers: Vec::new(),
+            })
+            .collect(),
+        durable: None,
+        limit: tab_store::MAX_TABS,
+    })
+}
+
+/// One sandbox, or the published not-found error.
+async fn load_sandbox(
+    scope: &mut TenantScope<'_>,
+    sandbox_id: Uuid,
+) -> Result<crate::domain::sandbox::Sandbox, ApiError> {
+    sandbox_store::get(scope, sandbox_id)
+        .await
+        .map_err(|error| match error {
+            StoreError::NotFound => ApiError::not_found(
+                ErrorCode::SANDBOX_NOT_FOUND,
+                "No sandbox with that id exists in this environment.",
+            ),
+            other => ApiError::from(other),
+        })
 }
 
 #[cfg(test)]
@@ -949,4 +1210,33 @@ mod tests {
         assert_eq!(limits.idle, Duration::from_secs(1800));
         assert_eq!(limits.stale_after(), Duration::from_secs(2100));
     }
+}
+
+
+/// Who is attached to which terminal tab of one sandbox.
+///
+/// A terminal is shared: several people can sit in the same `tmux` session. The
+/// runner holds the sockets, so this is a read of its live answer, not of a table.
+pub async fn attached(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+) -> Result<serde_json::Value, ApiError> {
+    require(principal, Permission::SandboxRead)?;
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    let sandbox = crate::store::postgres::sandboxes::get(&mut scope, sandbox_id)
+        .await
+        .map_err(|error| match error {
+            crate::error::StoreError::NotFound => {
+                ApiError::not_found(ErrorCode::SANDBOX_NOT_FOUND, "No such sandbox in this environment.")
+            }
+            other => ApiError::from(other),
+        })?;
+    scope.commit().await.map_err(ApiError::from)?;
+    ctx.runtime
+        .terminal_sessions(&sandbox.name)
+        .await
+        .map_err(|error| ApiError::conflict(ErrorCode::SANDBOX_INVALID_STATE, error.to_string()))
 }

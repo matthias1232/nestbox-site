@@ -103,9 +103,11 @@ fn request(name: &str, pack: &str) -> CreateSandbox {
         memory_limit: "512Mi".to_string(),
         cpu_limit: 0.5,
         pids_limit: 256,
+        gpu_count: None,
         node: None,
         parent_id: None,
         login: None,
+        egress_mode: None,
     }
 }
 

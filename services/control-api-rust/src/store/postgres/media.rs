@@ -287,6 +287,41 @@ pub async fn sandbox_id_by_name(
     Ok(id)
 }
 
+/// The data centers a sandbox name appears in, answered across tenants.
+///
+/// The accounting proxy carries no principal, so there is no scope to read
+/// `sandboxes` under, and "which environment exists?" is not the question: the
+/// sandbox is. `nb_sandbox_environment(name)` (migration 0088) returns the
+/// environment of every sandbox with that name and nothing else.
+///
+/// `None` means the installation's schema predates the function, so the caller
+/// keeps its single-data-center fallback; `Some(vec![])` means no such sandbox;
+/// two entries mean the name exists in two data centers, which the service
+/// answers as a 409 rather than picking one.
+pub async fn sandbox_environments_by_name(
+    pool: &sqlx::PgPool,
+    name: &str,
+) -> Result<Option<Vec<Uuid>>, StoreError> {
+    let found = sqlx::query_scalar::<_, Uuid>(
+        "SELECT DISTINCT environment_id \
+           FROM nb_sandbox_environment($1::text) AS environments(environment_id)",
+    )
+    .bind(name)
+    .fetch_all(pool)
+    .await;
+    match found {
+        Ok(environments) => Ok(Some(environments)),
+        Err(error) => {
+            let error = StoreError::from(error);
+            if super::is_missing_function(&error) {
+                Ok(None)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
 /// Whether the media MCP server is attached and enabled for this sandbox.
 ///
 /// The attachment is the grant: a tool name the agent learned somewhere else is

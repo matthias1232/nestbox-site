@@ -39,3 +39,22 @@ agents from start to finish, that is not enough, and there was no way to create 
 * **Policies are shared documents.** An operator may edit a policy that other users' sandboxes
   carry; a per-owner policy scope is the next step.
 * Telemetry rows about *no* sandbox (gateway, node) are visible to admins only.
+
+## Amendment 2026-11-03 — a member does not see the shared rows, and a sandbox is owned from the insert on
+
+Point 2 said "anyone else sees their own and the shared ones (no owner)", and a sandbox was owned
+by an `UPDATE` after its `INSERT`. Both were wrong once the `member` role existed (ADR 0045): on an
+installation whose sandboxes carry no owner — what a deleted creator leaves — a member granted one
+sandbox saw every sandbox of the data center in "My sandboxes" (U06-05), because the shared clause
+applied to roles that are not supposed to see the shared ones.
+
+* The **member** and **viewer** roles see the sandboxes they own or were granted, and nothing else
+  — the definition of the member role in `domain::auth::Role`.
+* **Admin**, **operator** and the control plane (no acting user) still see the shared rows, because
+  they are the people who adopt or clean up what a removed user left.
+* `sandboxes.owner_user_id` is written by the `INSERT` itself, so the row is never briefly unowned:
+  a member's own sandbox passes the write policy the moment it exists (migration 0090).
+
+The alternative — filtering in the list query — was rejected: it would let `GET /sandboxes/{id}`
+open a sandbox the list hides, and every other reader of `sandboxes` (telemetry, rules, supervisors,
+the inventory tree) would need the same filter to stay consistent with it.

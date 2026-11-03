@@ -31,11 +31,16 @@ CONF=/tmp/envoy.yaml
 # The Lua filter asks the control API about tunnels, so it needs the same identity.
 sed -e "s|__NESTBOX_NODE_ID__|${NODE_ID}|g" -e "s|__NESTBOX_NODE_TOKEN__|${TOKEN}|g" \
     /etc/envoy/extensions/mcp.lua > /tmp/mcp.lua
+cp /etc/envoy/extensions/route.lua /tmp/route.lua
 
 # The certificate broker is only useful for the TLS-reading mode; when its CA
 # secret is absent it exits with a message and Envoy carries on, because the
 # default HTTPS path (a decided tunnel) does not need it.
-/usr/local/bin/egress-mitm &
+#
+# It also checks the bodies it forwards and asks the control API with this
+# node's identity: no second credential, and the same trust the tunnel check
+# already relies on.
+NESTBOX_NODE_ID="$NODE_ID" NESTBOX_NODE_TOKEN="$TOKEN" /usr/local/bin/egress-mitm &
 broker=$!
 sleep 1
 if ! kill -0 "$broker" 2>/dev/null; then

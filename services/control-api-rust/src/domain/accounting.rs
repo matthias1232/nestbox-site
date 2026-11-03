@@ -345,6 +345,9 @@ pub struct NewAccountingRow {
     pub privacy_action: Option<String>,
     /// Which detector decided it, when one did.
     pub privacy_detector: Option<String>,
+    /// Extra identifiers the caller attached, such as the cluster and the member
+    /// that answered. Never request content.
+    pub detail: Option<serde_json::Value>,
 }
 
 /// One stored request, as the accounting list shows it.
@@ -709,5 +712,152 @@ mod tests {
         }
         .invalid_reason()
         .is_some());
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Usage read off the transparent proxy
+// ---------------------------------------------------------------------------
+
+/// Whose bill a model call is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthKind {
+    /// An API key: the call has a cost.
+    Key,
+    /// A signed-in account (Claude, Codex): the subscription is the price, so the
+    /// call has no cost, only an estimate at list price.
+    Account,
+    #[default]
+    Unknown,
+}
+
+impl AuthKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Key => "key",
+            Self::Account => "account",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "key" => Self::Key,
+            "account" => Self::Account,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// The counters the proxy read from one answer, already in one vocabulary.
+///
+/// `input` is the *fresh* prompt: what the model read that was not served from the
+/// cache and not written to it. The providers disagree about this (Anthropic's
+/// `input_tokens` excludes the cache, OpenAI's `prompt_tokens` includes it); the
+/// proxy normalises before it ships, so everything here adds up the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ObservedUsage {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    /// All cache writes, whichever lifetime.
+    pub cache_write: i64,
+    /// The part of `cache_write` kept for an hour (billed higher than five minutes).
+    pub cache_write_1h: i64,
+    pub reasoning: i64,
+}
+
+impl ObservedUsage {
+    /// Everything the model read.
+    pub fn prompt(&self) -> i64 {
+        self.input.max(0) + self.cache_read.max(0) + self.cache_write.max(0)
+    }
+
+    /// Clamp into the shape the schema accepts.
+    pub fn normalised(self) -> Self {
+        let cache_write = self.cache_write.max(0);
+        Self {
+            input: self.input.max(0),
+            output: self.output.max(0),
+            cache_read: self.cache_read.max(0),
+            cache_write,
+            cache_write_1h: self.cache_write_1h.clamp(0, cache_write),
+            reasoning: self.reasoning.clamp(0, self.output.max(0)),
+        }
+    }
+
+    /// The share of the prompt that came out of the cache, 0..=1.
+    pub fn cache_hit_rate(&self) -> f64 {
+        let prompt = self.prompt();
+        if prompt == 0 { 0.0 } else { self.cache_read.max(0) as f64 / prompt as f64 }
+    }
+}
+
+/// What a call costs at `price`, cache reads and writes included.
+///
+/// Writes cost more than input (Anthropic: 1.25x for five minutes, 2x for an hour)
+/// and reads cost less (the price's cached rate). The write multipliers are the
+/// provider's published ratios, not a stored rate: a price row carries input,
+/// output and cached, and the writes follow from the input rate.
+pub fn observed_cost_micros(usage: &ObservedUsage, price: Option<&Price>) -> Option<i64> {
+    let price = price?;
+    let u = usage.normalised();
+    let input_rate = price.input_per_mtok.max(0) as i128;
+    let write_5m = (u.cache_write - u.cache_write_1h) as i128;
+    let micros = (u.input as i128) * input_rate
+        + (u.cache_read as i128) * (price.cached_rate().max(0) as i128)
+        + write_5m * input_rate * 5 / 4
+        + (u.cache_write_1h as i128) * input_rate * 2
+        + (u.output as i128) * (price.output_per_mtok.max(0) as i128);
+    Some(round_to_micros(micros))
+}
+
+#[cfg(test)]
+mod observed_tests {
+    use super::*;
+
+    fn price() -> Price {
+        Price { input_per_mtok: 3_000_000, output_per_mtok: 15_000_000, cached_per_mtok: Some(300_000) }
+    }
+
+    #[test]
+    fn a_call_is_priced_with_reads_and_writes() {
+        // 1,000,000 fresh in, 1,000,000 cache reads, 1,000,000 five-minute writes,
+        // 1,000,000 one-hour writes, 1,000,000 out.
+        let usage = ObservedUsage {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 1_000_000,
+            cache_write: 2_000_000,
+            cache_write_1h: 1_000_000,
+            reasoning: 0,
+        };
+        // 3.00 + 0.30 + 3.75 + 6.00 + 15.00 = 28.05 dollars.
+        assert_eq!(observed_cost_micros(&usage, Some(&price())), Some(28_050_000));
+        assert_eq!(observed_cost_micros(&usage, None), None);
+    }
+
+    #[test]
+    fn the_prompt_adds_up_and_the_hit_rate_is_a_share_of_it() {
+        let usage = ObservedUsage { input: 1_997, output: 81, cache_read: 42_537, cache_write: 535, cache_write_1h: 535, reasoning: 79 };
+        assert_eq!(usage.prompt(), 45_069);
+        assert!((usage.cache_hit_rate() - 42_537.0 / 45_069.0).abs() < 1e-9);
+        assert_eq!(ObservedUsage::default().cache_hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn nonsense_is_clamped_not_stored() {
+        let usage = ObservedUsage { input: -5, output: 10, cache_read: 0, cache_write: 3, cache_write_1h: 99, reasoning: 50 }.normalised();
+        assert_eq!((usage.input, usage.cache_write_1h, usage.reasoning), (0, 3, 10));
+    }
+
+    #[test]
+    fn auth_round_trips() {
+        for kind in [AuthKind::Key, AuthKind::Account, AuthKind::Unknown] {
+            assert_eq!(AuthKind::parse(kind.as_str()), kind);
+        }
+        assert_eq!(AuthKind::parse("anything"), AuthKind::Unknown);
     }
 }

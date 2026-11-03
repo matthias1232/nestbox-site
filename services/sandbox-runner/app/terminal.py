@@ -30,12 +30,19 @@ Three rules shape this file:
    mean "no check".
 """
 from __future__ import annotations
-from app.workload import get_container, list_workloads, sandbox_name
+from app.gateway_exec import GatewayPty
+from app.workload import get_container, list_workloads, openshell_name, sandbox_name
 
 import asyncio
+import logging
 import codecs
+import itertools
 import json
 import os
+import threading
+import time
+
+logger = logging.getLogger("nestbox.runner.terminal")
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -71,6 +78,59 @@ MAX_INPUT_BYTES = 65_536
 EVENT_QUEUE = 64
 
 SUBPROTOCOL = "nestbox-terminal"
+
+# Who is attached to which tab, per sandbox: {sandbox: {tab: {viewer_id: {...}}}}.
+# In memory on purpose: it describes sockets this process holds right now, and a
+# restart of the runner ends them anyway. Nothing is stored.
+_PRESENCE: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+_PRESENCE_LOCK = threading.Lock()
+_VIEWER_SEQ = itertools.count(1)
+
+
+def presence_add(sandbox: str, tab: str, who: str) -> int:
+    """Record one attached viewer and return its id (to remove it later)."""
+    viewer = next(_VIEWER_SEQ)
+    entry = {"who": who or "someone", "since": time.time()}
+    with _PRESENCE_LOCK:
+        _PRESENCE.setdefault(sandbox, {}).setdefault(tab, {})[str(viewer)] = entry
+    return viewer
+
+
+def presence_remove(sandbox: str, tab: str, viewer: int) -> None:
+    with _PRESENCE_LOCK:
+        tabs = _PRESENCE.get(sandbox)
+        if not tabs:
+            return
+        viewers = tabs.get(tab)
+        if viewers:
+            viewers.pop(str(viewer), None)
+            if not viewers:
+                tabs.pop(tab, None)
+        if not tabs:
+            _PRESENCE.pop(sandbox, None)
+
+
+def presence_of(sandbox: str) -> dict[str, Any]:
+    """The tabs of one sandbox and who is in them, as the console draws it."""
+    with _PRESENCE_LOCK:
+        tabs = {tab: list(viewers.values()) for tab, viewers in _PRESENCE.get(sandbox, {}).items()}
+    return {
+        "sandbox": sandbox,
+        "items": [
+            {
+                "tab": tab,
+                "viewers": [
+                    {
+                        "who": viewer["who"],
+                        "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(viewer["since"])),
+                        "seconds": int(time.time() - viewer["since"]),
+                    }
+                    for viewer in viewers
+                ],
+            }
+            for tab, viewers in tabs.items()
+        ],
+    }
 
 
 def container_name(name: str) -> str:
@@ -397,6 +457,12 @@ def opened_exec(container: Any, tab: str) -> tuple[str, PtySocket]:
     return exec_id, PtySocket(raw)
 
 
+@router.get("/v1/sandboxes/{name}/terminal/sessions")
+def terminal_sessions(name: str) -> dict[str, Any]:
+    """Which terminal tabs of this sandbox are open, and who is in each."""
+    return presence_of(name)
+
+
 @router.websocket("/v1/sandboxes/{name}/terminal")
 async def terminal(websocket: WebSocket, name: str) -> None:
     """Attach a PTY to the container and pump it.
@@ -405,9 +471,12 @@ async def terminal(websocket: WebSocket, name: str) -> None:
     client gets an HTTP 403 on the handshake instead of a WebSocket it must
     parse to learn it was refused.
     """
+    logger.info("ws terminal: enter %s", name)
     if not authorised(websocket):
+        logger.info("ws terminal: refused (no token) %s", name)
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="node token required")
         return
+    logger.info("ws terminal: authorised %s", name)
 
     import docker
     from docker.errors import DockerException, NotFound
@@ -426,20 +495,34 @@ async def terminal(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=CLOSE_INTERNAL, reason="sandbox is not running")
         return
 
+    logger.info("ws terminal: accepting %s", name)
     await websocket.accept(subprotocol=SUBPROTOCOL)
+    logger.info("ws terminal: accepted %s", name)
 
     tab = websocket.query_params.get("tab", "")
     if not tab or len(tab) > 64 or not all(ch.isascii() and (ch.isalnum() or ch in "_-") for ch in tab):
         await websocket.close(code=CLOSE_INTERNAL, reason="invalid terminal tab")
         return
+    viewer = presence_add(name, tab, websocket.query_params.get("who", "").strip()[:80])
+    gateway = openshell_name(container.name)
+    exec_id = None
     try:
-        exec_id, pty = await asyncio.to_thread(opened_exec, container, tab)
-    except (DockerException, KeyError) as exc:
+        if gateway:
+            # Through the gateway, so the shell has the proxy, the CA and the
+            # boundary the agent has (see gateway_exec.py).
+            pty = await asyncio.to_thread(GatewayPty.open, gateway, tab)
+        else:
+            exec_id, pty = await asyncio.to_thread(opened_exec, container, tab)
+    except (DockerException, KeyError, OSError) as exc:
+        presence_remove(name, tab, viewer)
         await finish(websocket, "error", f"could not open a shell: {exc}")
         return
 
     def resize(cols: int, rows: int) -> None:
-        client.api.exec_resize(exec_id, height=rows, width=cols)
+        if gateway:
+            pty.resize(cols, rows)
+        else:
+            client.api.exec_resize(exec_id, height=rows, width=cols)
 
     try:
         # A PTY starts at whatever the kernel defaults to; setting the size
@@ -449,5 +532,6 @@ async def terminal(websocket: WebSocket, name: str) -> None:
         reason = await pump(websocket, pty, resize, idle_seconds())
     finally:
         pty.close()
+        presence_remove(name, tab, viewer)
 
     await finish(websocket, reason)

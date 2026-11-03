@@ -1,6 +1,6 @@
 // Gateways, supervisors, and topology.
 
-import { request } from './client.js';
+import { request, query } from './client.js';
 
 export function gateways() {
   return request('gateways');
@@ -25,8 +25,10 @@ export function supervisors() {
   return request('supervisors');
 }
 
-export function topology() {
-  return request('topology');
+// `live` adds the egress edges of a window — including the destinations that
+// were blocked — to the static graph. Without it the answer is unchanged.
+export function topology(live) {
+  return request(`topology${live ? query({ live }) : ''}`);
 }
 
 // The settings document of the supervisor that watches one sandbox.

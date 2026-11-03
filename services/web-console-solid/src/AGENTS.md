@@ -16,6 +16,20 @@ that know nothing about the domain.
 | `state/` | Session and environment | screen logic |
 | `styles/` | Design tokens and layout | component-specific hacks |
 
+## The menu
+
+`navigation.js` is the menu as data: six groups (Overview, Operate, Setup,
+Security, Administration, Help) and the route list with a minimum role per entry.
+`App.jsx` only renders it. A new screen is one line there. `navigation.test.js`
+(`node --test src/navigation.test.js`) checks that every route is in exactly one
+group and that a role never sees an entry above it. Hiding is convenience; the
+API enforces the same rule.
+
+| Row | Meaning |
+|---|---|
+| `minRole` | The entry is hidden from a role below it; the API refuses such a call. |
+| `hidden: true` | The entry stays out of the menu (sidebar, palette, help search) while the page and its path stay, for a page whose API is not there yet — `live` today. |
+
 ## Rules
 
 1. No `fetch` outside `api/client.js`.
@@ -25,6 +39,16 @@ that know nothing about the domain.
    yet" look identical, which is how a broken screen looks healthy.
 5. The CSRF token lives in memory only. `localStorage` is not used for
    credentials, because anything in storage is readable by an injected script.
+6. Every string a reader sees is English. There is no i18n framework, because
+   the console ships one language; `noGerman.test.js` scans `src/**/*.{js,jsx}`
+   for German characters and a short German word list and fails on them
+   (comments and test files are out of scope).
+6. No `new EventSource` outside `api/events.js` (`api/chats.js` and `api/live.js`
+   still own their streams until their screens move). A screen subscribes with
+   `useLive().on(name, handler)`; a window holds one state stream at most, and one
+   telemetry stream only while a screen holds `wantTelemetry()`. The browser keeps
+   six HTTP/1.1 connections per host for all tabs and pop-outs, so a stream per
+   panel is what freezes the console. `streams.test.js` enforces this.
 
 ## Adding a screen
 
@@ -35,3 +59,14 @@ that know nothing about the domain.
    The Admin Center is the one view with a real address (`/sandboxes/<id>`), so
    a link to a sandbox survives a reload and can be pasted into a chat; every
    other view stays a signal.
+
+`routing.js` says what a URL means (Admin Center, workbox, pop-outs); `App.jsx` only renders it.
+A pop-out window shares the opener's CSRF token (`adoptOpenerCsrf`) instead of rotating it.
+A link that names an entity of another data center moves the session once
+(`features/shell/placeEnvironment.js`, V15). A second time it does not move it again — that
+would fight the data-center picker — and `App.jsx` shows a notice with `Open in <data center>`
+and `Home` instead of a loading line that never ends (F5).
+
+Control Center routing (Wave 0): `routing.js` implements contract C1 (`paths`, `parsePath`, `SHELLLESS`); the address
+bar is the only source of truth. `navigation.js` holds the six menu groups; `App.jsx` maps `parsePath` results to pages
+and wraps them in `features/shell/Shell.jsx`.

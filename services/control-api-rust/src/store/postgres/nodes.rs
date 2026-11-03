@@ -14,6 +14,10 @@ use crate::error::StoreError;
 const NODE_COLUMNS: &str = "id, name, display_name, kind, status, is_local, runner_url, \
      container_gpu, zone, region, description, last_seen, created_at";
 
+/// A node is usable by the caller's data center when it is its own, its organisation's, or
+/// shared (migration 0062). `$ENV` is replaced by the placeholder of the environment bind.
+const VISIBLE: &str = "nb_node_usable(environment_id, current_setting('app.environment_id', true)::uuid)";
+
 fn row_to_node(row: &sqlx::postgres::PgRow) -> Result<Node, StoreError> {
     let kind_raw: String = row.try_get("kind")?;
     let status_raw: String = row.try_get("status")?;
@@ -36,14 +40,14 @@ fn row_to_node(row: &sqlx::postgres::PgRow) -> Result<Node, StoreError> {
 
 /// Every node, local first.
 pub async fn list(scope: &mut TenantScope<'_>) -> Result<Vec<Node>, StoreError> {
-    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY is_local DESC, name");
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE {VISIBLE} ORDER BY is_local DESC, name");
     let rows = sqlx::query(&sql).fetch_all(scope.connection()).await?;
     rows.iter().map(row_to_node).collect()
 }
 
 /// One node by id.
 pub async fn get(scope: &mut TenantScope<'_>, id: Uuid) -> Result<Node, StoreError> {
-    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = $1");
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = $1 AND {VISIBLE}");
     let row = sqlx::query(&sql)
         .bind(id)
         .fetch_optional(scope.connection())
@@ -54,7 +58,7 @@ pub async fn get(scope: &mut TenantScope<'_>, id: Uuid) -> Result<Node, StoreErr
 
 /// One node by name (`local`, `gpu-box-01`).
 pub async fn get_by_name(scope: &mut TenantScope<'_>, name: &str) -> Result<Node, StoreError> {
-    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE name = $1");
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE name = $1 AND {VISIBLE}");
     let row = sqlx::query(&sql)
         .bind(name)
         .fetch_optional(scope.connection())
@@ -63,9 +67,15 @@ pub async fn get_by_name(scope: &mut TenantScope<'_>, name: &str) -> Result<Node
     row_to_node(&row)
 }
 
-/// The local node: the machine the control plane runs on.
+/// The node a sandbox lands on when nobody names one: the local node if this data center may
+/// use it, otherwise its only own node. With several candidates the caller must choose, so
+/// the answer is `NotFound` rather than a guess.
 pub async fn local(scope: &mut TenantScope<'_>) -> Result<Node, StoreError> {
-    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE is_local LIMIT 1");
+    let sql = format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE {VISIBLE}
+           AND (is_local OR (SELECT count(*) FROM nodes n2 WHERE nb_node_usable(n2.environment_id, current_setting('app.environment_id', true)::uuid)) = 1)
+         ORDER BY is_local DESC LIMIT 1"
+    );
     let row = sqlx::query(&sql)
         .fetch_optional(scope.connection())
         .await?

@@ -29,15 +29,26 @@ def openshell_name(container_name: str) -> str | None:
 
 
 def get_container(client: Any, name: str) -> Any:
-    """The container for a sandbox name, or `NotFound`."""
+    """The container for a sandbox name, or `NotFound`.
+
+    A name can briefly have two containers: the Docker one from before a move to
+    the gateway runtime, and the gateway's workload. The one that is running is the
+    sandbox; only when neither runs does the order decide (ours first, as before).
+    """
+    found = []
     try:
-        return client.containers.get(f"{OWN_PREFIX}{name}")
+        found.append(client.containers.get(f"{OWN_PREFIX}{name}"))
     except NotFound:
         pass
     for item in client.containers.list(all=True, filters={"name": f"{OPENSHELL_PREFIX}{name}-"}):
         if openshell_name(item.name) == name:
+            found.append(item)
+    if not found:
+        raise NotFound(f"no sandbox {name}")
+    for item in found:
+        if item.status == "running":
             return item
-    raise NotFound(f"no sandbox {name}")
+    return found[0]
 
 
 def list_workloads(client: Any) -> list[Any]:

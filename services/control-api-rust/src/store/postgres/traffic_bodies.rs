@@ -58,8 +58,8 @@ pub async fn insert_batch(
     let mut written = 0u64;
 
     for body in bodies {
-        let request_body = body.request_body.map(redaction::redact);
-        let response_body = body.response_body.map(redaction::redact);
+        let request_body = body.request_body.map(redaction::redact).map(strip_nul);
+        let response_body = body.response_body.map(redaction::redact).map(strip_nul);
         let result = sqlx::query(
             "INSERT INTO traffic_bodies
                 (event_id, environment_id, sandbox_id, ts, request_body,
@@ -149,4 +149,22 @@ pub async fn purge_expired(
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
+}
+
+/// PostgreSQL text cannot hold a NUL byte, and a captured body is arbitrary bytes (a TLS
+/// handshake read as text, a binary upload). One body with one NUL made the whole batch fail,
+/// and the proxy retried it forever; the byte is dropped and the rest of the body is kept.
+fn strip_nul(text: String) -> String {
+    if text.contains('\u{0}') { text.replace('\u{0}', "") } else { text }
+}
+
+#[cfg(test)]
+mod nul_tests {
+    use super::strip_nul;
+
+    #[test]
+    fn a_nul_byte_is_dropped_and_the_rest_kept() {
+        assert_eq!(strip_nul("ab\u{0}cd\u{0}".to_string()), "abcd");
+        assert_eq!(strip_nul("plain".to_string()), "plain");
+    }
 }

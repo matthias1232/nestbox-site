@@ -257,7 +257,7 @@ impl RuntimeAdapter for AnsweringRuntime {
         Ok(VerificationAnswer::default())
     }
 
-    async fn open_terminal(&self, _name: &str, _tab_id: &str) -> Result<BoxTerminal, RuntimeError> {
+    async fn open_terminal(&self, _name: &str, _tab_id: &str, _who: &str) -> Result<BoxTerminal, RuntimeError> {
         Err(RuntimeError::Rejected("not used in this suite".into()))
     }
 }

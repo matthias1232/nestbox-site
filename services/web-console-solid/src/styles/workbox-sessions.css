@@ -1,0 +1,186 @@
+/* Shared terminals, the desktop panel and the two pop-out windows.
+ *
+ * One file because the three pieces are one screen family: the tab strip with
+ * who is in each tab, the desktop next to it, and the pop-outs that show either
+ * one alone in a window of its own. Only the tokens from `tokens.css` are used,
+ * so the panels follow a theme change without a second palette.
+ */
+
+/* The terminal tab strip. A tab is a button, the people in it, and a menu. */
+
+.terminal-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 4px 2px 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  position: relative;
+}
+
+.terminal-tab.active {
+  border-color: var(--accent);
+  background: var(--bg-inset);
+}
+
+.terminal-tab > button.tiny {
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+}
+
+.terminal-tab.active > button.tiny:first-child {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* The per-tab menu drops under the tab, so it never moves the strip. */
+
+.terminal-tab-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 170px;
+  margin-top: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.terminal-tab-menu button {
+  text-align: left;
+}
+
+/* The SSH / PuTTY line for one tab. */
+
+.sessions-ssh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.sessions-ssh pre {
+  margin: 0;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+.sessions-ssh p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* A terminal that fills its window (a pop-out, or the Sessions panel). */
+
+.tab-panel.sessions-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.tab-panel.sessions-fill .term-wrap {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* The Sessions panel: terminal and desktop behind two tabs. */
+
+.ws-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.ws-presence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.ws-presence strong {
+  color: var(--fg);
+}
+
+/* The desktop: a fixed height in a panel, the whole window in a pop-out. */
+
+.desktop-screen {
+  height: 70vh;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.desktop-screen.full {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.tab-panel.desktop-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* A pop-out owns its window: no sidebar, no page scroll, one title bar. */
+
+.ws-popout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  box-sizing: border-box;
+  background: var(--bg);
+}
+
+.ws-popout-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-titlebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.ws-titlebar h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ws-titlebar .mono {
+  color: var(--fg-muted);
+}

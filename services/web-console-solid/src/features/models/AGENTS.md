@@ -29,7 +29,8 @@ Install on a model the API will refuse.
 
 1. `CapacityOverview` — CPU model and cores, system RAM, GPU memory or the
    unified pool, each memory bar scaled against the largest requirement in the
-   loaded catalog.
+   loaded catalog. Every line stays inside its own card and wraps: a machine
+   value is as long as the machine makes it (V19).
 2. Filter chips (all / fits / does not fit / runs without a GPU / needs unified
    memory) with live counts, plus family, publisher, runtime, and text search.
 3. The table: model and licence, size and format, minimum and recommended need,
@@ -39,3 +40,21 @@ Install on a model the API will refuse.
 
 No fetching of model weights, no progress bar for a download, no client-side
 VRAM arithmetic.
+
+## Files
+
+| File | What it shows |
+|---|---|
+| `ModelsPage.jsx` | the catalogue as cards or table, "Fit against" node, filters, opens the wizard (`?deploy=1&model=&node=`) |
+| `ModelPage.jsx` | `/models/<key>`: Installs, Requirements, Grants, Clusters tabs and the actions |
+| `BulkDeployWizard.jsx` | Model → Nodes → Options → Review → live progress; one `installBulk` call |
+| `NodePicker.jsx` | nodes grouped data center › site with checkboxes, fit badges, quick selections |
+| `DeployProgress.jsx` | per-node meters, overall meter, log tail, "Open cluster" |
+| `InstallsTable.jsx` | the installs of one model, enabled switch, logs/metrics drawer, uninstall |
+| `ModelCard.jsx` | one catalogue card |
+| `useModels.js` | catalogue + installs + hardware on one 20 s poll, filters |
+| `bulkDeploy.js` | pure: preview fit per node, selection helpers, request body, progress rows (tested in `bulkDeploy.test.js`) |
+| `ModelRuntimePanel.jsx` | one installed model's flags, logs and metrics |
+| `ModelGrantsSection.jsx` | environment and user model grants (admins only), below the page |
+
+The wizard's per-node fit is a preview computed in `bulkDeploy.js`; the server's `targets[].fit`/`skipped` in the answer always win.

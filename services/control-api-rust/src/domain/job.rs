@@ -187,6 +187,12 @@ pub enum JobKind {
     SessionCleanup,
     CatalogSync,
     RecipeBuild,
+    /// One model on many nodes (contract C6).
+    ModelBulkInstall,
+    /// Move or stop every sandbox of a node (contract C8).
+    NodeDrain,
+    /// Provision or join a node, optionally with a model (contract C8).
+    NodeQuickDeploy,
 }
 
 impl JobKind {
@@ -213,6 +219,9 @@ impl JobKind {
             Self::SessionCleanup => "session_cleanup",
             Self::CatalogSync => "catalog_sync",
             Self::RecipeBuild => "recipe_build",
+            Self::ModelBulkInstall => "model_bulk_install",
+            Self::NodeDrain => "node_drain",
+            Self::NodeQuickDeploy => "node_quick_deploy",
         }
     }
 }
@@ -239,6 +248,13 @@ mod tests {
             finished_at: None,
             updated_at: Utc::now(),
         }
+    }
+
+    #[test]
+    fn the_control_center_kinds_have_their_contract_names() {
+        assert_eq!(JobKind::ModelBulkInstall.as_str(), "model_bulk_install");
+        assert_eq!(JobKind::NodeDrain.as_str(), "node_drain");
+        assert_eq!(JobKind::NodeQuickDeploy.as_str(), "node_quick_deploy");
     }
 
     #[test]

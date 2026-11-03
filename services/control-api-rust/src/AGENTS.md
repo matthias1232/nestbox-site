@@ -74,9 +74,9 @@ Forbidden, and enforced by `tests/architecture.rs`:
 
 | File | Responsibility |
 |---|---|
-| `main.rs` | Process start: config, pool, migrate subcommand, serve |
+| `main.rs` | Process start: config, pool, migrate subcommand, serve; before the first request it settles what a restart interrupted (moves, builds, model installs, and the Control Center's own jobs) |
 | `lib.rs` | Crate surface: `build`, `app` |
 | `config.rs` | Environment to settings, secret files, redaction-safe logging |
-| `error.rs` | `ApiError` and the published error envelope |
+| `error.rs` | `ApiError`, the enumerated `ErrorCode` constants, and the published error envelope. A new code is added here rather than spelled inline, and only when no existing code names the condition (P10 added `node.name_taken` and `site.not_found`) |
 | `state.rs` | `AppState`: pool, runtime, bus, config |
 | `openapi.rs` | The `utoipa` document |

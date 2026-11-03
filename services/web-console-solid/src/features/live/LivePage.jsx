@@ -1,13 +1,18 @@
 // The agent situation page: organisation totals, the live map, and one agent
 // in detail. The page is markup and layout; the stream lives in the hook.
 
-import { Show, onMount } from 'solid-js';
+import { Show, createSignal, onMount } from 'solid-js';
 import Empty from '../../components/Empty.jsx';
 import AgentSituationMap from './AgentSituationMap.jsx';
 import AgentPanel from './AgentPanel.jsx';
+import AllChats from './AllChats.jsx';
+import RequestStream from './RequestStream.jsx';
+import Segmented from '../../components/Segmented.jsx';
 import { useLiveAgents } from './useLiveAgents.js';
 import { formatCost, formatCount } from './format.js';
 import './live.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const CONNECTION = {
   connecting: { tone: 'warn', label: 'connecting' },
@@ -15,7 +20,14 @@ const CONNECTION = {
   lost: { tone: 'bad', label: 'disconnected' },
 };
 
+const VIEWS = [
+  { value: 'map', label: 'Agenten-Karte' },
+  { value: 'requests', label: 'Requests live' },
+  { value: 'chats', label: 'Alle Chats' },
+];
+
 export default function LivePage() {
+  const [view, setView] = createSignal('map');
   const live = useLiveAgents();
   onMount(() => live.start());
 
@@ -23,17 +35,14 @@ export default function LivePage() {
 
   return (
     <section class="page live-page">
-      <header class="page-head">
-        <div>
-          <h1>Agent situation</h1>
-          <p class="muted">
-            What every agent is doing now, and what it did in the last five minutes.
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Agent situation"
+        subtitle={<>What every agent is doing now, and what it did in the last five minutes.</>}
+        actions={<>
           <span class={`badge ${connection().tone}`}>{connection().label}</span>
-        </div>
-      </header>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={live.connection() === 'lost'}>
         <div class="warn-note live-banner" role="status">
@@ -43,6 +52,13 @@ export default function LivePage() {
           </span>
           <button class="tiny" onClick={live.retry}>Retry now</button>
         </div>
+      </Show>
+
+      <Show when={live.snapshotError() && live.agents().length === 0 && !live.loading()}>
+        <Empty
+          title="Agent situation needs the live agents route"
+          hint="The control API did not answer the live agents snapshot, so this page has nothing to draw. It fills in as soon as the route exists; see the project status for the open question."
+        />
       </Show>
 
       <Show when={live.snapshotError()}>
@@ -75,6 +91,14 @@ export default function LivePage() {
         </article>
       </div>
 
+      <div class="controls">
+        <Segmented options={VIEWS} value={view()} onChange={setView} />
+      </div>
+
+      <Show when={view() === 'requests'}><RequestStream /></Show>
+      <Show when={view() === 'chats'}><AllChats /></Show>
+
+      <Show when={view() === 'map'}>
       <div class="live-body">
         <section class="live-map-panel" aria-label="Agent map">
           <Show
@@ -109,6 +133,7 @@ export default function LivePage() {
         unreported value is <code>n/a</code>, never zero. A moving dot marks one
         real event, and nothing moves while the environment is idle.
       </p>
+      </Show>
     </section>
   );
 }

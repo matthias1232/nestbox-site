@@ -51,6 +51,39 @@ class ShellCommandTest(unittest.TestCase):
         self.assertEqual(ssh_gateway.shell_command(command), ["bash", "-lc", command])
 
 
+class TmuxTabTest(unittest.TestCase):
+    def test_a_plain_login_means_the_shared_ssh_tab(self) -> None:
+        self.assertEqual(ssh_gateway.tmux_tab(None), "ssh")
+        self.assertEqual(ssh_gateway.tmux_tab(""), "ssh")
+        self.assertEqual(ssh_gateway.tmux_tab("   "), "ssh")
+
+    def test_attach_and_tab_name_the_tab_to_join(self) -> None:
+        self.assertEqual(ssh_gateway.tmux_tab("attach t-1"), "t-1")
+        self.assertEqual(ssh_gateway.tmux_tab("tab t_1"), "t_1")
+
+    def test_anything_else_is_a_command_not_a_tab(self) -> None:
+        for command in ("tab x y", "ls -la", "attach ../x", "attach " + "x" * 65, "attach x; rm -rf /"):
+            with self.subTest(command=command):
+                self.assertIsNone(ssh_gateway.tmux_tab(command))
+
+
+class ShellCommandWithTmuxTest(unittest.TestCase):
+    def test_a_login_lands_in_the_shared_ssh_tab(self) -> None:
+        self.assertEqual(
+            ssh_gateway.shell_command(None, has_tmux=True),
+            ["tmux", "new-session", "-A", "-s", "nestbox-ssh"],
+        )
+
+    def test_attach_joins_the_named_tab(self) -> None:
+        self.assertEqual(
+            ssh_gateway.shell_command("attach t-9", has_tmux=True),
+            ["tmux", "new-session", "-A", "-s", "nestbox-t-9"],
+        )
+
+    def test_a_command_stays_a_command_even_with_tmux(self) -> None:
+        self.assertEqual(ssh_gateway.shell_command("ls -la", has_tmux=True), ["bash", "-lc", "ls -la"])
+
+
 class HostKeyPathTest(unittest.TestCase):
     def test_the_key_lives_in_the_state_directory(self) -> None:
         self.assertEqual(str(ssh_gateway.host_key_path("/var/lib/x")), "/var/lib/x/ssh_host_ed25519_key")
@@ -101,8 +134,13 @@ class ClientVanishesTests(unittest.IsolatedAsyncioTestCase):
 
         class Run:
             tty = True
+            tab = None
+            gateway = ""
             bytes_in = bytes_out = 0
             sock = Sock()
+
+            def end_input(self) -> None:
+                pass  # a terminal session has no end-of-file
 
             def close(self) -> None:
                 release.set()
@@ -116,3 +154,44 @@ class ClientVanishesTests(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.wait_for(ssh_gateway._pump(Process(), Run()), 3)
         self.assertIn(b"\x04\x04", Sock.written, "the idle shell is told to end instead of leaking")
+
+    async def test_a_tmux_session_is_only_detached(self) -> None:
+        import asyncio
+        import threading
+
+        from app import ssh_gateway
+
+        release = threading.Event()
+
+        class Sock:
+            written: list[bytes] = []
+
+            def read(self, _n: int) -> bytes:
+                release.wait(5)
+                return b""
+
+            def write(self, data: bytes) -> None:
+                self.written.append(data)
+
+        class Run:
+            tty = True
+            tab = "ssh"
+            gateway = ""
+            bytes_in = bytes_out = 0
+            sock = Sock()
+
+            def end_input(self) -> None:
+                pass
+
+            def close(self) -> None:
+                release.set()  # closing the door releases the reader
+
+        class Stdin:
+            async def read(self, _n: int) -> bytes:
+                return b""
+
+        class Process:
+            stdin = Stdin()
+
+        await asyncio.wait_for(ssh_gateway._pump(Process(), Run()), 3)
+        self.assertEqual(Sock.written, [], "a tab outlives the connection; nothing is typed into it")

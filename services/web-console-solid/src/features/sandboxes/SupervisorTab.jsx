@@ -55,6 +55,10 @@ export default function SupervisorTab(props) {
         </p>
       </Show>
 
+      <Show when={view()?.openshell_note}>
+        <p class="notice">{view().openshell_note}</p>
+      </Show>
+
       <Show when={view()}>
         <div class="supervisor-grid">
           <div class="card">

@@ -1,0 +1,303 @@
+/* The content-check colour language, and the table and chat surfaces that use it.
+   One definition, so "orange means rewritten" is true on every screen. */
+:root {
+  --dlp-blocked: var(--bad);
+  --dlp-replaced: var(--warn);
+  --dlp-pseudo: color-mix(in srgb, var(--info) 55%, var(--bad));
+  --dlp-recorded: var(--info);
+  --dlp-failed: color-mix(in srgb, var(--bad) 50%, var(--bg));
+  --dlp-exempt: var(--fg-faint);
+  --dlp-clean: var(--ok);
+  --chat-user: color-mix(in srgb, var(--ok) 16%, transparent);
+  --chat-model: color-mix(in srgb, currentColor 6%, transparent);
+  --chat-tool: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
+/* Badges -------------------------------------------------------------- */
+
+.dlp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: var(--radius);
+  font-size: 0.75em;
+  color: var(--fg-on-accent);
+  white-space: nowrap;
+}
+.dlp-badge[data-state='blocked'] {
+  background: var(--dlp-blocked);
+}
+.dlp-badge[data-state='replaced'],
+.dlp-badge[data-state='redacted'] {
+  background: var(--dlp-replaced);
+}
+.dlp-badge[data-state='pseudonymized'] {
+  background: var(--dlp-pseudo);
+}
+.dlp-badge[data-state='allowed'] {
+  background: var(--dlp-recorded);
+}
+.dlp-badge[data-state='unavailable'],
+.dlp-badge[data-state='too_large'] {
+  background: var(--dlp-failed);
+}
+.dlp-badge[data-state='exempt'],
+.dlp-badge[data-state='skipped'] {
+  background: var(--dlp-exempt);
+}
+.dlp-badge[data-state='clean'] {
+  background: var(--dlp-clean);
+}
+
+/* Markings inside text ------------------------------------------------ */
+
+.dlp-del {
+  color: var(--dlp-replaced);
+  text-decoration: line-through 2px;
+}
+.dlp-ins {
+  color: var(--dlp-replaced);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dlp-pseudo {
+  color: var(--dlp-pseudo);
+  border-bottom: 2px dashed var(--dlp-pseudo);
+  cursor: pointer;
+}
+.dlp-recorded {
+  border-bottom: 2px dotted var(--dlp-recorded);
+}
+.dlp-blocked-text {
+  text-decoration: line-through 2px var(--dlp-blocked);
+  opacity: 0.8;
+}
+.dlp-finding {
+  cursor: pointer;
+}
+.dlp-finding:hover {
+  filter: brightness(1.2);
+}
+
+/* Findings that were only logged, as quiet chips under the text. */
+.dlp-recorded-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1, 4px);
+  margin-left: var(--space-1, 4px);
+  vertical-align: middle;
+}
+.dlp-recorded-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--dlp-recorded) 45%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--dlp-recorded) 14%, transparent);
+  font-size: 0.72em;
+  white-space: nowrap;
+}
+
+/* Shared table -------------------------------------------------------- */
+
+.data-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+.data-table-toolbar {
+  flex-wrap: wrap;
+}
+.data-table-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+}
+.data-table-scroll {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border, currentColor);
+  border-radius: var(--radius);
+}
+.data-table table.dense {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Header and filter row stay put while the body scrolls. */
+.data-table table.dense thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-raised, var(--card, transparent));
+  border-bottom: 1px solid var(--border, currentColor);
+  text-align: left;
+  white-space: nowrap;
+}
+.data-table table.dense thead .filter-row th {
+  top: 28px;
+  z-index: 1;
+  padding-block: 0.2rem;
+  font-weight: normal;
+}
+.data-table table.dense th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.data-table table.dense th.sortable:hover {
+  background: color-mix(in srgb, var(--fg, currentColor) 8%, var(--bg-raised, transparent));
+}
+.data-table .sort-arrow {
+  color: var(--accent, var(--dlp-recorded));
+  font-size: 0.8em;
+}
+.data-table .filter-row .input.tiny {
+  width: 100%;
+  min-width: 5rem;
+}
+
+/* A multi-select filter small enough to live in a header cell. */
+.filter-select {
+  position: relative;
+  display: inline-block;
+}
+.filter-select > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border, currentColor);
+  border-radius: var(--radius);
+  background: var(--bg-raised, var(--card, transparent));
+  white-space: nowrap;
+}
+.filter-select > summary::-webkit-details-marker {
+  display: none;
+}
+.filter-select > summary::after {
+  content: ' ▾';
+  opacity: 0.6;
+}
+.filter-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 11rem;
+  max-height: 16rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2, 8px);
+  background: var(--bg-raised, var(--bg-raised));
+  border: 1px solid var(--border-strong, var(--border, currentColor));
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Groups and rows. */
+.data-table .group-row td {
+  background: color-mix(in srgb, var(--fg, currentColor) 6%, var(--bg-raised, transparent));
+  border-bottom: 1px solid var(--border, currentColor);
+}
+.data-table .group-toggle {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  font-size: 12px;
+  font-weight: 600;
+}
+.data-table .group-toggle:hover {
+  color: var(--accent, inherit);
+}
+.data-table tbody tr.clickable {
+  cursor: pointer;
+}
+.data-table tbody tr.clickable:hover td {
+  background: color-mix(in srgb, var(--fg, currentColor) 6%, transparent);
+}
+.data-table tr.row-new {
+  animation: rowNew 600ms ease-out;
+}
+@keyframes rowNew {
+  from {
+    background: color-mix(in srgb, var(--dlp-recorded) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.data-table .new-rows {
+  align-self: flex-start;
+  padding: 0.15rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--dlp-recorded)) 55%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent, var(--dlp-recorded)) 18%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+.data-table .new-rows:hover {
+  filter: brightness(1.15);
+}
+.data-table .table-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+/* Route chains -------------------------------------------------------- */
+
+.route-chain {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  align-items: center;
+  font-size: 0.78em;
+}
+.route-chain.compact {
+  font-size: 0.72em;
+  max-width: 100%;
+}
+.route-pill {
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border, currentColor);
+  background: var(--bg-raised, var(--card, transparent));
+  white-space: nowrap;
+}
+.route-pill.passed {
+  border-color: var(--border-strong, var(--border, currentColor));
+}
+.route-pill.blocked {
+  border-color: var(--dlp-blocked);
+  color: var(--dlp-blocked);
+  background: color-mix(in srgb, var(--dlp-blocked) 14%, transparent);
+}
+.route-pill.would {
+  border-style: dashed;
+  border-color: var(--dlp-exempt);
+  color: var(--dlp-exempt);
+  opacity: 0.75;
+}
+.route-x {
+  font-weight: 700;
+}
+.route-arrow {
+  opacity: 0.5;
+}

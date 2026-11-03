@@ -1,0 +1,32 @@
+/* The policies page.
+ *
+ * Two things live here and nothing else: the column that holds the policies table
+ * together with its empty state (V27), and the size of that empty state. The table
+ * and the sentence "Select a policy to edit it…" used to be two children of
+ * `.split`, so the sentence landed in the second grid column and read as another
+ * column beside the table header. They are one column now, and the editor keeps
+ * the second one.
+ *
+ * Loaded by `features/policies/PoliciesPage.jsx`; the shared grid lives in
+ * `app.css`, which other screens use too and this page does not change.
+ */
+
+.split-main {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.split-main .table-scroll {
+  min-width: 0;
+}
+
+/* Under a table header a 32 px padded box is a monument; the state is a sentence. */
+.split-main .empty {
+  padding: var(--space-4);
+}
+
+.split > .empty {
+  margin: 0;
+}

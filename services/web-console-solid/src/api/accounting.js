@@ -25,3 +25,14 @@ export const saveSettings = (body) => request('accounting/settings', { method: '
 // Admin: roll the window into the daily table, then delete raw rows older than
 // `days`. The response says how many went.
 export const purge = (days) => request('accounting/purge', { method: 'POST', body: { days } });
+
+// Usage grouped by one dimension (provider, model, sandbox, auth, owner, site,
+// organization, agent, conversation, day): tokens, cache split, hit rate, the spend
+// made with API keys, and the list-price estimate of account usage. Kept apart.
+export const usage = ({ timeframe = '24h', group_by = 'model', sandbox_id } = {}) =>
+  request(`accounting/usage${query({ timeframe, group_by, sandbox_id })}`);
+
+// The price list and the models that were used but have none. Prices are micros
+// per million tokens; the console converts from dollars per million.
+export const prices = () => request('accounting/prices');
+export const setPrice = (body) => request('accounting/prices', { method: 'PUT', body });

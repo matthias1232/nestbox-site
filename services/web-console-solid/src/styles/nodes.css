@@ -1,4 +1,11 @@
-/* Nodes: the budget bars and the node drawer.
+/* Nodes: the table columns and the budget bars, plus the node drawer.
+ *
+ * The table is `table-layout: fixed`: every column has a width, so a long node
+ * name, a wide badge or a long value cannot push a neighbour out of the frame.
+ * Before that, the BUDGET cell drew inside one narrow column and overlapped its
+ * neighbours while ACTIONS was cut at the right edge (V25). The widths below add
+ * up to 950 px plus the flexible NODE column, so a 1100 px content area shows
+ * every column; below that the wrapper scrolls instead of overlapping.
  *
  * The bars follow the "have versus need" convention of `.resbars`: one dark
  * track, a muted segment for what is already taken, and an accent segment for
@@ -9,30 +16,139 @@
  * with the screen that uses them.
  */
 
+.node-table {
+  table-layout: fixed;
+  width: 100%;
+  /* The fixed columns plus the smallest legible name column; narrower than this
+   * the wrapper scrolls rather than squeezing a column into unreadable slivers. */
+  min-width: 1100px;
+}
+
+.node-table th,
+.node-table td {
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+  vertical-align: top;
+}
+
+.node-table th {
+  vertical-align: middle;
+}
+
+.node-table th.col-node { width: auto; }
+
+.node-table col.col-kind,
+.node-table th.col-kind { width: 80px; }
+
+.node-table col.col-status,
+.node-table th.col-status { width: 110px; }
+
+.node-table col.col-tunnel,
+.node-table th.col-tunnel { width: 88px; }
+
+.node-table col.col-egress,
+.node-table th.col-egress { width: 88px; }
+
+.node-table col.col-gpu,
+.node-table th.col-gpu { width: 106px; }
+
+.node-table col.col-sandboxes,
+.node-table th.col-sandboxes { width: 88px; }
+
+.node-table col.col-budget,
+.node-table th.col-budget { width: 260px; }
+
+.node-table col.col-actions,
+.node-table th.col-actions { width: 130px; }
+
+/* The name is one line with an ellipsis: the full name is in the title, and a
+ * wrapped name would change the row height of the whole table. */
+.node-table .node-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.node-table .node-pick {
+  flex: none;
+  margin: 0;
+}
+
+.node-table .node-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.node-table .node-key,
 .node-table .node-desc {
-  max-width: 340px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* A budget cell is two bars and a line of counts; it needs room to stay legible
- * without squeezing the name column. */
+.node-table .col-kind .badge,
+.node-table .col-gpu .badge {
+  margin-top: 2px;
+}
+
+/* The kind badges sit on their own line inside 80 px; the left margin and the
+ * normal padding would push the column one pixel past its width. */
+.node-table .col-kind .tiny-badge {
+  margin-left: 0;
+  padding: 0 4px;
+}
+
+/* Actions stay on one line at the right edge, so the column can never be cut
+ * off mid-button. */
+.node-table .node-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.node-table .node-actions .tiny {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.node-table .node-actions .tiny + .tiny {
+  margin-left: var(--space-1);
+}
+
+/* The budget cell is its own column now: each bar keeps its label and its track
+ * on one line, with the numbers underneath, instead of trying to fit a 240 px
+ * sentence beside a label and spilling over the edge. */
 .node-table .node-budget {
-  min-width: 340px;
-  vertical-align: top;
   padding-top: 8px;
   padding-bottom: 8px;
+}
+
+.budgetbars.compact .budgetbar {
+  grid-template-columns: auto minmax(40px, 1fr);
+  grid-template-areas:
+    "label track"
+    "values values";
+}
+
+.budgetbars.compact .budgetbar-values {
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .budgetbars {
   display: grid;
   gap: 6px;
   max-width: 460px;
+  min-width: 0;
 }
 
 .budgetbars.compact {
   gap: 4px;
+  max-width: 100%;
 }
 
 .budgetbar {
@@ -77,9 +193,9 @@
   grid-area: track;
   display: flex;
   height: 6px;
-  background: #070a0e;
+  background: var(--bg-inset);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 

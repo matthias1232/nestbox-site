@@ -48,7 +48,15 @@ use crate::store::postgres::{
 /// Bump this when the Dockerfile template changes in a way that must produce a
 /// new image for an unchanged recipe. Without it a code deploy would keep
 /// reusing the previous template's image because no recipe field moved.
-const GENERATOR_VERSION: u32 = 5;
+const GENERATOR_VERSION: u32 = 7;
+
+/// The desktop pack's install and start scripts. Part of the generated
+/// Dockerfile, so a change to either must change the image's content hash.
+const DESKTOP_INSTALL: &str = include_str!("../../../tool-images/desktop/install.sh");
+const DESKTOP_START: &str = include_str!("../../../tool-images/desktop/nestbox-desktop");
+const DESKTOP_DISPLAY: &str = include_str!("../../../tool-images/desktop/nestbox-display");
+const DESKTOP_MCP: &str = include_str!("../../../tool-images/desktop/nestbox-desktop-mcp");
+const DESKTOP_IDFIX: &str = include_str!("../../../tool-images/desktop/idfix.c");
 
 /// The supervisor program shipped inside every image the builder produces.
 ///
@@ -95,6 +103,8 @@ pub enum PackInstall {
     Binary { url: String, name: String },
     /// A git repository cloned to `/opt/<pack>`.
     Git { url: String, directory: String },
+    /// The graphical desktop: the shipped install and start scripts.
+    Desktop,
 }
 
 /// One agent as the image will contain it.
@@ -708,6 +718,7 @@ pub async fn instantiate(
     principal: &Principal,
     id: Uuid,
     name: &str,
+    egress_mode: Option<&str>,
 ) -> Result<Sandbox, ApiError> {
     require(principal, Permission::RecipeWrite)?;
     require(principal, Permission::SandboxWrite)?;
@@ -717,6 +728,17 @@ pub async fn instantiate(
         .await
         .map_err(ApiError::from)?;
     let recipe = store::get(&mut scope, id).await.map_err(recipe_error)?;
+    // The mode is decided once, here, and written down with the sandbox: the
+    // container's environment and the stored row must say the same thing, or
+    // the proxy reads TLS the sandbox does not trust.
+    let mode = match egress_mode {
+        Some(value) => crate::domain::policy::EgressMode::parse(value)
+            .ok_or_else(|| ApiError::validation("egress_mode is direct, forward_proxy, transparent or hybrid."))?,
+        None if recipe.agents.iter().any(|agent| agent.pack_key == "desktop") => {
+            crate::domain::policy::EgressMode::Transparent
+        }
+        None => crate::domain::policy::EgressMode::ForwardProxy,
+    };
     let Some(image) = recipe.image_ref.clone() else {
         return Err(ApiError::conflict(
             ErrorCode::RECIPE_NOT_BUILT,
@@ -837,6 +859,10 @@ pub async fn instantiate(
             image_digest: None,
             spec: &spec,
             parent_id: None,
+            // Building a recipe produces a sandbox of the person who asked for it, like
+            // `sandbox_service::create` does; a row nobody owns is shared with the whole data
+            // center, which is not what a build is.
+            owner_user_id: Some(principal.user_id),
         },
     )
     .await
@@ -930,10 +956,11 @@ pub async fn instantiate(
     // environment; the credential is resolved at use and never stored.
     let mut environment = if crate::services::sandbox_service::pack_needs_inference(&sandbox.pack_key)
     {
-        match crate::services::provider_service::environment_for_pack(
+        match crate::services::provider_service::environment_for_sandbox(
             ctx,
             principal.environment_id,
             &sandbox.pack_key,
+            &sandbox.name,
         )
         .await
         {
@@ -952,9 +979,13 @@ pub async fn instantiate(
     // Same rule as `sandbox_service::create`: a recipe sandbox also has no route
     // out, so the proxy is the only address it can use. The two paths must send
     // the same shape to the runtime or a recipe sandbox is a silent special case.
-    environment.extend(crate::services::sandbox_service::egress_environment(
-        &crate::services::sandbox_service::egress_proxy_url(),
-    ));
+    if let Some(proxy) = crate::services::sandbox_service::sandbox_proxy_url(mode, None) {
+        environment.extend(crate::services::sandbox_service::egress_environment_for(
+            &proxy,
+            mode,
+            crate::services::sandbox_service::EGRESS_CA_IN_SANDBOX,
+        ));
+    }
     // The model on this node is on the runtime network; proxying it would turn
     // a local call into a denied egress request.
     crate::services::sandbox_service::add_inference_bypass_vec(&mut environment);
@@ -1003,12 +1034,46 @@ pub async fn instantiate(
         pids_limit: recipe.resources.pids_limit,
         mounts: runtime_mounts,
         gpu_count: recipe.resources.gpu_count,
+        egress_mode: mode.as_str().to_string(),
+        node_id: None,
+        memory_reservation: None,
+        cpu_shares: None,
     };
+
+    // Write the mode down before the container exists, so the stored row and
+    // the container cannot disagree about what the proxy may read.
+    {
+        let mut scope = TenantScope::begin_for(&ctx.pool, principal).await.map_err(ApiError::from)?;
+        crate::store::postgres::policies::set_egress_mode(&mut scope, sandbox.id, mode, None, true, None, None)
+            .await
+            .map_err(ApiError::from)?;
+        scope.commit().await.map_err(ApiError::from)?;
+    }
 
     match ctx.runtime.create(runtime_spec).await {
         Ok(facts) => {
             let health = crate::services::sandbox_service::health_from_runtime(&facts);
-            settle(ctx, sandbox, SandboxStatus::Running, health).await
+            let has_desktop = recipe.agents.iter().any(|agent| agent.pack_key == "desktop");
+            let settled = settle(ctx, sandbox, SandboxStatus::Running, health).await?;
+            // A desktop comes with its browser: the MCP server is attached and
+            // the agents' files are written again so they start knowing it.
+            // Best effort, as for any sandbox: a failure is logged, not fatal.
+            if has_desktop {
+                match crate::services::mcp_service::attach(ctx, principal, settled.id, "chrome-browser", true).await {
+                    Ok(_) => {
+                        // Every agent the recipe holds, not only the first.
+                        let mut packs: Vec<&str> = recipe.agents.iter().map(|agent| agent.pack_key.as_str()).collect();
+                        packs.dedup();
+                        for pack in packs {
+                            if let Err(error) = crate::services::sandbox_service::reconfigure_pack(ctx, principal, settled.id, Some(pack)).await {
+                                tracing::warn!(sandbox = %settled.name, pack, code = error.code.0, "could not write the browser into the agent config");
+                            }
+                        }
+                    }
+                    Err(error) => tracing::warn!(sandbox = %settled.name, code = error.code.0, "could not attach the browser MCP"),
+                }
+            }
+            Ok(settled)
         }
         Err(error) => {
             tracing::error!(sandbox = %sandbox.name, error = %error, "runtime create failed");
@@ -1021,6 +1086,44 @@ pub async fn instantiate(
             .await
         }
     }
+}
+
+/// Make a recipe sandbox again with another egress mode.
+///
+/// The mode is fixed when the container is created, and a recipe sandbox's
+/// entrypoint is generated at build time, so there is no in-place recreate: the
+/// sandbox is removed and created again from the same recipe under the same name.
+/// The agents' persistent folders are not touched, so the login and the history
+/// are still there afterwards. The new sandbox has a new id.
+pub async fn rebuild_with_mode(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+    mode: &str,
+) -> Result<Sandbox, ApiError> {
+    require(principal, Permission::RecipeWrite)?;
+    require(principal, Permission::SandboxWrite)?;
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    let sandbox = sandbox_store::get(&mut scope, sandbox_id)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+    let recipe_id = sandbox
+        .spec
+        .get("recipe_id")
+        .and_then(|value| value.as_str())
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or_else(|| {
+            ApiError::conflict(
+                ErrorCode::SANDBOX_INVALID_STATE,
+                "This sandbox does not say which recipe it was made from.",
+            )
+        })?;
+    let name = sandbox.name.clone();
+    crate::services::sandbox_service::delete(ctx, principal, sandbox_id).await?;
+    instantiate(ctx, principal, recipe_id, &name, Some(mode)).await
 }
 
 /// Move a freshly created sandbox to its settled status and announce it.
@@ -1366,6 +1469,7 @@ fn prerequisites(kinds: &[InstallKind]) -> Vec<&'static str> {
             InstallKind::Pip => &["python3", "python3-pip"],
             InstallKind::Binary => &["curl", "ca-certificates"],
             InstallKind::Git => &["git"],
+            InstallKind::Desktop => &["ca-certificates", "curl"],
             InstallKind::Image | InstallKind::None => &[],
         };
         for key in needed {
@@ -1404,6 +1508,7 @@ fn pack_install(pack: &AgentPack) -> Result<PackInstall, String> {
                 pack.key
             ))
         }
+        InstallKind::Desktop => PackInstall::Desktop,
         InstallKind::Script => PackInstall::Script(validate_url(reference.ok_or_else(missing)?)?),
         InstallKind::Npm => PackInstall::Npm(validate_spec(reference.ok_or_else(missing)?)?),
         InstallKind::Pip => PackInstall::Pip(validate_spec(reference.ok_or_else(missing)?)?),
@@ -1431,6 +1536,9 @@ fn pack_install(pack: &AgentPack) -> Result<PackInstall, String> {
 }
 
 /// The directories an agent's home needs, inside the container.
+/// Entries in a pack's `home_paths` that are files, not folders.
+const HOME_FILES: &[&str] = &[".claude.json", ".gitconfig", ".bash_history"];
+
 fn agent_directories(agent: &AgentSpec, pack: &AgentPack) -> Result<Vec<String>, String> {
     let home = validate_directory(&agent.home_mode.home_path(&agent.instance))?;
     let paths = if agent.home_paths.is_empty() {
@@ -1446,6 +1554,12 @@ fn agent_directories(agent: &AgentSpec, pack: &AgentPack) -> Result<Vec<String>,
         }
         if relative.split('/').any(|part| part == ".." || part.is_empty()) {
             return Err(format!("'{path}' is not a path inside the agent's home."));
+        }
+        // A pack lists files as well as folders (`.claude.json`, `.gitconfig`).
+        // Creating a file's path as a directory blocks the program that wants
+        // to write the file, so only its parent folder is made.
+        if HOME_FILES.contains(&relative) {
+            continue;
         }
         directories.push(validate_directory(&format!("{home}/{relative}"))?);
     }
@@ -1508,6 +1622,21 @@ pub fn dockerfile(plan: &ImagePlan) -> Result<String, String> {
     ));
     out.push_str("# Do not edit: the next build regenerates this file from the recipe.\n");
     out.push_str(&format!("FROM {base}\n"));
+
+    // A repository is reached over HTTPS, and a minimal base image has no trust
+    // store: without ca-certificates `apt-get update` answers "No system
+    // certificates available" before the repository is ever used.
+    if !plan.repositories.is_empty() {
+        match manager {
+            PackageManager::Apt => out.push_str(
+                "RUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates \\\n && rm -rf /var/lib/apt/lists/*\n",
+            ),
+            PackageManager::Dnf => out.push_str(
+                "RUN dnf install -y ca-certificates \\\n && dnf clean all\n",
+            ),
+            PackageManager::Apk => out.push_str("RUN apk add --no-cache ca-certificates\n"),
+        }
+    }
 
     for repository in &plan.repositories {
         let name = super::selection::repository_name(&repository.name)?;
@@ -1627,6 +1756,25 @@ pub fn dockerfile(plan: &ImagePlan) -> Result<String, String> {
     out.push_str("COPY nestbox-supervisor.sh /usr/local/bin/nestbox-supervisor\n");
     out.push_str("COPY nestbox-agent-supervisor /usr/local/bin/nestbox-agent-supervisor\n");
     out.push_str("RUN chmod 0755 /usr/local/bin/nestbox-entrypoint /usr/local/bin/nestbox-supervisor /usr/local/bin/nestbox-agent-supervisor\n");
+    // The sandbox does not run as root. A gateway (OpenShell) sandbox refuses a
+    // working directory its user cannot write, and an agent that signs in on a
+    // root account has the whole container to damage. The user comes last, after
+    // every install step above, so the heavy layers stay cached and the installers
+    // keep the rights they need.
+    let owned = directories
+        .iter()
+        .map(|directory| shell_quote(directory))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let add_user = match manager {
+        PackageManager::Apk => "adduser -D -u 10001 -h /home/nestbox -s /bin/sh nestbox".to_string(),
+        _ => "useradd -m -d /home/nestbox -u 10001 -s /bin/bash nestbox".to_string(),
+    };
+    out.push_str(&format!(
+        "RUN id -u nestbox >/dev/null 2>&1 || {add_user}\n"
+    ));
+    out.push_str(&format!("RUN mkdir -p {owned} && chown -R nestbox {owned}\n"));
+    out.push_str("USER nestbox\n");
     out.push_str(&format!("WORKDIR {home}\n"));
     out.push_str("ENTRYPOINT [\"/usr/local/bin/nestbox-entrypoint\"]\n");
     out.push_str("CMD [\"sleep\", \"infinity\"]\n");
@@ -1697,8 +1845,8 @@ pub fn supervisor_script(plan: &ImagePlan) -> Result<String, String> {
     let command = crate::domain::builder::entrypoint_command(&launches);
     match command.as_slice() {
         // The shebang is not decoration: without it the kernel hands the file
-        // to /bin/sh, dash has no `wait -n`, and the sandbox dies at start with
-        // "wait: Illegal option -n".
+        // to /bin/sh, and the sandbox runs under a shell that is not the bash
+        // the pack commands assume.
         [shell, flag, script] if shell == "/bin/bash" && flag == "-c" => {
             Ok(format!("#!/bin/bash\n{script}"))
         }
@@ -1721,6 +1869,31 @@ fn install_step(install: &PackInstall) -> Result<String, String> {
                 shell_quote(&url)
             )
         }
+        PackInstall::Desktop => format!(
+            "RUN echo {install} | base64 -d > /tmp/nestbox-desktop-install.sh \\\n && sh /tmp/nestbox-desktop-install.sh \\\n && rm /tmp/nestbox-desktop-install.sh\n\
+             RUN echo {start} | base64 -d > /usr/local/bin/nestbox-desktop \\\n && chmod 0755 /usr/local/bin/nestbox-desktop\n\
+             # The display layout tool the desktop, the control API and the MCP\n\
+             # server all call: same layer rules, installed next to the start\n\
+             # script.\n\
+             RUN echo {display} | base64 -d > /usr/local/bin/nestbox-display \\\n && chmod 0755 /usr/local/bin/nestbox-display\n\
+             # Desktop control as an MCP server: the screen itself, every monitor,\n\
+             # next to the browser server from install.sh. stdio, so it is one\n\
+             # process inside the sandbox and nothing on the network.\n\
+             RUN echo {mcp} | base64 -d > /usr/local/bin/nestbox-desktop-mcp \\\n && chmod 0755 /usr/local/bin/nestbox-desktop-mcp\n\
+             # The X server compiles its keymap into this directory. It is root's\n\
+             # by default, and the desktop does not run as root. Its own layer, so\n\
+             # the cached install above stays valid.\n\
+             RUN mkdir -p /var/lib/xkb && chmod 1777 /var/lib/xkb\n\
+             # A gateway sandbox refuses setuid(getuid()), which the X server calls\n\
+             # before it starts xkbcomp: a small preload library answers it (idfix.c).\n\
+             # The compiler goes in and out in one layer.\n\
+             RUN echo {idfix} | base64 -d > /tmp/idfix.c \\\n && apt-get update \\\n && apt-get install -y --no-install-recommends gcc libc6-dev \\\n && gcc -shared -fPIC -O2 -o /usr/local/lib/nestbox-idfix.so /tmp/idfix.c -ldl \\\n && apt-get purge -y gcc libc6-dev \\\n && rm -rf /var/lib/apt/lists/* /tmp/idfix.c\n",
+            install = dockerfile_payload(DESKTOP_INSTALL),
+            start = dockerfile_payload(DESKTOP_START),
+            display = dockerfile_payload(DESKTOP_DISPLAY),
+            mcp = dockerfile_payload(DESKTOP_MCP),
+            idfix = dockerfile_payload(DESKTOP_IDFIX),
+        ),
         PackInstall::Npm(spec) => {
             let spec = validate_spec(spec)?;
             format!(
@@ -1791,6 +1964,15 @@ pub fn content_hash(
                     PackInstall::Git { url, directory } => {
                         serde_json::json!({ "kind": "git", "url": url, "directory": directory })
                     }
+                    // The scripts are the install: editing one has to produce a new image.
+                    PackInstall::Desktop => serde_json::json!({
+                        "kind": "desktop",
+                        "install": DESKTOP_INSTALL,
+                        "start": DESKTOP_START,
+                        "display": DESKTOP_DISPLAY,
+                        "mcp": DESKTOP_MCP,
+                        "idfix": DESKTOP_IDFIX,
+                    }),
                 },
                 "homes": agent.home_directories,
             })
@@ -2160,6 +2342,53 @@ async fn audit(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_file_in_a_pack_home_is_not_made_a_directory() {
+        let agent = AgentSpec {
+            pack_key: "claude-code".into(),
+            instance: "claude".into(),
+            home_mode: HomeMode::Shared,
+            persistence: crate::domain::builder::Persistence::Persistent,
+            home_paths: vec![".claude".into(), ".claude.json".into()],
+            port: None,
+        };
+        let pack = pack_of(InstallKind::None, None);
+        let directories = agent_directories(&agent, &pack).expect("directories");
+        assert!(directories.iter().any(|d| d.ends_with("/.claude")));
+        assert!(!directories.iter().any(|d| d.ends_with(".claude.json")), "{directories:?}");
+    }
+
+    #[test]
+    fn a_desktop_pack_installs_its_scripts_and_hashes_them() {
+        let mut desktop = plan(PackageManager::Apt, &["vim"]);
+        desktop.agents.push(PlannedAgent {
+            instance: "desktop".into(),
+            pack_key: "desktop".into(),
+            install: PackInstall::Desktop,
+            home_directories: vec!["/home/nestbox".into()],
+            command: vec!["/usr/local/bin/nestbox-desktop".into()],
+            env_slots: Vec::new(),
+            home_mode: HomeMode::Shared,
+            port: None,
+        });
+        let text = dockerfile(&desktop).expect("a desktop dockerfile");
+        // The user comes after every install step, so the layers stay cached and a
+        // gateway sandbox gets a working directory its user can write.
+        let install_at = text.find("nestbox-desktop-install.sh").expect("install step");
+        let user_at = text.find("USER nestbox").expect("a non-root user");
+        assert!(install_at < user_at, "{text}");
+        assert!(text.contains("chown -R nestbox"), "{text}");
+        assert!(text.contains("nestbox-desktop-install.sh"), "{text}");
+        assert!(text.contains("> /usr/local/bin/nestbox-desktop"), "{text}");
+        assert!(text.contains("> /usr/local/bin/nestbox-display"), "{text}");
+        assert!(text.contains("> /usr/local/bin/nestbox-desktop-mcp"), "{text}");
+        let plain = plan(PackageManager::Apt, &["vim"]);
+        assert_ne!(
+            content_hash(&desktop, &resources(), &[], SUPERVISOR_PROGRAM),
+            content_hash(&plain, &resources(), &[], SUPERVISOR_PROGRAM)
+        );
+    }
+
     use super::*;
     use crate::domain::builder::HomeMode;
 
@@ -2343,8 +2572,8 @@ mod tests {
         let (_, supervisor) = &request.files[1];
         assert!(supervisor.starts_with("#!/bin/bash\n"), "the kernel needs the shebang");
         assert!(supervisor.contains("mkdir -p /home/nestbox"));
-        assert!(supervisor.contains("exec sleep infinity"));
-        assert!(supervisor.contains("wait -n"));
+        assert!(supervisor.contains("    sleep infinity &"));
+        assert!(supervisor.contains("while true; do"));
         assert!(supervisor.contains("export OPENAI_API_KEY="));
     }
 
@@ -2360,10 +2589,17 @@ mod tests {
             credential_ref: None,
         }];
         let text = dockerfile(&plan).expect("a valid repository renders");
+        let trust = text.find("install -y --no-install-recommends ca-certificates")
+            .expect("the trust store is installed before the repository");
         let keyring = text.find("/etc/apt/keyrings/nestbox-artgate.asc").expect("keyring written");
         let list = text.find("/etc/apt/sources.list.d/nestbox-artgate.list").expect("repo written");
-        let install = text.find("apt-get install").expect("install step");
-        assert!(keyring < install && list < install, "the repository exists before the install");
+        let install = text
+            .find("apt-get install -y --no-install-recommends nginx")
+            .expect("install step");
+        assert!(
+            trust < keyring && keyring < install && list < install,
+            "the trust store, then the repository, then the install"
+        );
         let encoded = dockerfile_payload(
             "deb [signed-by=/etc/apt/keyrings/nestbox-artgate.asc] https://packages.example.test/apt stable main\n",
         );
@@ -2536,4 +2772,219 @@ mod tests {
         assert_eq!(bytes_of("2147483648b"), Some(2_147_483_648));
         assert_eq!(bytes_of("1g"), None);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Recreating an existing recipe sandbox (moves)
+// ---------------------------------------------------------------------------
+
+/// Create the container of an existing recipe sandbox again, on the node its row names.
+///
+/// `instantiate` makes a sandbox from a recipe; this makes the container of one that already
+/// exists, with the same id, name, node, image and stored mounts, which is what a move needs.
+/// `sandbox_service::recreate` cannot do it: a recipe image's entrypoint is generated at build
+/// time, so only the recipe knows how the sandbox starts.
+///
+/// The supervisor keeps its row, because the table is unique on gateway and name and the new
+/// container's reports must land where the old ones did, and gets a new token: only the hash of the
+/// old one was ever stored.
+pub async fn recreate_in_place(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+) -> Result<serde_json::Value, ApiError> {
+    require(principal, Permission::SandboxWrite)?;
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal)
+        .await
+        .map_err(ApiError::from)?;
+    let sandbox = sandbox_store::get(&mut scope, sandbox_id)
+        .await
+        .map_err(ApiError::from)?;
+    if !sandbox.image.starts_with("nestbox-recipe/") {
+        return Err(ApiError::conflict(
+            ErrorCode::SANDBOX_INVALID_STATE,
+            "This sandbox was not built from a recipe; recreate it from its mounts instead.",
+        ));
+    }
+    let recipe_id = sandbox
+        .spec
+        .get("recipe_id")
+        .and_then(|value| value.as_str())
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .ok_or_else(|| {
+            ApiError::conflict(
+                ErrorCode::SANDBOX_INVALID_STATE,
+                "This sandbox does not say which recipe it was made from.",
+            )
+        })?;
+    let recipe = store::get(&mut scope, recipe_id).await.map_err(recipe_error)?;
+    // The mode is read from the row, not from a request: the container is replaced after a move,
+    // and a mode the operator did not choose is a silent policy change.
+    let mode = crate::store::postgres::policies::egress_mode_for_sandbox(&mut scope, sandbox.id)
+        .await
+        .map_err(ApiError::from)?
+        .map(|setting| setting.mode)
+        .unwrap_or(crate::domain::policy::EgressMode::ForwardProxy);
+    let egress_exit = crate::store::postgres::proxies::for_sandbox(&mut scope, sandbox.id)
+        .await
+        .map_err(ApiError::from)?
+        .filter(|proxy| proxy.enabled);
+    let mounts = crate::services::persist_service::mount_specs_for_sandbox(&mut scope, sandbox.id).await?;
+    let memory_limit = sandbox
+        .spec
+        .get("memory_limit")
+        .and_then(|value| value.as_str())
+        .unwrap_or("1g")
+        .to_string();
+    let cpu_limit = sandbox.spec.get("cpu_limit").and_then(|value| value.as_f64()).unwrap_or(1.0);
+    let pids_limit = sandbox.spec.get("pids_limit").and_then(|value| value.as_i64()).unwrap_or(256);
+    let gpu_count = sandbox.spec.get("gpu_count").and_then(|value| value.as_u64()).unwrap_or(0) as u32;
+    let supervisor = reissue_supervisor_token(&mut scope, &sandbox).await?;
+    crate::store::postgres::audit::record(
+        &mut scope,
+        crate::store::postgres::audit::NewAuditEvent {
+            actor_id: Some(principal.user_id),
+            actor_label: &principal.display_name,
+            kind: "sandbox.recreate",
+            subject_type: Some("sandbox"),
+            subject_id: Some(sandbox.id),
+            detail: &serde_json::json!({
+                "recipe": recipe.name,
+                "image": sandbox.image,
+                "mounts": mounts.len(),
+                "in_place": true,
+            }),
+            request_id: None,
+        },
+    )
+    .await
+    .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+
+    let name = sandbox.name.clone();
+    let image = sandbox.image.clone();
+    let pack_key = sandbox.pack_key.clone();
+    let node_id = sandbox.node_id;
+    let mut environment: Vec<(String, String)> =
+        if crate::services::sandbox_service::pack_needs_inference(&pack_key) {
+            match crate::services::provider_service::environment_for_sandbox(
+                ctx,
+                principal.environment_id,
+                &pack_key,
+                &name,
+            )
+            .await
+            {
+                Ok(values) => values.into_iter().collect(),
+                Err(error) => {
+                    tracing::warn!(
+                        code = error.code.0,
+                        "provider environment unavailable; creating without it"
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+    // The same derivation `instantiate` uses, so a container created here reaches the proxy the
+    // stored mode says it should and nothing else.
+    if let Some(proxy) = crate::services::sandbox_service::sandbox_proxy_url(mode, egress_exit.as_ref()) {
+        environment.extend(crate::services::sandbox_service::egress_environment_for(
+            &proxy,
+            mode,
+            crate::services::sandbox_service::EGRESS_CA_IN_SANDBOX,
+        ));
+    }
+    crate::services::sandbox_service::add_inference_bypass_vec(&mut environment);
+    if let Some((supervisor_id, token)) = &supervisor {
+        environment.push((
+            "NESTBOX_SUPERVISOR_STATE".to_string(),
+            crate::domain::builder::supervisor_state_directory(),
+        ));
+        environment.push(("NESTBOX_SUPERVISOR_ID".to_string(), supervisor_id.to_string()));
+        environment.push(("NESTBOX_SUPERVISOR_TOKEN".to_string(), token.clone()));
+        environment.push((
+            "NESTBOX_CONTROL_URL".to_string(),
+            std::env::var("NESTBOX_CONTROL_URL")
+                .unwrap_or_else(|_| "http://control-api:8000".to_string()),
+        ));
+        crate::services::sandbox_service::add_env_url_bypass_vec(&mut environment, "NESTBOX_CONTROL_URL");
+        environment.push(("NESTBOX_TOOLS".to_string(), recipe.tools.join(",")));
+    }
+
+    // The container is replaced, not added: the name is what the runtime and the sandbox's
+    // supervisor know it by, so the old one has to go first.
+    if let Err(error) = ctx.runtime.remove(&name).await {
+        tracing::warn!(sandbox = %name, error = %error, "remove before the in-place recreate failed; continuing");
+    }
+    let spec = SandboxSpec {
+        name: name.clone(),
+        image: image.clone(),
+        // The image's own entrypoint starts the agents; a command here would run nothing the
+        // recipe installed. The same rule as `instantiate`.
+        command: Vec::new(),
+        environment,
+        pack_key: pack_key.clone(),
+        tool_profile: String::new(),
+        memory_limit,
+        cpu_limit,
+        pids_limit,
+        mounts,
+        gpu_count,
+        egress_mode: mode.as_str().to_string(),
+        node_id: Some(node_id),
+        memory_reservation: None,
+        cpu_shares: None,
+    };
+    match ctx.runtime.create(spec).await {
+        Ok(facts) => {
+            let health = crate::services::sandbox_service::health_from_runtime(&facts);
+            let settled = settle(ctx, sandbox, SandboxStatus::Running, health).await?;
+            // Every agent the recipe holds gets its files written again, so a container created on
+            // another node starts with the same configuration, MCP attachments included. Best
+            // effort, as for any sandbox: a failure is logged, not fatal.
+            let mut packs: Vec<String> = recipe.agents.iter().map(|agent| agent.pack_key.clone()).collect();
+            packs.dedup();
+            for pack in packs {
+                if let Err(error) = crate::services::sandbox_service::reconfigure_pack(ctx, principal, settled.id, Some(&pack)).await {
+                    tracing::warn!(sandbox = %settled.name, pack, code = error.code.0, "could not write the agent files after the recreate");
+                }
+            }
+            Ok(serde_json::json!({ "recreated": true, "sandbox": settled.name }))
+        }
+        Err(error) => {
+            tracing::error!(sandbox = %name, error = %error, "the in-place recreate failed");
+            settle(ctx, sandbox, SandboxStatus::Failed, SandboxHealth::Unhealthy).await?;
+            Err(ApiError::internal(
+                "The sandbox could not be created again; its container is gone. Create it again from its recipe.",
+            )
+            .with_internal(error.to_string()))
+        }
+    }
+}
+
+/// Give the sandbox's supervisor a new token, and return it in plain text.
+///
+/// Only a hash is stored, so a container created again cannot be handed the token it had. Rotating
+/// keeps one supervisor row per sandbox, which is what the unique constraint and the sandbox's
+/// reports both require.
+async fn reissue_supervisor_token(
+    scope: &mut TenantScope<'_>,
+    sandbox: &Sandbox,
+) -> Result<Option<(Uuid, String)>, ApiError> {
+    let Some(supervisor_id) = sandbox.supervisor_id else {
+        return Ok(None);
+    };
+    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    let hash: String = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+    sqlx::query("UPDATE supervisors SET token_hash = $2 WHERE id = $1")
+        .bind(supervisor_id)
+        .bind(&hash)
+        .execute(scope.connection())
+        .await
+        .map_err(|error| ApiError::from(StoreError::Database(error)))?;
+    Ok(Some((supervisor_id, token)))
 }

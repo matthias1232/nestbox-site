@@ -23,11 +23,11 @@ control plane.
 | `GET` | `/v1/sandboxes/{name}/logs?tail=` | Last lines of stdout/stderr |
 | `POST` | `/v1/sandboxes/{name}/exec` | Run one argument vector, return output |
 | `GET` | `/v1/hardware` | Raw `/proc` and `nvidia-smi` text for the control plane to parse |
-| `POST` | `/v1/builds` | Build a recipe image from a generated Dockerfile |
+| `POST` | `/v1/builds` | Build a recipe image from a generated Dockerfile (the body may carry the desktop pack's embedded scripts; `MAX_DOCKERFILE_BYTES` is 1 MiB) |
 | `POST` | `/v1/catalogue` | Search a baseline image's native package index in a throwaway container |
 | `POST` | `/v1/images/verify` | Check a built image's package database against the recipe's packages |
 | `POST` | `/v1/models/download` | Fetch one GGUF into `NESTBOX_MODEL_BASE` |
-| `POST` | `/v1/models/serve` | Start one model server container |
+| `POST` | `/v1/models/serve` | Start one model server container; on a joined node publish it on the node's overlay address and answer `published: "<ip>:<port>"` |
 | `GET`/`DELETE` | `/v1/models/serve/{key}` | Inspect or stop it |
 | `GET` | `/v1/egress` | The sandbox network, the proxy, and the redirect state, as facts |
 | `GET` | `/v1/sandboxes/{name}/stats` | One `docker stats` sample |
@@ -69,6 +69,20 @@ control plane.
    with `internal=false` is refused with 503 instead of reused. See below.
 9. The egress proxy is joined to that network by this adapter, under the alias
    the sandbox environment names.
+
+## Publishing a model server on a joined node
+
+A sandbox and the control plane reach a local model server by container name, on
+the runtime network. A joined node has no such name: the control plane is on
+another machine and arrives through the overlay, so the server has to be
+published there. When `NESTBOX_FORWARD_BIND` and `NESTBOX_MODEL_PUBLISH_RANGE`
+are both set (the node package sets them), `serve_model` maps container `8080` to
+the first free port of the range on that address and answers
+`published: "<ip>:<port>"`; the control plane writes that into the provider
+profile. `pick_port` is the decision, `port_is_free` binds the candidate and
+closes it again, and `published_address` reads the mapping back from Docker, so a
+re-serve after a runner restart reports the port this process did not choose.
+The appliance's runner sets neither variable and keeps today's behaviour.
 
 ## The sandbox network has no route out
 
@@ -153,14 +167,29 @@ seconds instead of half an hour.
 | File | Responsibility |
 |---|---|
 | `app/main.py` | The FastAPI adapter, the sandbox network, the egress wiring, and model serving |
+| `app/ca_bundle.py` | The CA and CA-bundle files a sandbox is given: built here, mounted read-only in every mode that uses the proxy, never in `direct` |
 | `app/images.py` | The one image allowlist shared by sandbox creation and the package catalogue |
 | `app/catalogue.py` | Live package search and post-build verification: fixed scripts, validated query, throwaway container |
 | `app/stats.py` | One-shot `docker stats` samples and the poster loop |
 | `app/processes.py` | `docker top` for one sandbox |
+| `app/commands.py` | What starts in a sandbox and by which way in (terminal, ssh, inside), from the parent chain; a ring buffer filled while somebody polls |
+| `app/gateway_exec.py` | Running things inside a sandbox whichever runtime holds it: `exec_run` (probes), `GatewayPty` (terminal through `openshell sandbox exec --tty`; `open_command` for any argv, as the SSH door needs), `GatewayStream` (desktop bridge). `docker exec` runs outside a gateway sandbox's boundary, so gateway sandboxes never use it |
+| `app/ssh_gateway.py` | The SSH door: key auth, no SFTP, no tunnels. A login lands in the tmux tab `nestbox-ssh` (`attach <tab>` joins a browser tab) and a dropped client only detaches; gateway sandboxes go through `GatewayPty.open_command` |
+| `tests/test_ssh_gateway.py` | Frame demux, the tab-versus-command choice, and the end of a session (Ctrl-D without tmux, detach with it), without Docker |
+| `app/connections.py` | The sockets of one sandbox and the process that owns each, by a fixed `sh` probe run as the sandbox user; a sample, not a trace |
+| `app/vnc.py` | The desktop transport: node token, then a fixed `python3` bridge in the container copies bytes between `127.0.0.1:5900` and the WebSocket; nothing is recorded. With `?view=1`, `RfbClientFilter` lets the RFB handshake and framebuffer requests through and drops every key, pointer, clipboard and resize message |
 | `app/inventory.py` | Runs the probe and parses its sections |
 | `app/inventory.sh` | The fixed probe script, executed inside the container |
 | `app/terminal.py` | The browser terminal: node token, PTY pump, resize, idle close |
+| `app/remote_ssh.py` | `POST /v1/remote/ssh-run`: one script over SSH on a machine that is not a node yet, credentials used once |
 | `tests/test_terminal.py` | The pump and the frame rules, without FastAPI and without Docker (`python3 -m unittest discover -s tests -t .`) |
+| `tests/test_ca_mounts.py` | Which egress modes get the CA and the bundle, and what the bundle contains |
+| `tests/test_vnc.py` | The view-only RFB filter: what passes, what is dropped, what makes the stream close |
+| `tests/test_remote_ssh.py` | `env_prefix` quoting and which environment keys are refused, without a machine to reach |
+| `tests/test_model_publish.py` | The model publish port: which range a joined node publishes in, the first free port, and the address read back from a running container |
+| `app/telemetry_shipper.py` | Reads the egress proxy's JSON access log from its container output and posts it as batches; the field map is pure, including the `would_deny` verdict |
+| `tests/test_terminal.py` | The pump and the frame rules, without FastAPI and without Docker (`python3 -m unittest discover -s tests -t .`) |
+| `tests/test_telemetry_shipper.py` | The access-log field map, the batch size cut, and the ship/drop/retry rule, without Docker |
 | `Dockerfile` | Image build |
 
 ## Samples, processes, inventory
@@ -203,3 +232,9 @@ Two questions, both answered by a container rather than by a scraped page:
 The ten-minute cache in `app/catalogue.py` is keyed by image, manager and query.
 It is a courtesy to the package index, never control state: emptying it changes
 nothing an operator can observe except how long the next search takes.
+
+`app/remote_ssh.py` runs a script over SSH on a machine that is not a node yet (ADR 0057): the
+credentials arrive with the request and are used once. The host key is not checked, on purpose —
+a first contact has no trusted key, and what is trusted afterwards is the WireGuard key the new
+node answers on its overlay address. `env_prefix` single-quotes every value and refuses a key
+that is not a shell name, and no password, key or environment ever reaches a log line.

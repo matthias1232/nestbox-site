@@ -30,7 +30,51 @@ def line(**fields) -> str:
     return "2026-10-29T01:14:23.241Z " + json.dumps(base)
 
 
+class ShipTest(unittest.TestCase):
+    def test_a_batch_is_cut_by_size(self) -> None:
+        big = {"host": "x", "request_body": "A" * 300_000}
+        taken = ship.take_batch([dict(big) for _ in range(5)])
+        self.assertEqual(len(taken), 2)
+        self.assertEqual(len(ship.take_batch([{"host": "a"}] * 10)), 10)
+        self.assertEqual(len(ship.take_batch([{"host": "x", "request_body": "A" * 2_000_000}])), 1)
+
+    def test_a_refused_entry_is_dropped_and_the_rest_is_delivered(self) -> None:
+        sent: list[list[str]] = []
+
+        def fake(entries):
+            hosts = [e["host"] for e in entries]
+            if "bad" in hosts:
+                return "refused"
+            sent.append(hosts)
+            return "ok"
+
+        original = ship.post_batch
+        ship.post_batch = fake
+        try:
+            batch = [{"host": name} for name in ("a", "b", "bad", "c", "d")]
+            self.assertEqual(ship.ship(batch), 5)
+        finally:
+            ship.post_batch = original
+        self.assertEqual(sorted(h for group in sent for h in group), ["a", "b", "c", "d"])
+
+    def test_a_server_that_is_down_keeps_everything(self) -> None:
+        original = ship.post_batch
+        ship.post_batch = lambda entries: "retry"
+        try:
+            self.assertEqual(ship.ship([{"host": "a"}, {"host": "b"}]), 0)
+        finally:
+            ship.post_batch = original
+
+
 class RecordTest(unittest.TestCase):
+    def test_a_body_cut_by_docker_is_joined_again(self) -> None:
+        # Docker splits a long line into pieces and stamps each piece.
+        cut = line(request_body="QUJD@@")
+        cut = cut.replace("@@", "2026-10-29T01:14:23.999Z REVG")
+        record = ship.record_from_line(cut)
+        self.assertEqual(record["request_body"], "QUJDREVG")
+        self.assertEqual(record["ts"], "2026-10-29T01:14:23.240Z")
+
     def test_maps_the_fields_the_control_api_reads(self) -> None:
         record = ship.record_from_line(line())
         self.assertEqual(record["sandbox_id"], SANDBOX)
@@ -45,6 +89,14 @@ class RecordTest(unittest.TestCase):
         self.assertNotIn("rule_id", record)
         self.assertNotIn("reason", record)
         self.assertNotIn("path", record)
+
+    def test_the_would_deny_verdict_is_carried_through(self) -> None:
+        # The authz answer is "1" when the rules said deny even though a window
+        # let the request through; a dash means the filter never ran.
+        self.assertEqual(ship.record_from_line(line(would_deny="1"))["would_deny"], "1")
+        self.assertEqual(ship.record_from_line(line(would_deny="0"))["would_deny"], "0")
+        self.assertNotIn("would_deny", ship.record_from_line(line(would_deny="-")))
+        self.assertNotIn("would_deny", ship.record_from_line(line()))
 
     def test_a_line_that_is_not_an_access_record_is_skipped(self) -> None:
         self.assertIsNone(ship.record_from_line("[2026-10-29 01:00:00][1][info][main] starting"))

@@ -47,26 +47,45 @@ on it.
 | File | Responsibility |
 |---|---|
 | `useSandboxes.js` | Paging, filters, selection, actions; no JSX |
-| `SandboxListPage.jsx` | Table with stacks (a lead and its members drawn together), facets, bulk bar, the New sandbox drawer |
+| `SandboxListPage.jsx` | Table with stacks (a lead and its members drawn together), facets, bulk bar, the New sandbox drawer. Its Network and Connected columns come from `GET /sandboxes/control-overview` every 15 s; a Workbox button opens `/box/<id>` |
+| `overview.js` | The list's live columns as text: `modeLabel`, `agentModes`, `indexById` for the overview map. Test: `node --test overview.test.js` |
 | `ConnectPanel.jsx`, `AccessTab.jsx` | How to reach a sandbox: the node's address and hostname (never the container's), every published port with its dial address, the `ssh` line, an SSH config block, the one-time key. Each port says what it is, how to connect to it, and whether it answers (open, and something behind it). One component, used by the Access tab and the list's Connect drawer |
-| `StackTopology.jsx`, `stackLayout.js` | The Topology tab: the stack from you to the internet in bands, live every 5 s, a card per piece with its facts, connections and log. `stackLayout.js` is pure (`node --test stackLayout.test.js`) |
+| `StackTopology.jsx`, `stackLayout.js` | The Topology tab: the stack from you to the internet drawn by `TopologyCanvas` (layers from the server), live every 5 s, with a detail panel of facts, connections and log below. `stackLayout.js` is pure (`node --test stackLayout.test.js`) |
 | `MapTab.jsx` | Hands the sandbox to `StackTopology.jsx`; the tab is registered as Topology |
 | `DashboardTab.jsx`, `ProcessesTab.jsx`, `InventoryTab.jsx`, `TrafficTab.jsx`, `McpTab.jsx`, `TerminalTab.jsx` | The deck's live tabs: usage and status, `docker top`, snapshot, every request with its decision (and "allow this"), MCP servers and calls, xterm.js over the terminal WebSocket. All poll every 4-5 s through `components/Poll.js` |
+| `MountEditor.jsx`, `MountRow.jsx`, `PathList.jsx`, `mountEditor.js` | F15: what a sandbox can touch. Mounted roots with an RO/RW chip, the filesystem policy's read-only/read-write paths, roots that could be mounted; Apply now (recreate) / Apply later / Discard via `api/mounts.js`. `policyMode` (props `spec`, `onChange`) renders only the path lists for the policy wizard. `mountEditor.js` is pure (`node --test mountEditor.test.js`); styles in `styles/mounts.css` |
+| `MountsTab.jsx` | Only renders `MountEditor` for the sandbox |
 | `ResourcesPanel.jsx` | Memory, CPU and process limits, changed on the running sandbox |
 | `SshAccessSection.jsx` | Operator keys and temporary user name/password logins, per sandbox |
 | `stacks.js` | Grouping the flat page into stacks; a member whose lead is on another page stays a row of its own and names its lead. Test: `node --test stacks.test.js` |
+| `CreateSandboxWizard.jsx`, `createWizard.js` | The New sandbox wizard (What → Where → Access → Review) over `components/Wizard.jsx`; opens in a wide drawer from the list or with `?new=1`. Writes nothing until Finish, then creates (sandbox or recipe instance) and runs the follow-ups (model grants, policy, mounts) and offers Open workbox / Open admin view. `createWizard.js` is pure: `stepsFor`, `validate`, `bodyFor`, `createCall`, `followUps`, `nodeHint`, `leastLoaded` (`node --test createWizard.test.js`). Style: `styles/create-wizard.css` |
 | `CreateSandboxForm.jsx` | Name, pack, node, memory, CPU, PIDs; the node's free numbers beside them (`feat/ui-sandbox-resources`) |
 | `useCreateSandbox.js` | Nodes, packs, the draft, and the pre-check; no JSX (`feat/ui-sandbox-resources`) |
 | `SandboxDetail.jsx` | Drawer with overview, agents, logs, shell, rules, inference |
 | `AgentsTab.jsx` | Agents of one sandbox: list, add, remove with "keep its data" (`feat/ui-sandbox-resources`) |
 | `useSandboxAgents.js` | Agents, pack catalog, add and remove; treats `agent.exists` and `agent.not_found` as sentences, not crashes (`feat/ui-sandbox-resources`) |
-| `AdminCenter.jsx` | The full-screen Admin Center shell: header, actions, tab strip; owns no tab body |
-| `DashboardTab.jsx` | Metrics, top processes, last blocks, MCP servers (`feat/admin-console-shell`) |
+| `AdminCenter.jsx` | The Admin Center frame: `Breadcrumb`, sticky `PageHeader` (status, presence, `ActionBar`), tab strip from `adminTabs.js`, body switch. Owns no tab body. The tab is in the URL (`?tab=`, written with `navigate(paths.sandbox(id, tab))`); Live (Connections / Commands / Chats) is a grouped tab with a switch, the Console tab renders `components/ConsoleFrame.jsx` (Shell / Desktop / SSH in one frame, X01), the Permissions tab renders `users/PermissionsTab.jsx` for this sandbox (X02). The Mounts tab renders `MountEditor` (F15) with the sandbox id. It imports `workbox/MoveDialog.jsx` through `ActionBar.jsx`; the workbox already imports from here, so the exception goes both ways for `MoveDialog` |
+| `ActionBar.jsx` | Sticky action bar in this order: Start or Stop as the single `primary` (Start while resting, Stop while live), Restart, Recreate, Move…, the Console split button (label `Console`, then `▾`), Allow all 15 min (becomes "Stop allowing" with a `Countdown`), Policies, Workbox. Stop (when agents are busy) and Recreate ask first; a toast reports each result |
+| `SummaryTab.jsx` | Summary tab: tiles, CPU and memory `Gauge`s and `Sparkline`s (metrics every 5 s), last refused with "Allow 15 min", models, first 5 mounts, open sessions |
+| `adminTabs.js`, `adminTabs.test.js` | Ordered tab list with `minRole`, old-id aliases (`dashboard`, `terminal`, ...), `tabsFor(role)`, `resolveTab`. Test: `node --test adminTabs.test.js` |
+| `DashboardTab.jsx` | Metrics, top processes, last blocks, MCP servers; now registered as the Resources tab; CPU and memory use `Gauge` and `Sparkline` (`feat/admin-console-shell`) |
 | `TrafficTab.jsx` | Live table, filters, "allow this", temporary window (`feat/console-traffic`) |
 | `McpTab.jsx` | Servers, tools, calls, visibility per transport (`feat/console-mcp`) |
-| `TerminalTab.jsx` | xterm.js over the terminal WebSocket (`feat/console-terminal`) |
+| `TerminalTab.jsx` | xterm.js over the terminal WebSocket; my tab list is read from and written to the server, so a reload reopens the same shells. `showAll` (on by default) merges everybody's tabs from `presence.tabsAll` with who is in each, `fixedTab` shows one tab alone for a pop-out. A tab menu offers pop-out, the SSH/PuTTY line, "close for me" (my list only, the shell keeps running) and "close for everyone" (`feat/console-terminal`, workbox). U03: a status line under the tab strip (`● Connected` lime / `● Connecting…` amber / `● Disconnected — <reason>` red, the reason being the server's close sentence, the HTTP status behind a refused handshake or the retry countdown), automatic reconnect at 1/2/5/10 s up to ten tries cancelled on unmount, `Reconnect` to start over, copy on selection, paste with Ctrl+Shift+V and a right-click Paste (clipboard API, prompt on plain HTTP), and focus after connecting and after a click into the frame |
+| `terminalState.js` | The terminal's status line and backoff as pure functions: `statusText`, `statusTone`, `nextDelay`, `shouldRetry`, `retryText`, `closeReasonText`, `socketReasonText`. Test: `node --test terminalState.test.js` |
+| `DesktopTab.jsx` | noVNC over the desktop WebSocket; only a sandbox built with the desktop pack has one. "watch only" reopens the stream with `?view=1` so the server drops the input, `fullWindow` fills a pop-out. Offers to attach the `chrome-browser` MCP server |
+| `TerminalTab.jsx` | xterm.js over the terminal WebSocket; my tab list is read from and written to the server, so a reload reopens the same shells. `showAll` (on by default) merges everybody's tabs from `presence.tabsAll` with who is in each, `fixedTab` shows one tab alone for a pop-out. A tab menu offers pop-out, the SSH/PuTTY line, "close for me" (my list only, the shell keeps running) and "close for everyone" (`feat/console-terminal`, workbox) |
+| `DesktopTab.jsx` | noVNC over the desktop WebSocket; only a sandbox built with the desktop pack has one. Its options (scaling, quality, compression, dot cursor, shared mode, automatic reconnect and delay) are stored per sandbox in `ui.console.vncOptions` and applied on connect and on change; "view only" is both the client flag and a reopened stream with `?view=1`, so the server drops the input. A close this window did not ask for reconnects after the configured delay and says so in the status line. Renders `components/VncSidebar.jsx` on the left and `VncStatus` beneath the picture, so the console tab and the pop-out (`fullWindow`) are the same view. U10b: `components/MonitorTabs.jsx` above the picture, one tab per monitor plus `All`, remembered per sandbox in `ui.console.monitor(id)`; a monitor tab is cropped with `monitorView.js` (same connection, `clipViewport` viewport on the monitor, `scale` to fit) and re-cropped after a `ResizeObserver` and every layout change; a pop-out with `?monitor=<id>` pins one monitor and hides the strip. The layout comes from `useDisplay.js`, edited in the sidebar's Display section. `onReady({sendCombo, sendKey, setOptions, options, clipboardSend, lastClipboard, fullscreen, power, connect, disconnect})` drives the frame's toolbar. Offers to attach the `chrome-browser` MCP server (U04) |
+| `monitorView.js`, `monitorView.test.js` | the cropped per-monitor view: `fitScale`, `cropSize`, `clickToFramebuffer` (pure, and the numbers the click proof compares against), `viewportFor`, `canCrop`, `showMonitor(rfb, monitor, box)` (clip, size, move, scale — in that order) and `showAll(rfb)`. The only place that touches `rfb._display`; a noVNC without it returns false so the caller can fall back. Node-tested with a fake display |
+| `displayLayout.js`, `displayLayout.test.js` | the console's copy of the display rules: 1–8 monitors, 320–7680 a side, no overlap, every monitor touching, bounding box and area, in the same sentences as the Rust domain and `nestbox-display`; plus `bounds`, `snap` (the nearest free slot beside a neighbour), `addMonitor`, `removeMonitor`, `resizeMonitor`, `rotateMonitor`, `renameMonitor`, `setPrimary`, `setMode`, `totals`, `arrangeGeometry`, `describeApplied`, `PRESETS`. Node tests mirror the Rust cases 1:1 |
+| `useDisplay.js` | the layout of one desktop, applied live: reads `display.get` on mount, edits locally at once and writes after 400 ms of quiet, sends `expected_applied_at` and adopts the server's layout on `409 display.changed`, re-reads on the live `control` event with `what: "display"` and every 10 s. `status()` is the line under the arrangement (`Applying…`, `Applied 1920×1080 + 2560×1440 · separate · 0.3 s`, the server's refusal, `Changed by <who> just now`); `problems()` is the pure validator's list. A request that never answers is given up after 15 s, so the panel can never stay on `Applying…` with every later edit dropped |
+| `vncOptions.js`, `vncOptions.test.js` | Pure noVNC options: `DEFAULTS`, `SCALINGS`, `KEYS` (Ctrl+Alt+Del, Ctrl+Alt+F1…F12, Tab, Esc, PrintScreen, the sticky modifiers), `STICKY`, `sanitizeOptions`, `applyOptions(rfb, options)` (clipping set before scaling), `sendCombo(rfb, keys)` (presses in order, releases in reverse), `withSticky`, `statusText`. Node-tested |
+| `CommandsTab.jsx` | New processes with their way in (terminal, ssh, inside), polled every 2 s while open |
+| `ConnectionsTab.jsx` | Sockets and owning processes, filtered by where they go (internet, SSH, name lookups), polled every 2.5 s |
+| `ChatsTab.jsx`, `chats.js` | Model conversations read from the recorded bodies (Anthropic, OpenAI chat, OpenAI responses; SSE stitched back). Needs an inspecting egress mode |
 | `AccessTab.jsx` | Ports, SSH key, remote snippets (`feat/console-access`) |
-| `PoliciesTab.jsx` | Effective rules, deployed state (`feat/console-map-policies`) |
+| `PrivacyTab.jsx` | What the content policy found in this sandbox (dashboard, log with direction and masked value → substitute, policy history), and whether this sandbox's egress mode allows an inline check at all |
+| `PoliciesTab.jsx` | Effective rules, deployed state; the egress-mode labels come from `features/workbox/network.js`, so this tab and the user's card name a mode the same way (`feat/console-map-policies`) |
 | `ProcessesTab.jsx`, `InventoryTab.jsx`, `LogsTab.jsx` | `docker top`, snapshot, log tail (`feat/console-inventory`) |
 
 ## The drawer's Agents tab
@@ -104,3 +123,23 @@ is request/response, not a PTY: the output comes back when the command ends,
 capped at 64 KiB, with the exit code. That is enough to ask Hermes a question
 or inspect a file, and it keeps every run in the audit trail as an argument
 vector. An interactive terminal is a later transport, not a change to this one.
+
+`CreateSandboxWizard.jsx` (F24) is a placeholder created in Wave 0.
+`MountEditor.jsx` (F15) and `CreateSandboxWizard.jsx` (F24) are placeholders created in Wave 0.
+
+Note: `TerminalTab` takes `fontSize` and `onReady({copy, paste, focus, fit, activeTab})`; `DesktopTab` owns its stored options and publishes `onReady({sendCombo, sendKey, setOptions, options, clipboardSend, lastClipboard, fullscreen, power, connect, disconnect})`; both are driven by `components/ConsoleFrame.jsx`. The desktop's view-only switch is the stored option, so the toolbar and the sidebar cannot disagree (U04).
+F21: `SandboxListPage.jsx` checkboxes now write to `ui.selection` (kind `sandbox`); the old inline bulk buttons are gone, `BulkBar` (via `BulkHost`) replaces them.
+`MountEditor.jsx` (F15) is a placeholder created in Wave 0.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `RequestJourney.jsx` | "How a request travels": pick a real connection this sandbox made and watch the five steps |
+| `SessionsTab.jsx` | Who is signed in to this sandbox's agent, and who is connected to the sandbox. |
+| `SupervisorTab.jsx` | The supervisor of one sandbox: what it is, what it enforces, what it logged. |
+| `UsageTab.jsx` | What this sandbox's agents used: models, tokens, cache, cost. |
+| `chats.test.js` | Node tests for `chats`. |
+| `journey.js` | The five steps a connection takes, written for someone who has never seen the system. |
+| `journey.test.js` | Node tests for `journey`. |

@@ -9,23 +9,37 @@ import StatusBadge from '../../components/StatusBadge.jsx';
 import Empty from '../../components/Empty.jsx';
 import Drawer from '../../components/Drawer.jsx';
 import { useSandboxes } from './useSandboxes.js';
+import { useUi } from '../../state/ui.jsx';
 import SandboxDetail from './SandboxDetail.jsx';
-import CreateSandboxForm from './CreateSandboxForm.jsx';
+import CreateSandboxWizard from './CreateSandboxWizard.jsx';
 import ConnectPanel from './ConnectPanel.jsx';
 import LoginBadge from '../../components/LoginBadge.jsx';
+import Countdown from '../../components/Countdown.jsx';
+import PresenceDots from '../../components/PresenceDots.jsx';
 import * as deck from '../../api/deck.js';
+import * as control from '../../api/control.js';
+import { navigate } from '../../routing.js';
 import { createMemo, createSignal } from 'solid-js';
 import { groupStacks, possibleLeads, worstStatus } from './stacks.js';
+import { indexById, modeLabel } from './overview.js';
 import '../../styles/stacks.css';
 import '../../styles/sandbox-hierarchy.css';
 
 export default function SandboxListPage(props) {
   const state = useSandboxes();
+  // The bulk selection is shared with the tree and the bulk bar (BulkHost).
+  const ui = useUi();
+  const isSelected = (id) => ui.selection.kind() === 'sandbox' && ui.selection.ids().has(id);
+  const allSelected = () => state.items().length > 0 && state.items().every((item) => isSelected(item.id));
   const [openId, setOpenId] = createSignal(null);
   const [creating, setCreating] = createSignal(false);
   // The sandbox whose connection details are open; `null` closes the drawer.
   const [connecting, setConnecting] = createSignal(null);
   const [created, setCreated] = createSignal(null);
+  // `?new=1` opens the wizard straight away (the command palette and the home page link to it).
+  onMount(() => {
+    if (new URLSearchParams(window.location.search).get('new') === '1') setCreating(true);
+  });
 
   // How each running sandbox's agent is signed in. Read apart from the list: it asks each
   // sandbox, so it is slower and refreshed less often, and a failure leaves the list intact.
@@ -38,11 +52,28 @@ export default function SandboxListPage(props) {
       /* the column shows a dash */
     }
   }
+
+  // The cheap per-sandbox control summary: network mode, "all allowed", who is connected.
+  // Read every 15 s from the same place as the logins, and a failure leaves the old rows.
+  const [summaries, setSummaries] = createSignal({});
+  async function loadSummaries() {
+    try {
+      const list = await control.overview();
+      setSummaries(indexById(list));
+    } catch {
+      /* the columns show a dash */
+    }
+  }
   onMount(() => {
     state.load({ cursor: null });
     loadLogins();
-    const timer = setInterval(loadLogins, 30000);
-    onCleanup(() => clearInterval(timer));
+    loadSummaries();
+    const loginTimer = setInterval(loadLogins, 30000);
+    const summaryTimer = setInterval(loadSummaries, 15000);
+    onCleanup(() => {
+      clearInterval(loginTimer);
+      clearInterval(summaryTimer);
+    });
   });
 
   // Which stacks are folded shut. Open is the default: a stack that hides its
@@ -69,8 +100,9 @@ export default function SandboxListPage(props) {
     }
   }
 
+  // The wizard shows its own "open workbox / admin view" screen, so the drawer stays open;
+  // the list only refreshes behind it.
   async function createdSandbox(sandbox) {
-    setCreating(false);
     setCreated(
       `Sandbox “${sandbox.name}” created on ${sandbox.node_name || 'the local node'}.`,
     );
@@ -102,8 +134,8 @@ export default function SandboxListPage(props) {
                       </Show>
                       <input
                         type="checkbox"
-                        checked={state.selected().has(sandbox.id)}
-                        onChange={() => state.toggle(sandbox.id)}
+                        checked={isSelected(sandbox.id)}
+                        onChange={() => ui.selection.toggle('sandbox', sandbox.id)}
                         aria-label={`Select ${sandbox.name}`}
                       />
                     </td>
@@ -159,6 +191,32 @@ export default function SandboxListPage(props) {
                     </td>
                     <td class="small"><LoginBadge entry={logins()[sandbox.id]} /></td>
                     <td class="small">
+                      <Show when={summaries()[sandbox.id]} fallback={<span class="muted">—</span>}>
+                        <span
+                          class={`badge ${summaries()[sandbox.id].egress_mode === 'off_allow_all' ? 'bad' : 'info'}`}
+                          title="What the egress proxy does with this sandbox's traffic"
+                        >
+                          <i />{modeLabel(summaries()[sandbox.id].egress_mode)}
+                        </span>
+                        <Show when={summaries()[sandbox.id].allow_all}>
+                          {' '}
+                          <span class="badge bad" title="Everything this sandbox asks for is allowed right now">
+                            <i />ALL ALLOWED
+                          </span>{' '}
+                          <Countdown until={summaries()[sandbox.id].allow_all_until} />
+                        </Show>
+                      </Show>
+                    </td>
+                    <td class="small">
+                      <PresenceDots
+                        people={(summaries()[sandbox.id]?.viewers || []).map((viewer) => ({
+                          name: viewer.user_name || 'SSH',
+                          kind: viewer.kind,
+                          view_only: !!viewer.view_only,
+                        }))}
+                      />
+                    </td>
+                    <td class="small">
                       <span class={`runtime-tag ${sandbox.runtime_kind || 'unknown'}`}
                             title={sandbox.runtime_kind === 'openshell'
                               ? 'Enforced by an NVIDIA OpenShell supervisor (Landlock, seccomp, per-program network policy)'
@@ -169,6 +227,8 @@ export default function SandboxListPage(props) {
                     <td class="actions">
                       <button class="tiny" title="How to reach this sandbox: host, ports, SSH"
                               onClick={() => setConnecting(sandbox)}>Connect</button>
+                      <button class="tiny" title="The Workbox: live control of this sandbox"
+                              onClick={() => navigate('/box/' + sandbox.id)}>Workbox</button>
                       <button class="tiny" onClick={() => setOpenId(sandbox.id)}>Details</button>
                       <Show when={state.canStop(sandbox)}
                             fallback={<button class="tiny" disabled={!state.canStart(sandbox)}
@@ -265,16 +325,6 @@ export default function SandboxListPage(props) {
         </For>
       </div>
 
-      <Show when={state.selected().size > 0}>
-        <div class="bulkbar">
-          <span>{state.selected().size} selected</span>
-          <button onClick={() => state.bulk('start')}>Start</button>
-          <button onClick={() => state.bulk('stop')}>Stop</button>
-          <button onClick={() => state.bulk('restart')}>Restart</button>
-          <button class="ghost" onClick={() => state.toggleAll()}>Clear</button>
-        </div>
-      </Show>
-
       <Show
         when={state.items().length > 0}
         fallback={
@@ -291,8 +341,8 @@ export default function SandboxListPage(props) {
                 <th class="narrow">
                   <input
                     type="checkbox"
-                    checked={state.selected().size === state.items().length && state.items().length > 0}
-                    onChange={() => state.toggleAll()}
+                    checked={allSelected()}
+                    onChange={() => (allSelected() ? ui.selection.clear() : ui.selection.set('sandbox', state.items().map((item) => item.id)))}
                     aria-label="Select all"
                   />
                 </th>
@@ -303,6 +353,8 @@ export default function SandboxListPage(props) {
                 <th title="Cluster › the gateway that carries it · the node (machine) it runs on">Cluster › gateway · node</th>
                 <th title="The service that watches this sandbox from outside and enforces its policy. One per sandbox, not a sandbox itself.">Supervisor</th>
                 <th title="How the agent in the sandbox is signed in: the gateway key, or your own account">Login</th>
+                <th title="What the egress proxy does with this sandbox's traffic, and whether everything is allowed right now">Network</th>
+                <th title="Who is connected to this sandbox right now: terminal, SSH, or desktop">Connected</th>
                 <th title="What enforces the sandbox">Runtime</th>
                 <th>Actions</th>
               </tr>
@@ -357,11 +409,11 @@ export default function SandboxListPage(props) {
       <Drawer
         open={creating()}
         title="New sandbox"
-        subtitle="Its limits are checked against the node it lands on."
+        subtitle="Four steps: what, where, access, review. Nothing is created before the last one."
         onClose={() => setCreating(false)}
       >
         <Show when={creating()}>
-          <CreateSandboxForm
+          <CreateSandboxWizard
             onCancel={() => setCreating(false)}
             onCreated={createdSandbox}
           />

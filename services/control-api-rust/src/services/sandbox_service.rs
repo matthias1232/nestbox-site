@@ -201,6 +201,8 @@ pub struct CreateSandbox {
     pub memory_limit: String,
     pub cpu_limit: f64,
     pub pids_limit: i64,
+    /// GPUs to hand to the container. Refused on a node that cannot hand them out.
+    pub gpu_count: Option<u32>,
     /// The node to place the sandbox on, by name. Empty means the local node.
     pub node: Option<String>,
     /// The lead of the stack this sandbox joins. Absent means standalone (or a
@@ -210,6 +212,14 @@ pub struct CreateSandbox {
     /// key) or `own_account` (no key in the environment; the user logs in inside the
     /// sandbox and the login is kept on its persistent home).
     pub login: Option<String>,
+    /// The egress mode the sandbox is created for; it decides the runtime.
+    ///
+    /// The container always starts in `forward_proxy` and a later change is applied
+    /// live, so this is not the mode the proxy reads. It is the one the person asked
+    /// for, and only it can choose the runtime: reading TLS needs Docker, because the
+    /// gateway parses every connection to another proxy as HTTP and refuses a
+    /// `CONNECT`. Absent means `forward_proxy`, which is the gateway's own mode.
+    pub egress_mode: Option<String>,
 }
 
 /// The sign-in choices.
@@ -217,6 +227,10 @@ pub const LOGIN_MODES: [&str; 2] = ["gateway", "own_account"];
 
 /// Take the gateway's model settings out of an agent's environment, for a sandbox the
 /// user signs in to with their own account. What stays: the MCP hub, the config directory.
+///
+/// Only for config files. The container environment keeps the gateway keys, whether
+/// or not an agent uses them: an agent's sign-in mode is the launcher's decision (ADR
+/// 0054), and a container cannot be told a different environment afterwards.
 pub fn apply_login_choice(environment: &mut BTreeMap<String, String>, login: Option<&str>) {
     if login != Some("own_account") {
         return;
@@ -401,20 +415,49 @@ pub const DEFAULT_EGRESS_PROXY: &str = "http://egress-proxy:3128";
 /// else changes.
 pub fn egress_proxy_url() -> String {
     if openshell_runtime() {
-        // A sandbox on a gateway has no route on the runtime network, so the
-        // compose service name is not resolvable from it. The supervisor reaches
-        // the host, and a published loopback port is reachable as
-        // `host.openshell.internal:<port>` — the same form the MCP hub already
-        // uses (ADR 0035). Without this the agent has no proxy, tries a direct
-        // connection and fails in DNS before any policy could speak.
-        return match std::env::var("NESTBOX_OPENSHELL_PROXY_URL") {
-            Ok(value) if !value.trim().is_empty() => value.trim().trim_end_matches('/').to_string(),
-            _ => DEFAULT_OPENSHELL_PROXY.to_string(),
-        };
+        openshell_proxy_url()
+    } else {
+        docker_egress_proxy_url()
     }
+}
+
+/// The address a gateway sandbox uses: an address on the host, not a compose
+/// service name.
+fn openshell_proxy_url() -> String {
+    // A sandbox on a gateway has no route on the runtime network, so the compose
+    // service name is not resolvable from it. The supervisor reaches the host,
+    // and a published loopback port is reachable as
+    // `host.openshell.internal:<port>` — the same form the MCP hub already uses
+    // (ADR 0035). Without this the agent has no proxy, tries a direct connection
+    // and fails in DNS before any policy could speak.
+    match std::env::var("NESTBOX_OPENSHELL_PROXY_URL") {
+        Ok(value) if !value.trim().is_empty() => value.trim().trim_end_matches('/').to_string(),
+        _ => DEFAULT_OPENSHELL_PROXY.to_string(),
+    }
+}
+
+/// The address a container sandbox uses: the compose service on the runtime
+/// network.
+fn docker_egress_proxy_url() -> String {
     match std::env::var("NESTBOX_EGRESS_PROXY_URL") {
         Ok(value) if !value.trim().is_empty() => value.trim().to_string(),
         _ => DEFAULT_EGRESS_PROXY.to_string(),
+    }
+}
+
+/// The proxy URL for a sandbox whose **runtime follows its egress mode**.
+///
+/// The two candidates are not interchangeable: `host.openshell.internal` exists
+/// only inside a gateway sandbox, and `egress-proxy:3128` only on the runtime
+/// network. Choosing by the deploy-wide default instead of by this sandbox's
+/// runtime is how a container in an inspecting mode ended up with an address it
+/// could not resolve — DNS failed before any policy could speak, and the mode
+/// that reads TLS looked like an outage.
+pub fn egress_proxy_url_for(mode: &str) -> String {
+    if crate::runtime::http_runner::runtime_for(mode) == "openshell" {
+        openshell_proxy_url()
+    } else {
+        docker_egress_proxy_url()
     }
 }
 
@@ -578,6 +621,81 @@ pub fn egress_environment(proxy: &str) -> Vec<(String, String)> {
     values
 }
 
+/// Where a sandbox finds the node CA when its egress is inspected.
+///
+/// The runner mounts the deployment's CA here, read-only, and only for a
+/// sandbox in a TLS-reading mode. Nothing is baked into an image: a CA in a
+/// registry is a CA trusted by every sandbox built from it, whether or not that
+/// sandbox is supposed to be inspected.
+pub const EGRESS_CA_IN_SANDBOX: &str = "/run/secrets/egress-ca.crt";
+
+/// Where a sandbox finds the bundle of public roots plus the node CA.
+///
+/// A client that replaces its trust store instead of adding to it needs the
+/// public roots too: with only the CA file in `SSL_CERT_FILE` every host whose
+/// TLS the proxy leaves alone fails verification. The runner mounts both files
+/// for every mode that goes through the proxy.
+pub const CA_BUNDLE_IN_SANDBOX: &str = "/run/secrets/nestbox-ca-bundle.crt";
+
+/// The trust variables that make a sandbox accept the node CA.
+///
+/// `NODE_EXTRA_CA_CERTS` adds to Node's store, so it gets the CA file alone: it
+/// is the one variable that cannot break an uninspected host. The others replace
+/// the bundle for their client and therefore get the combined bundle (public
+/// roots and the node CA). They are set for every mode that uses the proxy, not
+/// only for the ones that read TLS, because a container cannot gain a mount
+/// after it was created: switching an existing sandbox to `transparent` must
+/// work without a recreate.
+pub fn tls_trust_environment(ca_path: &str) -> Vec<(String, String)> {
+    let mut values = vec![("NODE_EXTRA_CA_CERTS".to_string(), ca_path.to_string())];
+    for key in [
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "GIT_SSL_CAINFO",
+        "AWS_CA_BUNDLE",
+    ] {
+        values.push((key.to_string(), CA_BUNDLE_IN_SANDBOX.to_string()));
+    }
+    values
+}
+
+/// The proxy variables for a mode, given the proxy the sandbox will actually
+/// talk to.
+///
+/// `direct` with no exit has none: the sandbox reaches the internet on its own
+/// route, which is what "no proxy" means. `direct` with an exit points at that
+/// exit. The proxied modes point at the node's egress proxy and also tell the
+/// sandbox to trust the node CA, whether or not the mode reads TLS today: the
+/// trust files are mounted for the container's whole life, and a mode switch
+/// must not need a recreate.
+pub fn egress_environment_for(
+    proxy: &str,
+    mode: crate::domain::policy::EgressMode,
+    ca_path: &str,
+) -> Vec<(String, String)> {
+    let mut values = egress_environment(proxy);
+    if mode.uses_proxy() {
+        values.extend(tls_trust_environment(ca_path));
+    }
+    values.sort();
+    values
+}
+
+/// The proxy URL a sandbox is given, and whether it is the node's egress proxy.
+///
+/// Returned as one value so the environment and the runtime spec cannot
+/// disagree about which mode a container was created in.
+pub fn sandbox_proxy_url(
+    mode: crate::domain::policy::EgressMode,
+    exit: Option<&crate::domain::proxy::Proxy>,
+) -> Option<String> {
+    match mode {
+        crate::domain::policy::EgressMode::Direct => exit.map(|proxy| proxy.url()),
+        _ => Some(egress_proxy_url_for(mode.as_str())),
+    }
+}
+
 /// Create a sandbox: validate, place, persist, then ask the runtime.
 ///
 /// Order matters. The row is written first so a failed runtime call leaves a
@@ -588,8 +706,25 @@ pub async fn create(
     request: CreateSandbox,
 ) -> Result<Sandbox, ApiError> {
     require(principal, Permission::SandboxWrite)?;
+    let requested_mode = match request.egress_mode.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Some(
+            crate::domain::policy::EgressMode::parse(value)
+                .ok_or_else(|| ApiError::validation("egress_mode is direct, forward_proxy, transparent or hybrid."))?
+                .as_str()
+                .to_string(),
+        ),
+        None => None,
+    };
 
     let name = SandboxName::new(&request.name).map_err(ApiError::validation)?;
+    // The gateway is stricter than a container: it derives a workload name from
+    // the sandbox name, and refuses more than 19 characters. Saying that here is
+    // a clear 422 instead of a runtime rejection after the row was written.
+    if openshell_runtime() && name.as_str().chars().count() > 19 {
+        return Err(ApiError::validation(
+            "An OpenShell sandbox name is at most 19 characters; the gateway derives its workload name from it.",
+        ));
+    }
 
     // Normalise before anything is stored, so the spec holds exactly what the
     // runtime was asked for and a later restart cannot reinterpret it.
@@ -599,6 +734,22 @@ pub async fn create(
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
+
+    // The name is the runtime's name too (container, agent home, SSH alias), so it is unique
+    // across the installation: another data center's sandbox with this name would collide on
+    // a shared node and be ambiguous to the dispatcher. Migration 0062.
+    let taken: bool = sqlx::query_scalar("SELECT nb_sandbox_name_taken($1, $2)")
+        .bind(name.as_str())
+        .bind(principal.environment_id)
+        .fetch_one(scope.connection())
+        .await
+        .map_err(|e| ApiError::from(crate::store::map_sqlx_error(e)))?;
+    if taken {
+        return Err(ApiError::conflict(
+            ErrorCode::SANDBOX_NAME_TAKEN,
+            "This name is used by another data center on this installation. Pick another name.",
+        ));
+    }
 
     // The image and command come from `agent_packs`, not from a `match`: an
     // unknown pack is a 404 and a disabled or misspelled one cannot silently
@@ -643,12 +794,29 @@ pub async fn create(
             })?,
         None => crate::store::postgres::nodes::local(&mut scope)
             .await
-            .map_err(ApiError::from)?,
+            .map_err(|error| match error {
+                crate::error::StoreError::NotFound => ApiError::not_found(
+                    ErrorCode::NODE_NOT_FOUND,
+                    "This data center has no node to run a sandbox on. Add a node first, or name one.",
+                ),
+                other => ApiError::from(other),
+            })?,
     };
     if !node.kind.is_operable() {
         return Err(ApiError::conflict(
             ErrorCode::NODE_RUNTIME_UNAVAILABLE,
             format!("Node '{}' has no runtime adapter yet.", node.name),
+        ));
+    }
+
+    // A GPU is handed out by the engine's container runtime, and a node whose
+    // runtime has none would accept the request and start a sandbox without the
+    // GPU it was promised. Refused here, before a row exists.
+    let gpu_count = request.gpu_count.unwrap_or(0);
+    if gpu_count > 0 && !node.container_gpu {
+        return Err(ApiError::conflict(
+            ErrorCode::CONFLICT,
+            "This node cannot hand GPUs to containers.",
         ));
     }
 
@@ -670,7 +838,12 @@ pub async fn create(
     // Recorded in the spec as well as passed in the environment: "what was this
     // sandbox told" has to be answerable from the row after the fact, not
     // reconstructed from a later deploy's configuration.
-    let egress_proxy = egress_proxy_url();
+    // Per sandbox, not per deploy: the mode the caller asked for decides the
+    // runtime, and the runtime decides which address can be resolved (see
+    // `egress_proxy_url_for`).
+    let egress_proxy = egress_proxy_url_for(
+        requested_mode.as_deref().unwrap_or("forward_proxy"),
+    );
 
     let login = request.login.clone().filter(|value| !value.is_empty());
     if let Some(mode) = login.as_deref() {
@@ -683,15 +856,24 @@ pub async fn create(
             ));
         }
     }
-    let spec = serde_json::json!({
+    // A custom command and the GPU count belong in the spec for the same reason as
+    // the limits: a recreate builds the container from the row, not from the
+    // request that made it.
+    let mut spec = serde_json::json!({
         "pack_key": request.pack_key,
         "memory_limit": memory_limit,
         "cpu_limit": request.cpu_limit,
         "pids_limit": request.pids_limit,
+        "gpu_count": gpu_count,
         "node": node.name,
         "egress_proxy": &egress_proxy,
         "login": login.as_deref().unwrap_or("gateway"),
     });
+    if !request.command.is_empty() {
+        if let Some(object) = spec.as_object_mut() {
+            object.insert("command".to_string(), serde_json::json!(&command));
+        }
+    }
 
     // A helper created without a lead joins the node's only agent. Done before the
     // lead is checked, so an automatic choice meets the same rules as a named one.
@@ -722,19 +904,16 @@ pub async fn create(
             image_digest: request.image_digest.as_deref(),
             spec: &spec,
             parent_id,
+            owner_user_id: Some(principal.user_id),
         },
     )
     .await
     .map_err(ApiError::from)?;
 
     // The creator owns the sandbox: they manage it from start to end, and other users
-    // (not admins) do not see it.
-    sqlx::query("UPDATE sandboxes SET owner_user_id = $1 WHERE id = $2")
-        .bind(principal.user_id)
-        .bind(sandbox.id)
-        .execute(scope.connection())
-        .await
-        .map_err(|error| ApiError::from(StoreError::Database(error)))?;
+    // (not admins) do not see it. It is written by the insert above, so the row is never
+    // unowned — a member's own sandbox has to pass the row-level policy, and that policy
+    // lets them write only what is theirs (migration 0090).
 
     // Every sandbox gets its supervisor row in the same transaction, so there is
     // no moment in which a running sandbox has no one watching it. On OpenShell
@@ -754,10 +933,17 @@ pub async fn create(
     // request cannot name a mount source: the only source is a persistent root's
     // stored host path. Read inside this transaction so a row written by the same
     // operation is visible.
-    // A Claude Code sandbox gets a persistent home for its state: the settings and the
-    // login the user makes themselves (no API key) live there, so they survive the
-    // sandbox being recreated, which a mount change requires.
-    if sandbox.pack_key == "claude-code" {
+    // A sandbox whose pack has switchable agents gets a persistent home for their
+    // state: the login the user makes themselves, the settings, the agent config.
+    // It lives on a persistent root, so it survives the sandbox being recreated,
+    // which a mount change requires — and a recreate would otherwise sign the user
+    // out of every agent.
+    let has_switchable_agents =
+        !crate::store::postgres::agent_auth::pack_agents(&mut scope, &sandbox.pack_key)
+            .await
+            .map_err(ApiError::from)?
+            .is_empty();
+    if has_switchable_agents {
         let slug = format!("home-{}", sandbox.name);
         if let Ok(valid) = crate::domain::persist::RootSlug::new(&slug) {
             let host_path = crate::domain::persist::host_path(
@@ -831,38 +1017,14 @@ pub async fn create(
     policy_service::apply_safe_defaults(ctx, principal.environment_id, sandbox.id).await;
 
     // Signing in with an own account needs the identity hosts of the agent's vendor,
-    // which the default policy rightly does not allow. They are written as ordinary rules
-    // of this sandbox, so they are visible and removable like any other.
-    if sandbox.spec.get("login").and_then(|v| v.as_str()) == Some("own_account") {
-        for host in own_login_hosts(&sandbox.pack_key) {
-            let rule = crate::domain::policy::NetworkRule {
-                id: Uuid::nil(),
-                environment_id: principal.environment_id,
-                policy_id: None,
-                sandbox_id: Some(sandbox.id),
-                name: format!("Sign-in: {host}"),
-                action: crate::domain::policy::RuleAction::Allow,
-                host: (*host).to_string(),
-                port: Some(443),
-                protocol: crate::domain::policy::RuleProtocol::Rest,
-                methods: vec![],
-                binaries: vec![],
-                matchers: crate::domain::policy::matchers_from_flat(
-                    host,
-                    Some(443),
-                    crate::domain::policy::RuleProtocol::Rest,
-                    &[],
-                    &[],
-                ),
-                enforcement: crate::domain::policy::Enforcement::Enforced,
-                priority: 100,
-                enabled: true,
-                version: 1,
-            };
-            if let Err(error) = policy_service::create_rule(ctx, principal, rule).await {
-                tracing::warn!(sandbox = %sandbox.name, host, code = error.code.0, "could not allow a sign-in host");
-            }
-        }
+    // which the default policy rightly does not allow. The rules are derived from the
+    // agents' modes in one place (B02), so a mode switch and a create cannot disagree
+    // about which hosts are open.
+    if let Err(error) =
+        crate::services::agent_auth_service::sync_login_rules(ctx, principal.environment_id, sandbox.id)
+            .await
+    {
+        tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "could not write the sign-in rules");
     }
 
     // Now ask the runtime. A failure here is recorded on the row, so the console
@@ -872,18 +1034,15 @@ pub async fn create(
     // locator at this moment and never stored (ADR 0005), so recreating the
     // sandbox picks up a rotated key without an edit here.
     let mut environment = if pack_needs_inference(&sandbox.pack_key) {
-        match crate::services::provider_service::environment_for_pack(
+        match crate::services::provider_service::environment_for_sandbox(
             ctx,
             principal.environment_id,
             &sandbox.pack_key,
+            &sandbox.name,
         )
         .await
         {
-            Ok(values) => {
-                let mut values: BTreeMap<String, String> = values.into_iter().collect();
-                apply_login_choice(&mut values, sandbox.spec.get("login").and_then(|v| v.as_str()));
-                values.into_iter().collect()
-            }
+            Ok(values) => values.into_iter().collect(),
             Err(error) => {
                 tracing::warn!(
                     code = error.code.0,
@@ -896,12 +1055,50 @@ pub async fn create(
         Vec::new()
     };
 
-    // The proxy every sandbox is told about. Without it the sandbox is isolated
-    // but blind — no tool can resolve an address, because the sandbox network
-    // answers no external name. With it, each request still needs a rule: the
-    // environment is a convenience for tools, not a permission.
-    environment.extend(egress_environment(&egress_proxy));
+    // The proxy every sandbox is told about, plus the trust files. Without the
+    // proxy the sandbox is isolated but blind — no tool can resolve an address,
+    // because the sandbox network answers no external name. With it, each request
+    // still needs a rule: the environment is a convenience for tools, not a
+    // permission. The trust variables are set even though a new sandbox starts in
+    // `forward_proxy`, because a switch to a TLS-reading mode must not need a
+    // rebuild and a container cannot gain a mount afterwards.
+    environment.extend(egress_environment_for(
+        &egress_proxy,
+        crate::domain::policy::EgressMode::ForwardProxy,
+        EGRESS_CA_IN_SANDBOX,
+    ));
     add_inference_bypass_vec(&mut environment);
+    // The hub and the media server sit on the runtime network. Sent through the
+    // egress proxy they are an external destination and are denied, which an
+    // agent sees as "hub error".
+    add_env_url_bypass_vec(&mut environment, "NESTBOX_MCP_URL");
+    add_env_url_bypass_vec(&mut environment, "NESTBOX_MEDIA_MCP_URL");
+
+    // Write the mode down before the container exists, so the stored row and the
+    // container cannot disagree about what the proxy may read — the same rule the
+    // recipe path follows. The runtime and the proxy address were already chosen
+    // from this mode; leaving the row at the default made a `transparent` sandbox
+    // a tunnel, with nothing in the console saying which of the two was true.
+    if let Some(requested) = requested_mode.as_deref() {
+        let mode = crate::domain::policy::EgressMode::parse(requested).ok_or_else(|| {
+            ApiError::validation("egress_mode is direct, forward_proxy, transparent or hybrid.")
+        })?;
+        let mut mode_scope = TenantScope::begin_for(&ctx.pool, principal)
+            .await
+            .map_err(ApiError::from)?;
+        crate::store::postgres::policies::set_egress_mode(
+            &mut mode_scope,
+            sandbox.id,
+            mode,
+            None,
+            true,
+            None,
+            None,
+        )
+        .await
+        .map_err(ApiError::from)?;
+        mode_scope.commit().await.map_err(ApiError::from)?;
+    }
 
     let runtime_spec = SandboxSpec {
         name: sandbox.name.clone(),
@@ -914,7 +1111,14 @@ pub async fn create(
         cpu_limit: request.cpu_limit,
         pids_limit: request.pids_limit,
         mounts,
-        gpu_count: 0,
+        gpu_count,
+        // The sandbox starts in `forward_proxy`; the *runtime* follows the mode the
+        // caller asked for (see `CreateSandbox::egress_mode`). A mode change later
+        // is applied live and cannot move a sandbox between runtimes.
+        egress_mode: requested_mode.unwrap_or_else(|| "forward_proxy".to_string()),
+        node_id: Some(node.id),
+        memory_reservation: None,
+        cpu_shares: None,
     };
 
     let configured_environment: BTreeMap<String, String> =
@@ -924,10 +1128,22 @@ pub async fn create(
             // The agent starts already connected: its own config files are written
             // before anyone opens a shell. Best effort; a failure is logged and the
             // environment still carries the same facts.
-            let servers = mcp_configs(ctx, principal, sandbox.id, &sandbox.name).await;
-            apply_agent_files(ctx, &sandbox.name, &sandbox.pack_key, &configured_environment, &servers).await;
+            // A sandbox with a desktop gets its browser as an MCP server before
+            // the agent's files are written, so the agent starts knowing it.
+            if sandbox.pack_key == "desktop" || sandbox.image.contains("desktop") {
+                if let Err(error) = crate::services::mcp_service::attach(ctx, principal, sandbox.id, "chrome-browser", true).await {
+                    tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "could not attach the browser MCP");
+                }
+                // The browser drives pages; the desktop server drives the whole screen, every
+                // monitor, the windows and the input. A desktop sandbox gets both, so an agent
+                // never has to discover that half of its workspace is missing (U12).
+                if let Err(error) = crate::services::mcp_service::attach(ctx, principal, sandbox.id, "desktop-control", true).await {
+                    tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "could not attach the desktop MCP");
+                }
+            }
             // An agent starts with the Nestbox MCP hub attached when the hub is
             // deployed (the same condition that put its address in the environment).
+            // Attached before the files are written, so the hub is in them.
             if configured_environment.contains_key("NESTBOX_MCP_URL") {
                 if let Err(error) = crate::services::mcp_service::attach(ctx, principal, sandbox.id, "nestbox-hub", true).await {
                     tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "could not attach the MCP hub");
@@ -943,6 +1159,14 @@ pub async fn create(
                 health,
             )
             .await?;
+            // After the row says `running`: the agent files are written into a
+            // running container, and `write_agent_files` refuses to guess.
+            if let Err(error) = write_agent_files(ctx, principal.environment_id, sandbox.id).await {
+                tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "agent files not written after create");
+            }
+            // The granted models are made ready in the background: the answer to a
+            // create must not wait for a model load on an expensive machine.
+            spawn_model_readiness(ctx, principal.environment_id, sandbox.id);
             Ok(updated)
         }
         Err(error) => {
@@ -959,6 +1183,24 @@ pub async fn create(
             Ok(failed)
         }
     }
+}
+
+/// Make the sandbox's granted models ready in the background.
+///
+/// Spawned rather than awaited: loading a local model takes minutes, and a create,
+/// a recreate or a start has to answer while it happens. A failure is logged and
+/// nothing else: the sandbox is already running, and refusing it over a warm-up
+/// would trade a working sandbox for a tidy one.
+fn spawn_model_readiness(ctx: &ServiceContext, environment_id: Uuid, sandbox_id: Uuid) {
+    let ctx = ctx.clone();
+    tokio::spawn(async move {
+        if let Err(error) =
+            crate::services::model_readiness_service::ensure_ready_for_sandbox(&ctx, environment_id, sandbox_id)
+                .await
+        {
+            tracing::warn!(sandbox = %sandbox_id, code = error.code.0, "models not made ready");
+        }
+    });
 }
 
 /// Run a lifecycle action.
@@ -1006,7 +1248,7 @@ pub async fn act(
     match outcome {
         Ok(facts) => {
             let health = health_from_runtime(&facts);
-            set_status(
+            let settled = set_status(
                 ctx,
                 principal,
                 id,
@@ -1014,7 +1256,13 @@ pub async fn act(
                 action.settled(),
                 health,
             )
-            .await
+            .await?;
+            // A started sandbox asks for its granted models the moment it is used;
+            // warming them now is what keeps the first request from waiting.
+            if action == LifecycleAction::Start {
+                spawn_model_readiness(ctx, principal.environment_id, id);
+            }
+            Ok(settled)
         }
         Err(error) => {
             tracing::error!(sandbox = %sandbox.name, action = action.as_str(), error = %error, "lifecycle action failed");
@@ -1361,6 +1609,111 @@ mod tests {
     }
 
     #[test]
+    fn direct_egress_has_no_proxy_variable_at_all() {
+        // "No proxy" has to mean no proxy variable: a leftover `HTTP_PROXY` is a
+        // sandbox that still goes through the thing the operator switched off.
+        let values = egress_environment_for(
+            DEFAULT_EGRESS_PROXY,
+            crate::domain::policy::EgressMode::Direct,
+            EGRESS_CA_IN_SANDBOX,
+        );
+        // The helper is only called when there is a proxy (a direct sandbox with
+        // an exit). With no exit the caller adds nothing at all.
+        assert!(values.iter().any(|(key, _)| key == "HTTP_PROXY"));
+        assert!(!values.iter().any(|(key, _)| key == "NODE_EXTRA_CA_CERTS"));
+    }
+
+    #[test]
+    fn only_a_tls_reading_mode_trusts_the_node_ca() {
+        use crate::domain::policy::EgressMode;
+        // Every mode that goes through the proxy trusts the node CA, whatever it reads
+        // today: the two files are mounted when the container is created and cannot be
+        // added later, so a switch to a TLS-reading mode must not need a rebuild.
+        for mode in [
+            EgressMode::ForwardProxy,
+            EgressMode::Transparent,
+            EgressMode::Hybrid,
+            EgressMode::OffAllowAll,
+        ] {
+            let values = egress_environment_for(DEFAULT_EGRESS_PROXY, mode, EGRESS_CA_IN_SANDBOX);
+            let value = |key: &str| {
+                values
+                    .iter()
+                    .find(|(name, _)| name == key)
+                    .map(|(_, value)| value.as_str())
+            };
+            // Node adds the CA alone; a client that replaces its store needs the
+            // public roots as well, or every uninspected host fails to verify.
+            assert_eq!(
+                value("NODE_EXTRA_CA_CERTS"),
+                Some("/run/secrets/egress-ca.crt"),
+                "{mode:?}"
+            );
+            assert_eq!(
+                value("SSL_CERT_FILE"),
+                Some("/run/secrets/nestbox-ca-bundle.crt"),
+                "{mode:?}"
+            );
+            for key in ["REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "AWS_CA_BUNDLE"] {
+                assert_eq!(value(key), Some("/run/secrets/nestbox-ca-bundle.crt"), "{mode:?} {key}");
+            }
+        }
+        // The constant and the mount point are one fact.
+        assert_eq!(EGRESS_CA_IN_SANDBOX, "/run/secrets/egress-ca.crt");
+        assert_eq!(CA_BUNDLE_IN_SANDBOX, "/run/secrets/nestbox-ca-bundle.crt");
+    }
+
+    #[test]
+    fn direct_trusts_no_certificate_at_all() {
+        // Nothing of ours is in the path, so nothing of ours is trusted.
+        use crate::domain::policy::EgressMode;
+        let values = egress_environment_for(DEFAULT_EGRESS_PROXY, EgressMode::Direct, EGRESS_CA_IN_SANDBOX);
+        for key in [
+            "NODE_EXTRA_CA_CERTS",
+            "SSL_CERT_FILE",
+            "REQUESTS_CA_BUNDLE",
+            "CURL_CA_BUNDLE",
+            "GIT_SSL_CAINFO",
+            "AWS_CA_BUNDLE",
+        ] {
+            assert!(
+                !values.iter().any(|(name, _)| name == key),
+                "direct must not set {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_direct_sandbox_with_an_exit_is_told_to_use_that_exit() {
+        let exit = crate::domain::proxy::Proxy {
+            id: uuid::Uuid::nil(),
+            environment_id: uuid::Uuid::nil(),
+            name: "DE".into(),
+            kind: crate::domain::proxy::ProxyKind::Http,
+            host: "192.168.55.1".into(),
+            port: 22541,
+            country: Some("DE".into()),
+            provider: None,
+            username: None,
+            password_configured: false,
+            password_ref: None,
+            enabled: true,
+            version: 1,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let url = sandbox_proxy_url(crate::domain::policy::EgressMode::Direct, Some(&exit));
+        assert_eq!(url.as_deref(), Some("http://192.168.55.1:22541"));
+        // Without an exit, a direct sandbox is given no proxy.
+        assert_eq!(sandbox_proxy_url(crate::domain::policy::EgressMode::Direct, None), None);
+        // A proxied mode always points at the node's egress proxy.
+        assert_eq!(
+            sandbox_proxy_url(crate::domain::policy::EgressMode::ForwardProxy, Some(&exit)).as_deref(),
+            Some(DEFAULT_EGRESS_PROXY)
+        );
+    }
+
+    #[test]
     fn a_tool_is_not_told_to_reach_the_proxy_through_the_proxy() {
         let values = egress_environment("http://egress-proxy:3128");
         let bypass = values
@@ -1693,7 +2046,21 @@ pub async fn mcp_configs(
     sandbox_id: Uuid,
     sandbox_name: &str,
 ) -> Vec<crate::domain::agent_config::McpServerConfig> {
-    let mut scope = match TenantScope::begin_for(&ctx.pool, principal).await {
+    mcp_configs_in_environment(ctx, principal.environment_id, sandbox_id, sandbox_name).await
+}
+
+/// The same list for a caller that has the environment but no user.
+///
+/// A background write after a create or a recreate is not a request, so it has no
+/// principal; the tenant scope is what the read needs. Kept as one implementation
+/// so a request and a background write cannot list different servers.
+async fn mcp_configs_in_environment(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    sandbox_id: Uuid,
+    sandbox_name: &str,
+) -> Vec<crate::domain::agent_config::McpServerConfig> {
+    let mut scope = match TenantScope::begin(&ctx.pool, environment_id).await {
         Ok(scope) => scope,
         Err(error) => {
             tracing::warn!(sandbox = sandbox_name, error = %error, "could not read MCP attachments");
@@ -1741,6 +2108,22 @@ pub async fn reconfigure_agent(
     principal: &Principal,
     id: Uuid,
 ) -> Result<serde_json::Value, ApiError> {
+    reconfigure_pack(ctx, principal, id, None).await
+}
+
+/// Re-apply the agent configuration of a sandbox (a changed model, a sandbox from
+/// before the files existed).
+///
+/// The pack override is not needed any more: `write_agent_files` writes every pack
+/// the sandbox holds, so a recipe sandbox no longer has agents whose files wait for
+/// someone to name them.
+pub async fn reconfigure_pack(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    id: Uuid,
+    pack_override: Option<&str>,
+) -> Result<serde_json::Value, ApiError> {
+    let _ = pack_override;
     require(principal, Permission::SandboxWrite)?;
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
@@ -1753,15 +2136,7 @@ pub async fn reconfigure_agent(
             "Configuration is written into a running sandbox; start it first.",
         ));
     }
-    let mut environment: BTreeMap<String, String> =
-        crate::services::provider_service::environment_for_pack(ctx, principal.environment_id, &sandbox.pack_key)
-            .await?
-            .into_iter()
-            .collect();
-    apply_login_choice(&mut environment, sandbox.spec.get("login").and_then(|v| v.as_str()));
-    environment.extend(egress_environment(&egress_proxy_url()));
-    let servers = mcp_configs(ctx, principal, sandbox.id, &sandbox.name).await;
-    let written = apply_agent_files(ctx, &sandbox.name, &sandbox.pack_key, &environment, &servers).await;
+    let written = write_agent_files(ctx, principal.environment_id, sandbox.id).await?;
     Ok(serde_json::json!({ "files_written": written }))
 }
 
@@ -1797,6 +2172,18 @@ pub async fn recreate(
     }
     let defaults = pack_service::pack_defaults(&mut scope, &sandbox.pack_key, None).await?;
     let mounts = crate::services::persist_service::mount_specs_for_sandbox(&mut scope, sandbox.id).await?;
+    // The two answers the container has to be created with. Read here, inside
+    // the transaction, because a recreate is exactly the moment they take
+    // effect: Docker fixes a container's environment when it is created.
+    let egress_mode = crate::store::postgres::policies::egress_mode_for_sandbox(&mut scope, sandbox.id)
+        .await
+        .map_err(ApiError::from)?
+        .map(|setting| setting.mode)
+        .unwrap_or(crate::domain::policy::EgressMode::ForwardProxy);
+    let egress_exit = crate::store::postgres::proxies::for_sandbox(&mut scope, sandbox.id)
+        .await
+        .map_err(ApiError::from)?
+        .filter(|proxy| proxy.enabled);
     let memory_limit = sandbox
         .spec
         .get("memory_limit")
@@ -1805,6 +2192,34 @@ pub async fn recreate(
         .to_string();
     let cpu_limit = sandbox.spec.get("cpu_limit").and_then(|value| value.as_f64()).unwrap_or(1.0);
     let pids_limit = sandbox.spec.get("pids_limit").and_then(|value| value.as_i64()).unwrap_or(256);
+    // A recreate reproduces the container the row describes, not the pack's
+    // defaults: a custom command, the GPU count and the resource figures
+    // `set_resources` stored are part of what the operator chose.
+    let command: Vec<String> = sandbox
+        .spec
+        .get("command")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::to_string)
+                .collect::<Vec<String>>()
+        })
+        .filter(|items| !items.is_empty())
+        .unwrap_or(defaults.command);
+    let gpu_count = sandbox
+        .spec
+        .get("gpu_count")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0)
+        .min(u32::MAX as u64) as u32;
+    let memory_reservation = sandbox
+        .spec
+        .get("memory_reservation")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let cpu_shares = sandbox.spec.get("cpu_shares").and_then(|value| value.as_i64());
     crate::store::postgres::audit::record(
         &mut scope,
         crate::store::postgres::audit::NewAuditEvent {
@@ -1821,18 +2236,27 @@ pub async fn recreate(
     .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
 
-    let mut environment: Vec<(String, String)> = {
-        let mut values: BTreeMap<String, String> =
-            crate::services::provider_service::environment_for_pack(ctx, principal.environment_id, &sandbox.pack_key)
-                .await
-                .map(|values| values.into_iter().collect())
-                .unwrap_or_default();
-        apply_login_choice(&mut values, sandbox.spec.get("login").and_then(|v| v.as_str()));
-        values.into_iter().collect()
-    };
-    environment.extend(egress_environment(&egress_proxy_url()));
+    // The container keeps the gateway keys whatever an agent's sign-in mode is: the
+    // launcher strips them per mode (ADR 0054), so switching a mode never needs the
+    // container to be built again.
+    let mut environment: Vec<(String, String)> =
+        crate::services::provider_service::environment_for_sandbox(ctx, principal.environment_id, &sandbox.pack_key, &sandbox.name)
+            .await
+            .map(|values| values.into_iter().collect())
+            .unwrap_or_default();
+    if let Some(proxy) = sandbox_proxy_url(egress_mode, egress_exit.as_ref()) {
+        environment.extend(egress_environment_for(
+            &proxy,
+            egress_mode,
+            EGRESS_CA_IN_SANDBOX,
+        ));
+    }
     add_inference_bypass_vec(&mut environment);
-    let configured: BTreeMap<String, String> = environment.iter().cloned().collect();
+    // The hub and the media server sit on the runtime network. Sent through the
+    // egress proxy they are an external destination and are denied, which an
+    // agent sees as "hub error".
+    add_env_url_bypass_vec(&mut environment, "NESTBOX_MCP_URL");
+    add_env_url_bypass_vec(&mut environment, "NESTBOX_MEDIA_MCP_URL");
 
     if let Err(error) = ctx.runtime.remove(&sandbox.name).await {
         tracing::warn!(sandbox = %sandbox.name, error = %error, "remove before recreate failed; continuing");
@@ -1840,7 +2264,7 @@ pub async fn recreate(
     let spec = SandboxSpec {
         name: sandbox.name.clone(),
         image: sandbox.image.clone(),
-        command: defaults.command,
+        command,
         environment,
         pack_key: sandbox.pack_key.clone(),
         tool_profile: String::new(),
@@ -1848,13 +2272,21 @@ pub async fn recreate(
         cpu_limit,
         pids_limit,
         mounts: mounts.clone(),
-        gpu_count: 0,
+        gpu_count,
+        egress_mode: egress_mode.as_str().to_string(),
+        node_id: Some(sandbox.node_id),
+        memory_reservation,
+        cpu_shares,
     };
     match ctx.runtime.create(spec).await {
         Ok(facts) => {
-            let servers = mcp_configs(ctx, principal, sandbox.id, &sandbox.name).await;
-            apply_agent_files(ctx, &sandbox.name, &sandbox.pack_key, &configured, &servers).await;
             let _ = set_status(ctx, principal, sandbox.id, sandbox.version, SandboxStatus::Running, health_from_runtime(&facts)).await;
+            // The row has to say `running` first: the files are written into the
+            // container, and `write_agent_files` refuses to guess when it is gone.
+            if let Err(error) = write_agent_files(ctx, principal.environment_id, sandbox.id).await {
+                tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "agent files not written after recreate");
+            }
+            spawn_model_readiness(ctx, principal.environment_id, sandbox.id);
             Ok(serde_json::json!({ "recreated": true, "mounts": mounts.len() }))
         }
         Err(error) => {
@@ -1939,4 +2371,226 @@ pub async fn visible_ids(
         .ok()?;
     let _ = scope.commit().await;
     Some(ids.into_iter().collect())
+}
+
+
+// ---------------------------------------------------------------------------
+// Bringing back sandboxes that crashed
+// ---------------------------------------------------------------------------
+
+/// How long to wait before the next attempt on a sandbox, by how many failed:
+/// a minute, two, four ... capped at half an hour.
+fn heal_delay(attempts: u32) -> std::time::Duration {
+    std::time::Duration::from_secs((60u64 << attempts.min(5)).min(1800))
+}
+
+/// After this many failed attempts a sandbox is left for an operator.
+const HEAL_MAX_ATTEMPTS: u32 = 6;
+
+type HealState = std::collections::HashMap<String, (u32, std::time::Instant)>;
+
+fn heal_state() -> &'static std::sync::Mutex<HealState> {
+    static STATE: std::sync::OnceLock<std::sync::Mutex<HealState>> = std::sync::OnceLock::new();
+    STATE.get_or_init(|| std::sync::Mutex::new(HealState::new()))
+}
+
+/// Restart gateway sandboxes that died while they were meant to run.
+///
+/// "Meant to run" is the stored status: a sandbox an operator stopped is `stopped`
+/// and is left alone, one that is `running` in the database but not on the
+/// runtime crashed. OpenShell freezes a workload whose supervisor lost the gateway
+/// and ends it when the recovery deadline passes (phase `Error`); nothing used to
+/// bring it back. Each attempt is audited, and repeated failures back off.
+pub async fn heal_crashed(ctx: &ServiceContext) -> Result<u64, ApiError> {
+    if !openshell_runtime() {
+        return Ok(0);
+    }
+    let facts = ctx.runtime.list().await.map_err(|error| {
+        ApiError::new(
+            axum::http::StatusCode::BAD_GATEWAY,
+            ErrorCode::NODE_RUNTIME_UNAVAILABLE,
+            error.to_string(),
+        )
+    })?;
+    let crashed: std::collections::HashSet<String> = facts
+        .iter()
+        .filter(|fact| fact.container_name.starts_with("openshell-default--") && fact.status != "running")
+        .map(|fact| fact.name.clone())
+        .collect();
+    let running: std::collections::HashSet<String> = facts
+        .iter()
+        .filter(|fact| fact.status == "running")
+        .map(|fact| fact.name.clone())
+        .collect();
+    // A sandbox that runs again has paid its debt.
+    if let Ok(mut state) = heal_state().lock() {
+        state.retain(|name, _| !running.contains(name));
+    }
+    if crashed.is_empty() {
+        return Ok(0);
+    }
+
+    let environments: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM environments")
+        .fetch_all(&ctx.pool)
+        .await
+        .map_err(|error| ApiError::from(crate::error::StoreError::Database(error)))?;
+    let mut healed = 0;
+    for environment_id in environments {
+        let mut scope = TenantScope::begin(&ctx.pool, environment_id).await.map_err(ApiError::from)?;
+        // `failed` is included: when a workload dies the reconcile marks the sandbox
+        // failed, and it is exactly the one to bring back. A sandbox that never
+        // came up also lands here, which is why attempts are capped below.
+        let wanted: Vec<(Uuid, String)> = sqlx::query_as(
+            "SELECT id, name FROM sandboxes WHERE status::text IN ('running', 'failed')",
+        )
+        .fetch_all(scope.connection())
+        .await
+        .map_err(|error| ApiError::from(crate::error::StoreError::Database(error)))?;
+        for (sandbox_id, name) in wanted.into_iter().filter(|(_, name)| crashed.contains(name)) {
+            let due = match heal_state().lock() {
+                Ok(state) => state
+                    .get(&name)
+                    .map(|(attempts, last)| {
+                        *attempts < HEAL_MAX_ATTEMPTS && last.elapsed() >= heal_delay(*attempts)
+                    })
+                    .unwrap_or(true),
+                Err(_) => false,
+            };
+            if !due {
+                continue;
+            }
+            let attempts = heal_state()
+                .lock()
+                .map(|mut state| {
+                    let entry = state.entry(name.clone()).or_insert((0, std::time::Instant::now()));
+                    entry.0 += 1;
+                    entry.1 = std::time::Instant::now();
+                    entry.0
+                })
+                .unwrap_or(1);
+            let outcome = ctx.runtime.restart(&name).await;
+            tracing::warn!(sandbox = %name, attempt = attempts, ok = outcome.is_ok(), "restarting a sandbox that crashed");
+            let detail = serde_json::json!({
+                "attempt": attempts,
+                "result": match &outcome { Ok(_) => "restarted".to_string(), Err(error) => error.to_string() },
+            });
+            let _ = crate::store::postgres::audit::record(
+                &mut scope,
+                crate::store::postgres::audit::NewAuditEvent {
+                    actor_id: None,
+                    actor_label: "nestbox",
+                    kind: "sandbox.healed",
+                    subject_type: Some("sandbox"),
+                    subject_id: Some(sandbox_id),
+                    detail: &detail,
+                    request_id: None,
+                },
+            )
+            .await;
+            if outcome.is_ok() {
+                healed += 1;
+                // It runs again; the stored state should say so.
+                let _ = sqlx::query(
+                    "UPDATE sandboxes SET status = 'running', version = version + 1, updated_at = now() \
+                      WHERE id = $1 AND status::text = 'failed'",
+                )
+                .bind(sandbox_id)
+                .execute(scope.connection())
+                .await;
+            }
+        }
+        scope.commit().await.map_err(ApiError::from)?;
+    }
+    Ok(healed)
+}
+
+#[cfg(test)]
+mod heal_tests {
+    use super::*;
+
+    #[test]
+    fn the_wait_doubles_and_is_capped() {
+        assert_eq!(heal_delay(0).as_secs(), 60);
+        assert_eq!(heal_delay(1).as_secs(), 120);
+        assert_eq!(heal_delay(3).as_secs(), 480);
+        assert_eq!(heal_delay(5).as_secs(), 1800);
+        assert_eq!(heal_delay(40).as_secs(), 1800);
+    }
+}
+
+/// Rebuild a sandbox's agent configuration from the current sign-in modes.
+///
+/// This is the one place that writes agent files: the pack's config files with
+/// the gateway settings of the gateway agents only, the MCP servers, the egress
+/// proxy and trust variables, and the launcher that reads each agent's mode
+/// (ADR 0054). Nothing restarts, so the caller decides about running agents.
+///
+/// It needs the environment and the sandbox, not a request: a create, a recreate
+/// and a mode switch all end here, and none of them may write a different set of
+/// files. A sandbox that is not running is not an error — its container is gone
+/// and the files are written the next time it runs.
+pub async fn write_agent_files(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    sandbox_id: Uuid,
+) -> Result<usize, ApiError> {
+    let mut scope = TenantScope::begin(&ctx.pool, environment_id)
+        .await
+        .map_err(ApiError::from)?;
+    let sandbox = store::get(&mut scope, sandbox_id).await.map_err(ApiError::from)?;
+    if sandbox.status != SandboxStatus::Running {
+        scope.commit().await.map_err(ApiError::from)?;
+        return Ok(0);
+    }
+    // The mode is read here so the launcher's proxy variables match the container
+    // the sandbox actually runs in, not the mode it was created with.
+    let egress_mode = crate::store::postgres::policies::egress_mode_for_sandbox(&mut scope, sandbox_id)
+        .await
+        .map_err(ApiError::from)?
+        .map(|setting| setting.mode)
+        .unwrap_or(crate::domain::policy::EgressMode::ForwardProxy);
+    // A recipe sandbox holds more than one agent: its own pack and one per recipe
+    // agent. Every pack is written, else the second agent keeps a stale config.
+    let mut packs = vec![sandbox.pack_key.clone()];
+    for pack in crate::store::postgres::agent_auth::sandbox_agent_packs(&mut scope, sandbox_id)
+        .await
+        .map_err(ApiError::from)?
+    {
+        if !packs.contains(&pack) {
+            packs.push(pack);
+        }
+    }
+    scope.commit().await.map_err(ApiError::from)?;
+
+    let mut environment: BTreeMap<String, String> =
+        crate::services::provider_service::environment_for_sandbox(
+            ctx,
+            environment_id,
+            &sandbox.pack_key,
+            &sandbox.name,
+        )
+        .await?;
+    let modes = crate::services::agent_auth_service::modes_for(ctx, environment_id, sandbox_id).await?;
+    crate::domain::agent_auth::strip_for_modes(&mut environment, &modes);
+    let egress_env: BTreeMap<String, String> = if egress_mode.uses_proxy() {
+        egress_environment(&egress_proxy_url()).into_iter().collect()
+    } else {
+        BTreeMap::new()
+    };
+    environment.extend(egress_env.clone());
+
+    let servers = mcp_configs_in_environment(ctx, environment_id, sandbox_id, &sandbox.name).await;
+    let mut written = 0;
+    for pack in &packs {
+        written += apply_agent_files(ctx, &sandbox.name, pack, &environment, &servers).await;
+    }
+    // The launcher reads the mode files; without it a subscription agent would still
+    // see the gateway key in its environment. A sandbox without a switchable agent
+    // (a plain ubuntu-dev, a tool image) has nothing to launch, so nothing is written.
+    if !modes.is_empty() {
+    if let Err(error) = crate::services::agent_launch_service::install(ctx, &sandbox.name, &modes, &egress_env).await {
+        tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "agent launcher not installed");
+    }
+    }
+    Ok(written)
 }

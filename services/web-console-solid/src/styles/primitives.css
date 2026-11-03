@@ -1,0 +1,124 @@
+/* Design primitives (package F02): icon button, stat tile, gauge, sparkline, key hint, toast,
+ * tree, select table, wizard. Colours only from tokens.css; square corners; 1 px lines. */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mono, .figure, .num { font-variant-numeric: tabular-nums; }
+.num { text-align: right; font-family: var(--mono); }
+
+/* IconButton */
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: transparent; color: var(--fg-muted); border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; transition: opacity 120ms ease-out, transform 120ms ease-out; }
+.icon-button:hover:not(:disabled) { color: var(--fg); background: var(--bg-hover); border-color: var(--border); }
+.icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.icon-button.active { color: var(--accent); border-color: var(--border-strong); }
+.icon-button.danger:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
+.icon-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* StatTile */
+.stat-tile { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3) var(--space-4); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--fg); text-align: left; font: inherit; }
+.stat-tile.clickable { cursor: pointer; }
+.stat-tile.clickable:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.stat-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.stat-tile .figure { font: 700 1.8rem var(--mono); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.stat-tile .figure small { font-size: 0.8rem; font-weight: 400; color: var(--fg-muted); margin-left: var(--space-1); }
+.stat-tile[data-tone='ok'] .figure { color: var(--ok); }
+.stat-tile[data-tone='warn'] .figure { color: var(--warn); }
+.stat-tile[data-tone='bad'] .figure { color: var(--bad); }
+.stat-tile[data-tone='info'] .figure { color: var(--info); }
+
+/* Gauge */
+.gauge { display: inline-flex; flex-direction: column; align-items: center; margin: 0; gap: var(--space-1); }
+.gauge figcaption { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.gauge-value { font: 600 0.8rem var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.gauge-label { font-size: 0.72rem; color: var(--fg-muted); }
+.gauge-track { fill: none; stroke: var(--border); stroke-width: 5; stroke-linecap: butt; }
+.gauge-fill { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: butt; }
+.gauge-fill.hot { stroke: var(--bad); }
+.gauge-percent { fill: var(--fg); font: 700 13px var(--mono); }
+
+/* Sparkline */
+.sparkline { color: var(--accent); display: block; }
+.sparkline[data-tone='bad'] { color: var(--bad); }
+.sparkline[data-tone='warn'] { color: var(--warn); }
+.sparkline[data-tone='info'] { color: var(--info); }
+.sparkline[data-tone='muted'] { color: var(--fg-muted); }
+
+/* KeyHint */
+.key-hint { display: inline-flex; gap: 2px; }
+.key-hint kbd { font: 600 0.68rem var(--mono); padding: 1px 5px; color: var(--fg-muted); background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
+/* Toast */
+.toast-stack { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 200; display: flex; flex-direction: column; gap: var(--space-2); max-width: 360px; }
+.toast { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--bg-raised); border: 1px solid var(--border-strong); border-left: 3px solid var(--info); border-radius: var(--radius); animation: toast-in 120ms ease-out; }
+.toast[data-tone='ok'] { border-left-color: var(--ok); }
+.toast[data-tone='bad'] { border-left-color: var(--bad); }
+.toast-text { flex: 1; font-size: 0.85rem; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Tree */
+.tree { overflow: auto; font-size: 0.85rem; }
+.tree-row { display: flex; align-items: center; gap: var(--space-2); height: var(--row-height); padding-right: var(--space-2); cursor: pointer; color: var(--fg); white-space: nowrap; border-left: 2px solid transparent; }
+.tree-row:hover { background: var(--bg-hover); }
+.tree-row.selected { background: var(--accent-dim); border-left-color: var(--accent); }
+.tree-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tree-twisty { display: inline-flex; width: 14px; justify-content: center; color: var(--fg-muted); }
+.tree-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.tree-empty { padding: var(--space-3); }
+/* Status dots are the only round thing in the console (V03); everything else stays square. */
+.status-dot { width: 7px; height: 7px; flex: none; background: var(--fg-faint); border-radius: 50%; }
+.status-dot[data-status='ok'], .status-dot[data-status='online'], .status-dot[data-status='running'] { background: var(--ok); }
+.status-dot[data-status='warn'], .status-dot[data-status='degraded'], .status-dot[data-status='starting'] { background: var(--warn); }
+.status-dot[data-status='bad'], .status-dot[data-status='offline'], .status-dot[data-status='failed'], .status-dot[data-status='error'] { background: var(--bad); }
+
+/* Tabs (V08): the active tab carries a 2px lime underline; an optional count is muted mono.
+ * Selectors carry `button.` so they win over the legacy strip in app.css whatever the load order. */
+.tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  /* Many tabs (Summary … Processes): the strip scrolls instead of cutting the
+   * last one off at the content edge (seen in the smoke run). */
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tabs button.tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+.tabs button.tab.active { color: var(--fg); border-bottom: 2px solid var(--accent); }
+.tabs .tab-count { font: 400 0.72rem var(--mono); color: var(--fg-muted); }
+
+/* Alert card (V11): a refusal draws its own frame in --bad; the eyebrow names the refusal and
+ * the age, the line names sandbox, destination, channel and count. The frame and text colours
+ * are set here because dock.css paints every `.alert-card` as an ordinary raised card. */
+.alert-stack .alert-card { border: 1px solid var(--bad); }
+.alert-card .alert-eyebrow { color: var(--bad); }
+.alert-card .alert-line { margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--space-1); font-size: 0.85rem; }
+.alert-card .alert-line a { color: var(--fg); }
+
+/* SelectTable */
+.select-table-wrap { overflow: auto; border: 1px solid var(--border); }
+.select-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.select-table thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-raised); color: var(--fg-muted); font: 400 0.78rem var(--font); text-transform: none; letter-spacing: 0; text-align: left; padding: 0 var(--space-3); height: var(--row-height); border-bottom: 1px solid var(--border); }
+.select-table td { padding: 0 var(--space-3); height: var(--row-height); border-bottom: 1px solid var(--border); }
+.select-table tr.selected td { background: var(--accent-dim); }
+.select-table tr.clickable { cursor: pointer; }
+.select-table tbody tr:hover td { background: var(--bg-hover); }
+.select-table th.num, .select-table td.num { text-align: right; }
+.select-table .check { width: 32px; }
+.select-table .sort { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; padding: 0; }
+
+/* Wizard */
+.wizard { display: grid; grid-template-columns: 200px 1fr; gap: var(--space-5); }
+.wizard-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.wizard-steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--fg-faint); padding: var(--space-2) 0; border-left: 2px solid var(--border); padding-left: var(--space-3); }
+.wizard-steps li.done { color: var(--fg-muted); }
+.wizard-steps li[aria-current='step'] { color: var(--fg); border-left-color: var(--accent); font-weight: 700; }
+.wizard-num { font: 700 0.75rem var(--mono); }
+.wizard-main { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.wizard-footer { display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding-top: var(--space-3); }
+@media (max-width: 720px) { .wizard { grid-template-columns: 1fr; } .wizard-steps { flex-direction: row; flex-wrap: wrap; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-button, .toast { transition: none; animation: none; }
+}

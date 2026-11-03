@@ -69,6 +69,25 @@ export function exec(id, command, timeoutSeconds = 60) {
   });
 }
 
+// The terminal tabs this user keeps in the sandbox, and whether their shells are
+// still alive. The list lives on the server so a reload reopens the same
+// terminals on any machine, not whatever this browser last stored.
+export function terminalSessions(id) {
+  return request(`sandboxes/${id}/terminal-sessions`);
+}
+
+export function terminalTabs(id) {
+  return request(`sandboxes/${id}/terminal-tabs`);
+}
+
+// Replace the tab set. A tab that is absent is closed.
+export function saveTerminalTabs(id, tabs) {
+  return request(`sandboxes/${id}/terminal-tabs`, {
+    method: 'PUT',
+    body: { tabs: tabs.map((tab) => ({ tab_id: tab.id, title: tab.label })) },
+  });
+}
+
 // How to reach a sandbox from outside: the node's address and hostname, every
 // published port with its dial address, the SSH key state, ready-made commands.
 export function connect(id) {

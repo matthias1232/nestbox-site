@@ -60,9 +60,8 @@ pub async fn environments_for_user(
 ) -> Result<Vec<(Uuid, String, Role)>, StoreError> {
     let rows = sqlx::query(
         "SELECT e.id, e.name, s.role
-           FROM user_scopes s
+           FROM nb_user_environments($1) s
            JOIN environments e ON e.id = s.environment_id
-          WHERE s.user_id = $1
           ORDER BY e.name",
     )
     .bind(user_id)
@@ -194,7 +193,7 @@ pub async fn role_in_environment(
     environment_id: Uuid,
 ) -> Result<Option<Role>, StoreError> {
     let row = sqlx::query(
-        "SELECT role FROM user_scopes WHERE user_id = $1 AND environment_id = $2",
+        "SELECT role FROM nb_user_environments($1) WHERE environment_id = $2",
     )
     .bind(user_id)
     .bind(environment_id)

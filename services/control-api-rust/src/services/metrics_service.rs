@@ -234,6 +234,66 @@ pub async fn processes(
         .map_err(runner_error)
 }
 
+/// The sandbox a desktop session may attach to, checked before the upgrade.
+///
+/// Watching a desktop is as revealing as a terminal but not as powerful as one:
+/// a viewer may drive the mouse and the keyboard, so driving needs
+/// `SandboxExec`. Only watching needs `SandboxRead`, and the caller cannot
+/// choose that on their own — `view_only` is requested, and the returned flag
+/// says whether the session really is view-only. A principal without
+/// `SandboxExec` is always view-only, even when the console asked for control.
+/// Returning the name rather than a ticket is enough: nothing here is counted
+/// or limited yet.
+pub async fn desktop_target(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+    view_only: bool,
+) -> Result<(String, bool), ApiError> {
+    if view_only {
+        require(principal, Permission::SandboxRead)?;
+    } else {
+        require(principal, Permission::SandboxExec)?;
+    }
+    let effective_view_only = view_only || !principal.can(Permission::SandboxExec);
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal).await.map_err(ApiError::from)?;
+    let sandbox = sandbox_store::get(&mut scope, sandbox_id).await.map_err(|error| match error {
+        StoreError::NotFound => ApiError::not_found(ErrorCode::SANDBOX_NOT_FOUND, "No such sandbox."),
+        other => ApiError::from(other),
+    })?;
+    scope.commit().await.map_err(ApiError::from)?;
+    if sandbox.status != crate::domain::sandbox::SandboxStatus::Running {
+        return Err(ApiError::conflict(
+            ErrorCode::SANDBOX_INVALID_STATE,
+            format!("A desktop needs a running sandbox; this one is '{}'.", sandbox.status.as_str()),
+        ));
+    }
+    Ok((sandbox.name, effective_view_only))
+}
+
+/// A live view of one sandbox, read through the runner.
+///
+/// The set of kinds is closed here: the kind becomes part of a runner URL, so
+/// only a name this function knows may pass.
+pub async fn live_view(
+    ctx: &ServiceContext,
+    principal: &Principal,
+    sandbox_id: Uuid,
+    kind: &str,
+) -> Result<serde_json::Value, ApiError> {
+    require(principal, Permission::SandboxRead)?;
+    if !["connections", "commands"].contains(&kind) {
+        return Err(ApiError::validation("Unknown live view."));
+    }
+    let mut scope = TenantScope::begin_for(&ctx.pool, principal).await.map_err(ApiError::from)?;
+    let sandbox = sandbox_store::get(&mut scope, sandbox_id).await.map_err(|error| match error {
+        StoreError::NotFound => ApiError::not_found(ErrorCode::SANDBOX_NOT_FOUND, "No such sandbox."),
+        other => ApiError::from(other),
+    })?;
+    scope.commit().await.map_err(ApiError::from)?;
+    ctx.runtime.live_view(&sandbox.name, kind).await.map_err(runner_error)
+}
+
 pub async fn process_action(
     ctx: &ServiceContext, principal: &Principal, sandbox_id: Uuid, pid: i64, action: String, nice: Option<i8>,
 ) -> Result<serde_json::Value, ApiError> {

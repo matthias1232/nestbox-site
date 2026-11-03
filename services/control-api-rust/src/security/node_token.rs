@@ -54,6 +54,23 @@ impl NodeTokenError {
 /// outside the secret directory and a file on which group or world has any
 /// permission bit — the same guard every other credential gets.
 pub fn verify(locator: &str, secret_dir: &Path, presented: &str) -> Result<(), NodeTokenError> {
+    // A node that joined over the overlay (ADR 0047) has no file on the control plane: it
+    // holds its token and the control plane holds the SHA-256 of it, written as
+    // `digest://<hex>`. The hash of a 256-bit random token is not a way back to the token.
+    if let Some(hex) = locator.strip_prefix("digest://") {
+        let presented = presented.trim();
+        if presented.is_empty() {
+            return Err(NodeTokenError::Missing);
+        }
+        let digest = Sha256::digest(presented.as_bytes());
+        let actual: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let expected = hex.trim().to_ascii_lowercase();
+        return if bool::from(actual.as_bytes().ct_eq(expected.as_bytes())) {
+            Ok(())
+        } else {
+            Err(NodeTokenError::Mismatch)
+        };
+    }
     let expected =
         secrets::resolve(locator, secret_dir).map_err(|_| NodeTokenError::NotConfigured)?;
     let presented = presented.trim();
@@ -75,6 +92,12 @@ pub fn matches(expected: &str, presented: &str) -> bool {
     let left = Sha256::digest(expected.trim().as_bytes());
     let right = Sha256::digest(presented.trim().as_bytes());
     left.ct_eq(&right).into()
+}
+
+/// The locator a joined node is stored under: `digest://` and the lower-case hex digest.
+pub fn hash_locator(token: &str) -> String {
+    let digest = Sha256::digest(token.trim().as_bytes());
+    format!("digest://{}", digest.iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
 #[cfg(test)]
@@ -152,5 +175,15 @@ mod tests {
         assert!(!matches("abc", "abcd"));
         assert!(!matches("", "abc"));
         assert!(matches(" abc ", "abc"));
+    }
+
+    #[test]
+    fn a_joined_node_is_verified_against_the_hash_of_its_token() {
+        let locator = hash_locator("a-long-random-node-token");
+        let dir = std::env::temp_dir();
+        assert!(verify(&locator, &dir, "a-long-random-node-token").is_ok());
+        assert!(verify(&locator, &dir, " a-long-random-node-token\n").is_ok());
+        assert_eq!(verify(&locator, &dir, "another"), Err(NodeTokenError::Mismatch));
+        assert_eq!(verify(&locator, &dir, ""), Err(NodeTokenError::Missing));
     }
 }

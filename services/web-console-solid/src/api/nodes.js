@@ -52,3 +52,13 @@ export function updateDisplay(id, displayName, description) {
 export function setEndpoint(id, body) {
   return request(`nodes/${id}/endpoint`, { method: 'PUT', body });
 }
+
+/** A one-time link that joins a machine to a site of this data center (ADR 0047). */
+export function joinToken(nodeName, siteId) {
+  return request('node-join-tokens', { method: 'POST', body: { node_name: nodeName, site_id: siteId } });
+}
+
+/** Remove a joined node that has nothing running on it. */
+export function removeJoined(id) {
+  return request(`nodes/${id}`, { method: 'DELETE' });
+}

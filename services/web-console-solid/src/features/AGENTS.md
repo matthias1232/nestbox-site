@@ -50,3 +50,20 @@ features/sandboxes/
 
 Create the folder, write its `AGENTS.md` first, then the hook, then the page.
 Add a row to this table and a route in `App.jsx`.
+
+## Multi-tenant and multi-node screens
+
+| Folder | Screen |
+|---|---|
+| `tenants/` | Data centers and sites, customers, the context switcher |
+| `images/` | Image registry and sync: the matrix and the assignments |
+| `moves/` | Move a sandbox to another node and back |
+| `hosting/` | Provider accounts and rented machines |
+| `users/AccessSection.jsx` | Share a sandbox with one person; invitations |
+| `nodes/JoinNode.jsx` | Add a node |
+
+| `workbox/` | the end-user view of one sandbox and the list of my sandboxes |
+
+`workbox` may import components from `features/sandboxes/` (`TerminalTab`, `DesktopTab`,
+`StackTopology`, `chats.js`): an explicit exception, because a second terminal and a second desktop
+would be a second truth.

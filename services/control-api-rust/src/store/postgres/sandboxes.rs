@@ -284,6 +284,11 @@ pub struct NewSandbox<'a> {
     pub spec: &'a serde_json::Value,
     /// The lead of the stack this sandbox joins, already checked by the service.
     pub parent_id: Option<Uuid>,
+    /// Who created it. Set in the statement that writes the row rather than in a
+    /// second one: a member's insert has to carry its owner to pass the
+    /// row-level policy (migration 0090), which only lets them write a sandbox
+    /// that is theirs or handed to them.
+    pub owner_user_id: Option<Uuid>,
 }
 
 /// Insert a sandbox and return it.
@@ -296,8 +301,8 @@ pub async fn insert(
         "WITH inserted AS (
             INSERT INTO sandboxes
                 (environment_id, cluster_id, gateway_id, node_id, name, pack_key,
-                 image, image_digest, spec, status, health, parent_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'unknown', $10)
+                 image, image_digest, spec, status, health, parent_id, owner_user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'unknown', $10, $11)
             RETURNING *
          )
          SELECT {SANDBOX_COLUMNS}
@@ -317,6 +322,7 @@ pub async fn insert(
         .bind(new.image_digest)
         .bind(new.spec)
         .bind(new.parent_id)
+        .bind(new.owner_user_id)
         .fetch_one(scope.connection())
         .await?;
 
@@ -602,4 +608,53 @@ pub async fn update_spec(
         return Err(StoreError::NotFound);
     }
     Ok(())
+}
+
+/// Set one of a sandbox's recording mutes (B11).
+///
+/// `bodies == false` sets `telemetry_mute_until` (nothing is stored); `bodies == true` sets
+/// `telemetry_mute_bodies_until` (flows are stored, bodies and chats are not). `None` clears it.
+pub async fn set_telemetry_mute(
+    scope: &mut TenantScope<'_>,
+    id: Uuid,
+    until: Option<DateTime<Utc>>,
+    bodies: bool,
+) -> Result<(), StoreError> {
+    let sql = if bodies {
+        "UPDATE sandboxes SET telemetry_mute_bodies_until = $3 WHERE environment_id = $1 AND id = $2"
+    } else {
+        "UPDATE sandboxes SET telemetry_mute_until = $3 WHERE environment_id = $1 AND id = $2"
+    };
+    let result = sqlx::query(sql)
+        .bind(scope.environment_id())
+        .bind(id)
+        .bind(until)
+        .execute(scope.connection())
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(StoreError::NotFound);
+    }
+    Ok(())
+}
+
+/// A sandbox's recording mutes: `(mute_until, mute_bodies_until)`; a missing sandbox reads as none.
+pub async fn telemetry_mute(
+    scope: &mut TenantScope<'_>,
+    id: Uuid,
+) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>), StoreError> {
+    let row = sqlx::query(
+        "SELECT telemetry_mute_until, telemetry_mute_bodies_until FROM sandboxes
+          WHERE environment_id = $1 AND id = $2",
+    )
+    .bind(scope.environment_id())
+    .bind(id)
+    .fetch_optional(scope.connection())
+    .await?;
+    match row {
+        Some(row) => Ok((
+            row.try_get("telemetry_mute_until")?,
+            row.try_get("telemetry_mute_bodies_until")?,
+        )),
+        None => Ok((None, None)),
+    }
 }

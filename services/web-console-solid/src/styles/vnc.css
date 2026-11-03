@@ -1,0 +1,241 @@
+/* The desktop view: Proxmox's noVNC sidebar on the left edge, the picture beside it,
+ * the status line underneath (U04).
+ *
+ * The rules: square corners, one lime accent, the sidebar a step lighter than the
+ * page, and nothing here may widen the console — the picture takes what is left.
+ */
+
+.vnc-wrap {
+  display: flex;
+  gap: var(--space-2);
+  min-height: 0;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.tab-panel.desktop-fill .vnc-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.vnc-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The sidebar: a column of sections, collapsible to a 32 px strip. */
+
+.vnc-sidebar {
+  flex: 0 0 228px;
+  width: 228px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.vnc-sidebar.collapsed {
+  flex-basis: 32px;
+  width: 32px;
+  overflow: hidden;
+}
+
+.vnc-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: 2px 2px 2px var(--space-2);
+  border-bottom: 1px solid var(--border);
+  min-height: 30px;
+}
+
+.vnc-sidebar.collapsed .vnc-side-head {
+  padding: 2px 0;
+  justify-content: center;
+}
+
+.vnc-side-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.vnc-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vnc-sidebar.collapsed .vnc-nav {
+  flex-direction: column;
+  align-items: center;
+}
+
+.vnc-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  min-width: 0;
+}
+
+.vnc-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border);
+}
+
+.vnc-sec h4 {
+  margin: var(--space-1) 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.vnc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.vnc-wide {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.vnc-clip {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 64px;
+  background: var(--bg-inset);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  font-family: var(--font);
+  font-size: 12px;
+  padding: var(--space-1);
+}
+
+.vnc-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vnc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.vnc-field b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.vnc-field input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.vnc-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-faint);
+}
+
+/* Three scaling choices do not fit across a 228 px panel: stack them. */
+.vnc-sidebar .nb-segmented {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+.vnc-sidebar .nb-seg {
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.vnc-sidebar .nb-seg:last-child {
+  border-bottom: 0;
+}
+
+.vnc-keys {
+  display: grid;
+  /* Twelve function keys, six per row of short labels: "F1", not "Ctrl+Alt+F1",
+   * which could not fit and painted over its neighbour (seen in the smoke run). */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.vnc-keys button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.vnc-keys button {
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.vnc-sticky button.active {
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+/* The status line under the picture. */
+
+.vnc-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-1);
+  border-top: 1px solid var(--border);
+  min-height: 28px;
+}
+
+.vnc-spacer {
+  flex: 1;
+}
+
+.vnc-status .badge {
+  font-family: var(--mono);
+}
+
+/* The picture keeps its 70vh in a panel (less the status line, which belongs under
+ * the picture and must stay visible) and takes the window in a pop-out. */
+
+.vnc-main .desktop-screen {
+  margin: 0;
+  height: calc(70vh - 44px);
+}
+
+.vnc-main .desktop-screen.full {
+  height: auto;
+}

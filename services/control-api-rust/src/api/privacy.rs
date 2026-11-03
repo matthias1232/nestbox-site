@@ -115,17 +115,19 @@ pub async fn inspect(
 ) -> Result<Json<InspectResult>, ApiError> {
     let direction = privacy_service::Direction::parse(&body.direction)
         .ok_or_else(|| ApiError::validation("direction must be 'inbound' or 'outbound'."))?;
-    Ok(Json(
-        privacy_service::inspect(
-            &state.services,
-            &auth.principal,
-            body.sandbox_id,
-            direction,
-            &body.content,
-            body.destination.as_deref(),
-        )
-        .await?,
-    ))
+    // The test button shows what the policy would do; the values behind the
+    // placeholders never leave this endpoint.
+    let mut result = privacy_service::inspect(
+        &state.services,
+        &auth.principal,
+        body.sandbox_id,
+        direction,
+        &body.content,
+        body.destination.as_deref(),
+    )
+    .await?;
+    result.restore.clear();
+    Ok(Json(result))
 }
 
 /// The recent incidents of one sandbox, newest first.
@@ -166,4 +168,120 @@ pub async fn purge(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let removed = privacy_service::purge(&state.services, &auth.principal, body.days).await?;
     Ok(Json(serde_json::json!({ "removed": removed, "older_than_days": body.days })))
+}
+
+
+/// The DLP dashboard's query.
+#[derive(Debug, Deserialize)]
+pub struct OverviewQuery {
+    #[serde(default)]
+    pub timeframe: Option<String>,
+    /// detector, action, severity, sandbox, day or destination. Default: detector.
+    #[serde(default)]
+    pub group_by: Option<String>,
+    #[serde(default)]
+    pub sandbox_id: Option<Uuid>,
+}
+
+/// Incidents over a window, grouped: the numbers a dashboard draws.
+pub async fn dlp_overview(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(query): Query<OverviewQuery>,
+) -> Result<Json<privacy_service::DlpReport>, ApiError> {
+    let timeframe = crate::api::accounting::parse_timeframe(query.timeframe.as_deref())?;
+    let since = timeframe.since(chrono::Utc::now());
+    Ok(Json(
+        privacy_service::dlp_overview(
+            &state.services,
+            &auth.principal,
+            since,
+            query.group_by.as_deref().unwrap_or("detector"),
+            query.sandbox_id,
+        )
+        .await?,
+    ))
+}
+
+/// The DLP log's query.
+#[derive(Debug, Deserialize)]
+pub struct LogQuery {
+    #[serde(default)]
+    pub timeframe: Option<String>,
+    #[serde(default)]
+    pub sandbox_id: Option<Uuid>,
+    /// blocked, redacted, replaced or allowed.
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub detector: Option<String>,
+    /// inbound (to the model) or outbound (to the agent).
+    #[serde(default)]
+    pub direction: Option<String>,
+    /// egress, accounting_proxy, mcp or test.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// A free-text needle: detector, sandbox, destination, model, served model
+    /// or owner name. Case-insensitive.
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// The newest incidents with their masked excerpts, across sandboxes.
+pub async fn dlp_log(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(query): Query<LogQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let timeframe = crate::api::accounting::parse_timeframe(query.timeframe.as_deref())?;
+    let since = timeframe.since(chrono::Utc::now());
+    let items = privacy_service::dlp_log(
+        &state.services,
+        &auth.principal,
+        since,
+        query.sandbox_id,
+        query.action.as_deref().filter(|value| !value.is_empty() && *value != "all"),
+        query.detector.as_deref().filter(|value| !value.is_empty() && *value != "all"),
+        query.direction.as_deref().filter(|value| !value.is_empty() && *value != "all"),
+        query.source.as_deref().filter(|value| !value.is_empty() && *value != "all"),
+        query
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        query.limit.unwrap_or(100),
+    )
+    .await?;
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// The policy history's query.
+#[derive(Debug, Deserialize)]
+pub struct ChangesQuery {
+    #[serde(default)]
+    pub sandbox_id: Option<Uuid>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Who changed this sandbox's DLP policy (or the default it inherits), when, and
+/// from what to what.
+///
+/// The audit trail is the source: a save, an inherit and a purge are audited
+/// acts already, and a second table of the same facts would be a second truth.
+pub async fn dlp_changes(
+    State(state): State<AppState>,
+    auth: Auth,
+    Query(query): Query<ChangesQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let items = privacy_service::changes(
+        &state.services,
+        &auth.principal,
+        query.sandbox_id,
+        query.limit.unwrap_or(50),
+    )
+    .await?;
+    Ok(Json(serde_json::json!({ "items": items })))
 }

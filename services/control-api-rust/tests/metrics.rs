@@ -157,6 +157,10 @@ async fn sandbox(pool: &PgPool, environment: Uuid, runtime: &FakeRuntime) -> San
             pids_limit: 256,
             mounts: Vec::new(),
             gpu_count: 0,
+        egress_mode: "forward_proxy".into(),
+        node_id: None,
+            memory_reservation: None,
+            cpu_shares: None,
         })
         .await
         .expect("the fake runner creates a sandbox");
@@ -176,6 +180,7 @@ async fn sandbox(pool: &PgPool, environment: Uuid, runtime: &FakeRuntime) -> San
             image_digest: Some("sha256:0123456789abcdef"),
             spec: &serde_json::json!({}),
             parent_id: None,
+            owner_user_id: None,
         },
     )
     .await

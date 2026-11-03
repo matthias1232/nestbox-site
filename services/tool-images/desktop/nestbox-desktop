@@ -1,0 +1,64 @@
+#!/bin/bash
+# The desktop of a sandbox: a VNC server, XFCE, and Chrome with remote debugging.
+#
+# Started by the sandbox supervisor like any agent. It must not exit: the
+# supervisor ends the container when one of its programs stops, so Chrome is
+# restarted in a loop and the script waits on the VNC server.
+#
+# Nothing here listens outside the container. The VNC port and the debugging port
+# are on 127.0.0.1; the runner reaches 5900 through `docker exec`, and the
+# control API decides who may ask it to.
+set -u
+export DISPLAY=:1
+export HOME="${HOME:-/home/nestbox}"
+GEOMETRY="${NESTBOX_DESKTOP_GEOMETRY:-1440x900}"
+PROFILE="$HOME/.config/nestbox-chrome"
+mkdir -p "$HOME/.vnc" "$HOME/.config" "$PROFILE" "$HOME/.pki/nssdb"
+
+# A gateway sandbox's syscall filter refuses setuid(getuid()), which the X server
+# makes before it starts xkbcomp; this library answers "already that user" (see
+# idfix.c). Only when it is there, so a Docker sandbox is unaffected.
+if [ -r /usr/local/lib/nestbox-idfix.so ]; then
+  export LD_PRELOAD=/usr/local/lib/nestbox-idfix.so
+fi
+
+# No VNC password: the port is loopback only inside the container.
+Xtigervnc :1 -geometry "$GEOMETRY" -depth 24 -rfbport 5900 -localhost yes \
+  -SecurityTypes None -AlwaysShared -ac &
+VNC_PID=$!
+
+# Wait for the display; a desktop started before it exists dies at once.
+for _ in $(seq 1 50); do
+  xdpyinfo -display :1 >/dev/null 2>&1 && break
+  sleep 0.2
+done
+
+# The monitor layout the operator or an agent left behind. The agent home is
+# persistent, so a wall of monitors comes back after a reconnect, a restart and
+# a recreate; without it the desktop starts as the one screen the VNC server was
+# given. Before XFCE starts, so panels and the window manager see the monitors.
+[ -r "$HOME/.config/nestbox-display.json" ] && nestbox-display set "$(cat "$HOME/.config/nestbox-display.json")" || true
+
+dbus-launch --exit-with-session startxfce4 >/dev/null 2>&1 &
+
+# When the egress proxy inspects TLS, Chrome has to trust its CA. Chrome ignores
+# SSL_CERT_FILE and keeps its own store (NSS), so the certificate is added there,
+# only when the runner mounted one (an inspecting mode), never at build time.
+if [ -r /run/secrets/egress-ca.crt ]; then
+  certutil -d "sql:$HOME/.pki/nssdb" -L >/dev/null 2>&1 || certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
+  certutil -d "sql:$HOME/.pki/nssdb" -D -n nestbox-egress >/dev/null 2>&1 || true
+  certutil -d "sql:$HOME/.pki/nssdb" -A -t "C,," -n nestbox-egress -i /run/secrets/egress-ca.crt
+fi
+
+(
+  while true; do
+    google-chrome \
+      --no-sandbox --disable-dev-shm-usage --no-first-run --no-default-browser-check \
+      --disable-features=Translate --password-store=basic \
+      --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
+      --user-data-dir="$PROFILE" --start-maximized about:blank >/dev/null 2>&1
+    sleep 2
+  done
+) &
+
+wait "$VNC_PID"

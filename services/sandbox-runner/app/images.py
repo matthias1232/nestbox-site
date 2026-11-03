@@ -17,6 +17,14 @@ ALLOWED_IMAGES = set(
     ).split(",")
 )
 
+# Registries whose images this node may start without naming each one. A joined node pulls what
+# the control plane assigns it from the control plane's registry, and the registry's address is
+# the one thing the node knows up front (ADR 0048). Empty on the appliance, where the list above
+# is the whole rule.
+ALLOWED_PREFIXES = tuple(
+    prefix for prefix in os.getenv("NESTBOX_ALLOWED_PREFIXES", "").split(",") if prefix.strip()
+)
+
 # Images the runner built itself from a recipe are always allowed: they carry
 # this prefix and a content hash, and the Dockerfile came from the control plane.
 RECIPE_IMAGE_PREFIX = "nestbox-recipe/"
@@ -24,4 +32,8 @@ RECIPE_IMAGE_PREFIX = "nestbox-recipe/"
 
 def image_allowed(image: str) -> bool:
     """Whether `image` may be started on this node."""
-    return image in ALLOWED_IMAGES or image.startswith(RECIPE_IMAGE_PREFIX)
+    return (
+        image in ALLOWED_IMAGES
+        or image.startswith(RECIPE_IMAGE_PREFIX)
+        or (bool(ALLOWED_PREFIXES) and image.startswith(ALLOWED_PREFIXES))
+    )

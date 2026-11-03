@@ -19,6 +19,8 @@ import * as mcpApi from '../../api/mcp.js';
 import * as templatesApi from '../../api/imageTemplates.js';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import '../../styles/builder.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const DEFAULT_RESOURCES = {
   memory_limit: '1g',
@@ -452,22 +454,18 @@ export default function BuilderPage() {
 
   return (
     <section class="page builder-page">
-      <header class="page-head">
-        <div>
-          <h1>Build a sandbox image</h1>
-          <p class="muted">
-            A recipe names a baseline, its tools, its agents, the limits, a node, and the roots
-            to mount. The image is built from it; the sandbox is created from the image.
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Build a sandbox image"
+        subtitle={<>A recipe names a baseline, its tools, its agents, the limits, a node, and the roots to mount. The image is built from it; the sandbox is created from the image.</>}
+        actions={<>
           <Show when={saved()}>
             <span class="muted small">rev {saved().revision}</span>
             <StatusBadge status={saved().state} />
             <button class="secondary" onClick={refresh} disabled={busy()}>Refresh</button>
           </Show>
-        </div>
-      </header>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>

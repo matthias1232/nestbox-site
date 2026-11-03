@@ -1,6 +1,6 @@
 # ADR 0029 — A node is a row plus an adapter; multi-node is not a rename
 
-Status: Accepted
+Status: Superseded by ADR 0047
 Date: 2026-10-28
 
 ## Context

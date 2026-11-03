@@ -1,0 +1,112 @@
+// The UI preferences that survive a reload, as pure functions (no DOM, no Solid).
+//
+// Only presentation lives here: sidebar width, dock state, tree view, the last console choice
+// per sandbox, the monitor tab of each desktop, log panes, palette recents and dismissed tours.
+// Never a token, never a secret.
+
+import { sanitizeOptions } from '../features/sandboxes/vncOptions.js';
+
+/** The localStorage key. */
+export const STORAGE_KEY = 'nestbox:ui';
+
+/** What a fresh browser starts with. */
+export const DEFAULTS = Object.freeze({
+  sidebarCollapsed: false,
+  sidebarWidth: 272,
+  dockOpen: false,
+  dockTab: 'tasks',
+  dockHeight: 220,
+  treeView: 'infrastructure',
+  consoleMode: {},
+  // The monitor tab of each desktop (`All`, or one monitor's id), remembered per
+  // sandbox: which screen a person watches is their taste, not the sandbox's.
+  monitorTabs: {},
+  // The noVNC options of each desktop, per sandbox: a person's taste about one
+  // screen, not a property of the sandbox.
+  vncOptions: {},
+  logPanes: [],
+  paletteRecent: [],
+  toursDismissed: [],
+  // Alert pop-ups: 'on', 'off' (until the operator turns them on), or { until: <ms epoch> }.
+  alertPopups: 'on',
+});
+
+const TREE_VIEWS = ['infrastructure', 'workloads', 'models'];
+const DOCK_TABS = ['tasks', 'events', 'alerts'];
+
+const clamp = (value, low, high, fallback) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(high, Math.max(low, value)) : fallback;
+
+/**
+ * The stored pop-up choice, kept to its three shapes: 'on', 'off', or a live timed mute
+ * `{ until: <ms epoch> }`. Anything else falls back to 'on', so a broken value never
+ * silences an alert the operator never muted.
+ */
+function popupChoice(value) {
+  if (value === 'off') return 'off';
+  if (value && typeof value === 'object' && Number.isFinite(value.until)) return { until: value.until };
+  return 'on';
+}
+
+/** Turn anything parsed from storage into a complete, well-typed preference object. */
+export function sanitize(raw) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const consoleMode = {};
+  if (input.consoleMode && typeof input.consoleMode === 'object') {
+    for (const [id, mode] of Object.entries(input.consoleMode)) {
+      if (typeof mode === 'string' && mode.length <= 20) consoleMode[id] = mode;
+    }
+  }
+  const strings = (list, max) =>
+    Array.isArray(list) ? list.filter((item) => typeof item === 'string').slice(0, max) : [];
+  // One monitor tab per sandbox: a monitor id, or `all`.
+  const monitorTabs = {};
+  if (input.monitorTabs && typeof input.monitorTabs === 'object' && !Array.isArray(input.monitorTabs)) {
+    for (const [id, tab] of Object.entries(input.monitorTabs)) {
+      if (typeof id === 'string' && id.length <= 64 && typeof tab === 'string' && tab.length <= 64) {
+        monitorTabs[id] = tab;
+      }
+    }
+  }
+  // One entry per sandbox, each completed and clamped by the desktop's own rules.
+  const vncOptions = {};
+  if (input.vncOptions && typeof input.vncOptions === 'object') {
+    for (const [id, options] of Object.entries(input.vncOptions)) {
+      if (typeof id === 'string' && id.length <= 64 && options && typeof options === 'object') {
+        vncOptions[id] = sanitizeOptions(options);
+      }
+    }
+  }
+  return {
+    sidebarCollapsed: input.sidebarCollapsed === true,
+    sidebarWidth: clamp(input.sidebarWidth, 200, 480, DEFAULTS.sidebarWidth),
+    dockOpen: input.dockOpen === true,
+    dockTab: DOCK_TABS.includes(input.dockTab) ? input.dockTab : DEFAULTS.dockTab,
+    dockHeight: clamp(input.dockHeight, 120, 600, DEFAULTS.dockHeight),
+    treeView: TREE_VIEWS.includes(input.treeView) ? input.treeView : DEFAULTS.treeView,
+    consoleMode,
+    monitorTabs,
+    vncOptions,
+    logPanes: strings(input.logPanes, 8),
+    paletteRecent: Array.isArray(input.paletteRecent)
+      ? input.paletteRecent.filter((item) => item && typeof item.id === 'string').slice(0, 8)
+      : [],
+    toursDismissed: strings(input.toursDismissed, 20),
+    alertPopups: popupChoice(input.alertPopups),
+  };
+}
+
+/** Read preferences from stored text; garbage gives the defaults. */
+export function parse(text) {
+  if (!text) return sanitize(null);
+  try {
+    return sanitize(JSON.parse(text));
+  } catch {
+    return sanitize(null);
+  }
+}
+
+/** The text to store. */
+export function serialize(prefs) {
+  return JSON.stringify(sanitize(prefs));
+}

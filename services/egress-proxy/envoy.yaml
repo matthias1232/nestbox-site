@@ -124,11 +124,19 @@ static_resources:
                           mcp_tool: "%DYNAMIC_METADATA(nestbox:mcp_tool)%"
                           mcp_is_error: "%DYNAMIC_METADATA(nestbox:mcp_is_error)%"
                           mcp_result_kind: "%DYNAMIC_METADATA(nestbox:mcp_result_kind)%"
+                          request_body: "%DYNAMIC_METADATA(nestbox:request_body)%"
+                          response_body: "%DYNAMIC_METADATA(nestbox:response_body)%"
+                          usage: "%DYNAMIC_METADATA(nestbox:usage)%"
+                          cache_markers: "%DYNAMIC_METADATA(nestbox:cache_markers)%"
+                          llm_auth: "%DYNAMIC_METADATA(nestbox:llm_auth)%"
                           # The decision the control API made, copied out of the
                           # ext_authz response headers into filter metadata (see
                           # `dynamic_metadata_from_headers` below). Empty until
                           # a decider answers, which is the truth and not a bug.
                           decision: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-decision)%"
+                          # 1 when only a window or an allow-all mode let this
+                          # through; the decision above is then allow.
+                          would_deny: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-would-deny)%"
                           reason: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-reason)%"
                           rule_id: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-rule-id)%"
                 route_config:
@@ -150,6 +158,31 @@ static_resources:
                         # mode (`tls_terminator`, listener 2 below), not the
                         # default: a tunnel that cannot be read should be
                         # allowed or denied by name, not broken.
+                        # Inspection route: the Lua filter marks a CONNECT whose
+                        # sandbox is in `transparent` or `hybrid` mode. Anything
+                        # not marked stays on the tunnel route below, so an
+                        # unmarked connection can never be decrypted by accident.
+                        - match:
+                            connect_matcher: {}
+                            headers:
+                              - name: x-nestbox-inspect
+                                exact_match: "1"
+                          route:
+                            cluster: tls_terminator
+                            upgrade_configs:
+                              - upgrade_type: CONNECT
+                                connect_config: {}
+                            timeout: 0s
+                            # Short so a changed egress mode reaches the next
+                            # connection within seconds (ADR 0052).
+                            idle_timeout: 10s
+                          typed_per_filter_config:
+                            envoy.filters.http.buffer:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.BufferPerRoute
+                              disabled: true
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
                         - match: { connect_matcher: {} }
                           route:
                             cluster: dynamic_forward_proxy_cluster
@@ -158,9 +191,11 @@ static_resources:
                                 connect_config: {}
                             # A tunnel may legitimately be idle for a while; it
                             # is the idle timeout, not the request timeout, that
-                            # ends a dead one.
+                            # ends a dead one. Short so a changed egress mode
+                            # reaches the next connection within seconds
+                            # (ADR 0052).
                             timeout: 0s
-                            idle_timeout: 300s
+                            idle_timeout: 10s
                           typed_per_filter_config:
                             # The buffer filter waits for the end of the request
                             # body, and a CONNECT's body is the tunnel: it ends
@@ -199,6 +234,15 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       default_source_code:
                         filename: /tmp/mcp.lua
+                  # Second, tiny Lua filter: it turns the tunnel decision the
+                  # first one fetched into a header while the headers can still
+                  # be continued, which is the only moment Envoy re-resolves the
+                  # route (see extensions/route.lua).
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      default_source_code:
+                        filename: /tmp/route.lua
                   - name: envoy.filters.http.ext_authz
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
@@ -247,6 +291,9 @@ static_resources:
                               - exact: x-nestbox-reason
                               - exact: x-nestbox-rule-id
                               - exact: x-nestbox-sandbox
+                              # A window or an allow-all mode let the request
+                              # through although a rule would have denied it.
+                              - exact: x-nestbox-would-deny
                       # Fail closed. A control API that cannot answer is not
                       # permission to proceed.
                       failure_mode_allow: false
@@ -279,6 +326,12 @@ static_resources:
       # inspector's ClientHello parse, and `%REQUESTED_SERVER_NAME%` reads it
       # from there. Without the inspector the log field is empty.
       listener_filters:
+        # Restores the sandbox's address from the broker's header. Loopback only,
+        # so nothing outside the container can claim an address.
+        - name: envoy.filters.listener.proxy_protocol
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.proxy_protocol.v3.ProxyProtocol
+            rules: []
         - name: envoy.filters.listener.tls_inspector
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
@@ -336,9 +389,25 @@ static_resources:
                           mcp_tool: "%DYNAMIC_METADATA(nestbox:mcp_tool)%"
                           mcp_is_error: "%DYNAMIC_METADATA(nestbox:mcp_is_error)%"
                           mcp_result_kind: "%DYNAMIC_METADATA(nestbox:mcp_result_kind)%"
+                          request_body: "%DYNAMIC_METADATA(nestbox:request_body)%"
+                          response_body: "%DYNAMIC_METADATA(nestbox:response_body)%"
+                          usage: "%DYNAMIC_METADATA(nestbox:usage)%"
+                          cache_markers: "%DYNAMIC_METADATA(nestbox:cache_markers)%"
+                          llm_auth: "%DYNAMIC_METADATA(nestbox:llm_auth)%"
                           decision: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-decision)%"
+                          # 1 when only a window or an allow-all mode let this
+                          # through; the decision above is then allow.
+                          would_deny: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-would-deny)%"
                           reason: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-reason)%"
                           rule_id: "%DYNAMIC_METADATA(envoy.filters.http.ext_authz:x-nestbox-rule-id)%"
+                          # What the content check did: blocked, replaced,
+                          # pseudonymized, unavailable, too_large. Empty when the
+                          # check does not apply to this request.
+                          dlp: "%RESP(X-NESTBOX-DLP)%"
+                          # What the content check did: blocked, replaced,
+                          # pseudonymized, unavailable, too_large. Empty when the
+                          # check does not apply to this request.
+                          dlp: "%RESP(X-NESTBOX-DLP)%"
                 route_config:
                   name: egress_terminated
                   virtual_hosts:
@@ -347,14 +416,14 @@ static_resources:
                       routes:
                         - match: { prefix: "/" }
                           route:
-                            cluster: dynamic_forward_proxy_cluster
+                            cluster: egress_reencrypt
                             timeout: 300s
                             idle_timeout: 60s
                 http_filters:
                   - name: envoy.filters.http.buffer
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
-                      max_request_bytes: 65536
+                      max_request_bytes: 4194304
                   - name: envoy.filters.http.lua
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
@@ -396,13 +465,22 @@ static_resources:
                               - exact: x-nestbox-reason
                               - exact: x-nestbox-rule-id
                               - exact: x-nestbox-sandbox
+                              # A window or an allow-all mode let the request
+                              # through although a rule would have denied it.
+                              - exact: x-nestbox-would-deny
+                          # The broker that re-encrypts this hop is where a body
+                          # is checked against the privacy policy: it holds the
+                          # decrypted bytes and can rewrite them, which the router
+                          # cannot. It needs to know whose body it is and what the
+                          # egress mode allows when the check itself cannot be
+                          # answered. Both come from the answer above, so a sandbox
+                          # cannot write them (the Lua filter removes every
+                          # `x-nestbox-*` header from the client first).
+                          allowed_upstream_headers:
+                            patterns:
+                              - exact: x-nestbox-sandbox
+                              - exact: x-nestbox-egress-mode
                       failure_mode_allow: false
-                  - name: envoy.filters.http.dynamic_forward_proxy
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
-                      dns_cache_config:
-                        name: dynamic_forward_proxy_cache
-                        dns_lookup_family: V4_ONLY
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -418,11 +496,41 @@ static_resources:
           dns_cache_config:
             name: dynamic_forward_proxy_cache
             dns_lookup_family: V4_ONLY
+    # What the terminated hop leaves through: the certificate broker's second
+    # port, which encrypts the request again towards the host it names and
+    # checks that server's certificate (mitm/upstream.go). A plain HTTP/1.1 hop on
+    # loopback; the broker being down is a 503, never an unverified request.
+    - name: egress_reencrypt
+      connect_timeout: 2s
+      type: STATIC
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http_protocol_options: {}
+      load_assignment:
+        cluster_name: egress_reencrypt
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 10002 }
     # The certificate broker. An endpoint that is down here is an HTTPS request
     # that fails closed: the client gets a 503 instead of an unverified tunnel.
     - name: tls_terminator
       connect_timeout: 2s
       type: STATIC
+      # The sandbox's address travels to the broker as a PROXY protocol header,
+      # because the decrypted request reaches the inner listener from loopback.
+      transport_socket:
+        name: envoy.transport_sockets.upstream_proxy_protocol
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.proxy_protocol.v3.ProxyProtocolUpstreamTransport
+          config: { version: V1 }
+          transport_socket:
+            name: envoy.transport_sockets.raw_buffer
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.raw_buffer.v3.RawBuffer
       load_assignment:
         cluster_name: tls_terminator
         endpoints:

@@ -321,17 +321,30 @@ pub struct AgentLaunch {
     pub port: Option<u16>,
 }
 
+/// The directory where every supervised process writes its PID file.
+///
+/// The convention is shared with the control plane: `nestbox-agentctl restart
+/// <name>` and the supervisors of other images find a process by this path, so
+/// the generator must not invent its own location.
+const AGENT_PID_DIRECTORY: &str = "/tmp/nestbox-agents";
+
 /// Render the container command that starts every agent in a sandbox.
 ///
 /// One supervisor script, not one process per container: each agent runs in a
 /// subshell that changes into its home, exports the pack's environment slots,
-/// and is `exec`'d so the PID the supervisor tracks is the agent itself. The
-/// supervisor then waits for the first agent to stop and exits, because a
-/// sandbox whose agents have died must not look healthy.
+/// and is supervised there. One agent per home; an agent that stops is started
+/// again after 2 s, so a crash or a sign-in mode change costs one process and
+/// not the whole sandbox.
 ///
-/// bash is used rather than `/bin/sh` for `wait -n`, which is how "any child"
-/// is expressed without polling. Every sandbox image starts from Ubuntu or
-/// Debian and ships bash 5; the pack's own command is unaffected by the choice.
+/// Each agent's subshell writes the PID of the process it just started to
+/// `/tmp/nestbox-agents/<name>.pid`, which is how `nestbox-agentctl restart`
+/// and the mode change reach exactly one agent. The script sources
+/// `.nestbox/env.sh` before every start, so an edited environment is picked up
+/// by the next start without restarting the container.
+///
+/// bash is used rather than `/bin/sh` for `wait $!` and because the pack
+/// commands assume it; every sandbox image starts from Ubuntu or Debian and
+/// ships bash 5.
 ///
 /// A pack without a command (it is its own image with its own entrypoint) gets
 /// `sleep infinity`, so the supervisor still owns one PID per agent and the
@@ -339,8 +352,8 @@ pub struct AgentLaunch {
 pub fn entrypoint_command(agents: &[AgentLaunch]) -> Vec<String> {
     let mut script = String::from(
         "set -u\n\
-         # Nestbox sandbox supervisor: one agent per home, and the sandbox\n\
-         # lives exactly as long as all of them do.\n",
+         # Nestbox sandbox supervisor: one agent per home; an agent that stops\n\
+         # is started again after 2 s.\n",
     );
 
     if agents.is_empty() {
@@ -352,9 +365,12 @@ pub fn entrypoint_command(agents: &[AgentLaunch]) -> Vec<String> {
         return vec!["/bin/bash".to_string(), "-c".to_string(), script];
     }
 
+    script.push_str(&format!("\nmkdir -p {AGENT_PID_DIRECTORY}\n"));
+
     for agent in agents {
         let home = agent.home_mode.home_path(&agent.instance);
         let quoted = quote(&home);
+        let pidfile = quote(&format!("{AGENT_PID_DIRECTORY}/{}.pid", agent.instance));
         script.push_str(&format!(
             "\necho \"nestbox: starting {0} in {1}\"\n# agent {0} in {1} ({2})\nmkdir -p {quoted}\n(\n  cd {quoted} || exit 1\n  export HOME={quoted}\n",
             agent.instance,
@@ -379,16 +395,18 @@ pub fn entrypoint_command(agents: &[AgentLaunch]) -> Vec<String> {
             agent.command.to_vec()
         };
         let line: Vec<String> = command.iter().map(|part| quote(part)).collect();
-        script.push_str(&format!("  exec {}\n) &\n", line.join(" ")));
+        script.push_str(&format!(
+            "  while true; do\n    [ -f \"$HOME/.nestbox/env.sh\" ] && . \"$HOME/.nestbox/env.sh\"\n    {0} &\n    echo $! > {pidfile}\n    wait $!\n    echo \"nestbox: {1} exited with status $?; starting it again in 2 s\" >&2\n    sleep 2\n  done\n) &\n",
+            line.join(" "),
+            agent.instance,
+        ));
     }
 
     script.push_str(
-        "\necho \"nestbox: supervisor up\"\n\n# The first agent to stop ends the sandbox: a sandbox with a dead\n\
-         # agent is not healthy, and restarting is the operator's decision.\n\
-         wait -n\n\
-         status=$?\n\
-         echo \"nestbox: an agent exited with status $status; stopping the sandbox\" >&2\n\
-         exit 1\n",
+        "\necho \"nestbox: supervisor up\"\n\n# Every agent runs in its own loop, so one agent stopping is not the\n\
+         # end of the sandbox; the supervisor stays until the container is\n\
+         # stopped, and `wait` without arguments keeps it in the foreground.\n\
+         wait\n",
     );
     vec!["/bin/bash".to_string(), "-c".to_string(), script]
 }
@@ -461,9 +479,16 @@ mod supervisor_tests {
         assert_eq!(command[1], "-c");
         let script = &command[2];
 
-        // One supervisor, one script, one `wait`.
-        assert_eq!(script.matches("wait -n").count(), 1);
-        assert!(script.ends_with("exit 1\n"));
+        // One supervisor, one script, and no `wait -n`: an agent that stops is
+        // restarted by its own loop instead of ending the sandbox.
+        assert!(!script.contains("wait -n"));
+        assert!(script.contains("while true; do"));
+        assert_eq!(script.matches("while true; do").count(), 2);
+        assert!(script.trim_end().ends_with("wait"));
+
+        // The PID directory exists before the first agent writes into it.
+        assert!(script.contains("mkdir -p /tmp/nestbox-agents"));
+        assert!(script.contains("echo $! > /tmp/nestbox-agents/claude.pid"));
 
         // The shared agent lands in /home/nestbox, the isolated one in its own.
         assert!(script.contains("mkdir -p /home/nestbox"));
@@ -473,8 +498,8 @@ mod supervisor_tests {
         assert!(!script.contains("/home/agents/hermes"));
 
         // Each agent is started, and its own slots are exported for it only.
-        assert!(script.contains("exec sleep infinity"));
-        assert!(script.contains("exec claude --dangerously-skip-permissions"));
+        assert!(script.contains("    sleep infinity &"));
+        assert!(script.contains("    claude --dangerously-skip-permissions &"));
         assert!(script.contains("export OPENAI_BASE_URL=\"${OPENAI_BASE_URL:-}\""));
         assert!(script.contains("export OPENAI_API_KEY=\"${OPENAI_API_KEY:-}\""));
         assert!(script.contains("export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY:-}\""));
@@ -482,6 +507,9 @@ mod supervisor_tests {
 
         // One background subshell per agent.
         assert_eq!(script.matches(") &").count(), 2);
+
+        // Every start reads the environment the control plane wrote.
+        assert_eq!(script.matches("[ -f \"$HOME/.nestbox/env.sh\" ]").count(), 2);
 
         // The claude block must not carry hermes's slots.
         let claude_block = script.split("# agent claude").nth(1).unwrap_or_default();
@@ -499,7 +527,7 @@ mod supervisor_tests {
             &slots,
             None,
         )]);
-        assert!(command[2].contains("exec sleep infinity"));
+        assert!(command[2].contains("    sleep infinity &"));
         assert_eq!(command[2].matches(") &").count(), 1);
     }
 
@@ -509,6 +537,7 @@ mod supervisor_tests {
         assert_eq!(command[0], "/bin/bash");
         assert!(command[2].contains("exec sleep infinity"));
         assert!(!command[2].contains("wait -n"));
+        assert!(!command[2].contains("while true; do"));
     }
 
     #[test]
@@ -516,7 +545,46 @@ mod supervisor_tests {
         let command = vec!["sh".to_string(), "-c".to_string(), "echo 'hi there'".to_string()];
         let slots: Vec<String> = Vec::new();
         let rendered = entrypoint_command(&[launch("x", HomeMode::Shared, &command, &slots, None)]);
-        assert!(rendered[2].contains("exec sh -c 'echo '\\''hi there'\\'''"));
+        assert!(rendered[2].contains("sh -c 'echo '\\''hi there'\\''' &"));
+    }
+
+    #[test]
+    fn a_hostile_instance_does_not_escape_the_pid_path() {
+        let empty: Vec<String> = Vec::new();
+        let slots: Vec<String> = Vec::new();
+        let rendered =
+            entrypoint_command(&[launch("a; id", HomeMode::Isolated, &empty, &slots, None)]);
+        assert!(!rendered[2].contains("> /tmp/nestbox-agents/a; id.pid"));
+        assert!(rendered[2].contains("/tmp/nestbox-agents/a; id.pid'"));
+    }
+
+    #[test]
+    fn the_generated_script_parses() {
+        // The script runs in a container where a syntax error would cost the
+        // whole sandbox, so the generator is checked with a real shell parser.
+        let command = vec!["claude".to_string(), "--continue".to_string()];
+        let slots = vec!["ANTHROPIC_API_KEY".to_string()];
+        let agents = vec![
+            launch("hermes", HomeMode::Shared, &command, &slots, None),
+            launch("claude", HomeMode::Isolated, &command, &slots, Some(3000)),
+        ];
+        for agent_set in [Vec::new(), agents] {
+            let rendered = entrypoint_command(&agent_set);
+            let output = std::process::Command::new(&rendered[0])
+                .arg("-n")
+                .arg("-c")
+                .arg(&rendered[2])
+                .output();
+            let Ok(output) = output else {
+                // No bash on this machine: nothing to check against.
+                return;
+            };
+            assert!(
+                output.status.success(),
+                "generated script does not parse: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     #[test]

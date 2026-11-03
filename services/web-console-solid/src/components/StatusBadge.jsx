@@ -16,6 +16,9 @@ const TONES = {
   // install created a profile whose server is not started yet, which is not the
   // same as an endpoint that failed (ADR 0018).
   reachable: 'ok', unreachable: 'bad',
+  // A caller may already hold a tone (the health rows of the home page do, X13); naming a
+  // tone as the status keeps such a row honest instead of printing the word "bad".
+  ok: 'ok', warn: 'warn', bad: 'bad', info: 'info', muted: 'muted',
 };
 
 export default function StatusBadge(props) {

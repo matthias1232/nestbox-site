@@ -66,7 +66,7 @@ pub fn hashes_equal(a: &str, b: &str) -> bool {
 }
 
 /// 32 random bytes as lowercase hex.
-fn random_token() -> String {
+pub fn random_token() -> String {
     let mut bytes = [0u8; TOKEN_BYTES];
     rand::thread_rng().fill_bytes(&mut bytes);
     let mut out = String::with_capacity(TOKEN_BYTES * 2);

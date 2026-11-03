@@ -89,6 +89,28 @@ pub async fn put(
     Ok(meta)
 }
 
+/// Store a value on the control plane's own initiative (a joined node's token). Same sealing and
+/// the same table as `put`; the difference is that no caller is asked for a permission, because
+/// the caller is the join flow that already proved a one-time token.
+pub async fn put_system(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    created_by: Uuid,
+    name: &str,
+    kind: &str,
+    value: &str,
+) -> Result<(), ApiError> {
+    let master = key(ctx)?;
+    let (ciphertext, nonce) = vault::seal(&master, &environment_id.to_string(), name, value)
+        .map_err(|error| ApiError::validation(error.message()))?;
+    let mut scope = TenantScope::begin(&ctx.pool, environment_id).await.map_err(ApiError::from)?;
+    store::upsert(&mut scope, name, kind, &ciphertext, &nonce, &vault::last4(value), created_by)
+        .await
+        .map_err(ApiError::from)?;
+    scope.commit().await.map_err(ApiError::from)?;
+    Ok(())
+}
+
 /// Delete a secret. Refused while a provider still points at it, so a key is not
 /// removed out from under a working sandbox.
 pub async fn delete(ctx: &ServiceContext, principal: &Principal, id: Uuid) -> Result<(), ApiError> {

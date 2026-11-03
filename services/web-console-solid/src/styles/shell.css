@@ -1,0 +1,190 @@
+/* The Control Center shell (Wave 0 skeleton; package F01 refines it).
+ * Grid: topbar over (sidebar | content) over dock. Colours only from tokens.css.
+ */
+
+.brand-mark { font-weight: 800; letter-spacing: -0.05em; color: var(--fg); text-decoration: none; font-size: 1.1rem; }
+.brand-mark i { color: var(--accent); font-style: normal; }
+
+.eyebrow { font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-muted); margin: 0; }
+.pending { color: var(--fg-faint); font-size: 0.8rem; }
+
+.cc-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: var(--topbar-height) 1fr auto;
+  grid-template-areas: "top top" "side main" "side dock";
+  height: 100%;
+  background: var(--bg);
+}
+
+.cc-topbar {
+  grid-area: top;
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+.cc-context { flex: 1; min-width: 0; }
+.cc-user { white-space: nowrap; }
+.cc-menu-button { display: none; }
+
+.cc-sidebar {
+  grid-area: side; position: relative;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+  overflow-y: auto;
+  min-height: 0;
+}
+.cc-nav { padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-4); }
+.cc-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.cc-nav-group h2 { padding: 0 var(--space-2) var(--space-1); }
+.cc-nav button {
+  text-align: left; background: transparent; border: 0; color: var(--fg-muted);
+  padding: var(--space-1) var(--space-2); font: inherit; cursor: pointer;
+}
+.cc-nav button:hover { background: var(--bg-hover); color: var(--fg); }
+.cc-nav button[aria-current="page"] { background: var(--accent-dim); color: var(--fg); font-weight: 600; }
+.cc-nav button:focus-visible { outline: 2px solid var(--accent); }
+
+.cc-content { grid-area: main; overflow: auto; min-width: 0; position: relative; }
+
+.cc-dock { grid-area: dock; position: relative; border-top: 1px solid var(--border); background: var(--bg-inset); min-width: 0; }
+.cc-dock-bar { display: flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-2); }
+.cc-dock-tabs { display: flex; align-items: center; height: 100%; flex: none; }
+.cc-dock-bar button { background: transparent; border: 0; color: var(--fg-muted); font: inherit; font-size: 0.8rem; cursor: pointer; padding: 0 var(--space-2); height: 100%; white-space: nowrap; }
+.cc-dock-bar button[aria-selected="true"] { color: var(--fg); border-bottom: 2px solid var(--accent); }
+/* The bar says what runs: the newest task in muted mono, the newest refusal on the right (V06).
+ * Both lines share the free width and shorten with an ellipsis; each keeps half as its base. */
+.cc-dock-running { flex: 1 1 auto; min-width: 0; margin-left: var(--space-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.72rem; color: var(--fg-muted); }
+.cc-dock-right { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.cc-dock-right > button { flex: none; }
+.cc-dock-alert { flex: 0 1 auto; min-width: 0; max-width: 52ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: var(--space-2); text-align: right; font-size: 0.72rem; color: var(--bad); }
+.cc-dock-toggle { margin-left: 0; }
+.cc-dock-body { overflow: auto; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); }
+
+.cc-breadcrumb { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-3) var(--space-5) 0; font-size: 0.8rem; color: var(--fg-muted); }
+.cc-breadcrumb a { color: var(--fg-muted); text-decoration: none; }
+.cc-breadcrumb a:hover { color: var(--fg); }
+.cc-crumb-sep { color: var(--fg-faint); }
+
+/* Title and action bar share one row at >= 1100 px: the title takes the free space, the
+ * actions get their own column on the right and wrap inside it, never over the title. */
+.cc-page-header {
+  position: sticky; top: 0; z-index: 5;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 60%);
+  align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.cc-page-title { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; min-width: 0; }
+.cc-page-title h1 { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.03em; margin: 0; }
+.cc-page-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
+/* One primary button per action bar; every other action is secondary, ghost or danger. */
+
+/* topbar */
+.cc-topbar button { font: inherit; }
+.cc-topbar .ghost { background: transparent; border: 1px solid transparent; color: var(--fg-muted); cursor: pointer; padding: var(--space-1) var(--space-2); }
+.cc-topbar .ghost:hover { color: var(--fg); background: var(--bg-hover); }
+.cc-topbar button:focus-visible, .cc-topbar a:focus-visible, .cc-topbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Context picker reads as a breadcrumb: `PLATFORM ▸ Berlin`, the select borderless (V01). */
+.cc-context-bar { display: flex; align-items: center; gap: var(--space-2); font-size: 0.8rem; color: var(--fg-muted); }
+.cc-context-bar .cc-context-org { color: var(--fg-muted); white-space: nowrap; }
+.cc-context-sep { color: var(--fg-faint); }
+.cc-context-bar select { max-width: 260px; border: 0; background: transparent; color: var(--fg); font-weight: 600; padding: 0 var(--space-1); cursor: pointer; }
+.cc-context-bar select option, .cc-context-bar select optgroup { background: var(--bg-raised); color: var(--fg); font-weight: 400; }
+.cc-search {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  min-width: 220px; padding: var(--space-1) var(--space-3);
+  background: var(--bg-inset); border: 1px solid var(--border); color: var(--fg-faint); cursor: pointer;
+}
+.cc-search:hover { border-color: var(--border-strong); color: var(--fg-muted); }
+.cc-search:focus-visible { outline: 2px solid var(--accent); }
+.cc-kbd { border: 1px solid var(--border); padding: 0 var(--space-1); font-size: 0.7rem; color: var(--fg-muted); }
+.cc-bell { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* The bell is a split control (U05): the bell opens the dock, the ▾ opens the pop-up menu. */
+.cc-bell-group { position: relative; display: inline-flex; align-items: center; }
+.cc-bell-more { padding: 0 var(--space-1); line-height: 1; color: var(--fg-muted); border: 0; background: transparent; cursor: pointer; }
+.cc-bell-more:hover { color: var(--fg); }
+.cc-bell-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cc-bell-menu { min-width: 250px; }
+.cc-icon-button { display: inline-flex; align-items: center; justify-content: center; }
+.cc-bell-count { min-width: 1.4em; padding: 0 var(--space-1); text-align: center; border: 1px solid var(--border); color: var(--fg-muted); font-size: 0.72rem; }
+.cc-bell-count.hot { border-color: var(--bad); color: var(--bad); }
+/* A new refusal while the pop-ups are muted: the count flashes once, 600 ms, and nothing else. */
+.cc-bell-count.flash { animation: cc-bell-flash 600ms ease-out 1; }
+@keyframes cc-bell-flash { 0% { background: var(--bad); color: var(--bg); } 100% { background: transparent; color: var(--bad); } }
+.cc-user-menu { position: relative; }
+.cc-menu-pop { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 140px; background: var(--bg-raised); border: 1px solid var(--border-strong); }
+.cc-menu-pop button { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--fg); padding: var(--space-2) var(--space-3); cursor: pointer; }
+.cc-menu-pop button:hover { background: var(--bg-hover); }
+.cc-menu-pop button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* sidebar */
+.cc-sidebar-head { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3) 0; min-height: 28px; }
+.cc-sidebar.collapsed .cc-sidebar-head { justify-content: center; padding: var(--space-2) 0 0; }
+.cc-collapse { background: transparent; border: 0; color: var(--fg-muted); cursor: pointer; padding: var(--space-1) var(--space-2); }
+.cc-collapse:hover { color: var(--fg); }
+.cc-collapse:focus-visible, .cc-group-toggle:focus-visible, .cc-tree-filter:focus-visible { outline: 2px solid var(--accent); }
+.cc-tree-controls { flex: 0 0 auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+/* The view tabs (V13): one row of its own with a definite height. It may neither shrink when the
+ * sidebar is short nor be overlapped: the segmented fills the row, its buttons share the width,
+ * and the tree follows in normal flow after this block. No negative margins, no positioning. */
+.cc-view-tabs { display: block; flex: none; }
+.cc-view-tabs .nb-segmented { display: flex; width: 100%; height: 26px; overflow: hidden; }
+.cc-view-tabs .nb-seg { flex: 1 1 0; min-width: 0; height: 100%; margin: 0; padding: 0 var(--space-2); line-height: 1; overflow: hidden; text-overflow: ellipsis; }
+.cc-tree-filter { width: 100%; box-sizing: border-box; background: var(--bg-inset); color: var(--fg); border: 1px solid var(--border); padding: var(--space-1) var(--space-2); font: inherit; font-size: 0.8rem; }
+.cc-tree-filter:focus { border-color: var(--border-strong); }
+/* Tree and menu share the sidebar height (V17). The tree keeps at least 45 % of it; the menu
+ * gets its own scroll box with a cap, and since its groups start collapsed the normal case is
+ * only six headings, so the tree simply takes the rest. */
+.cc-tree { flex: 1 1 auto; min-height: 45%; overflow: auto; border-bottom: 1px solid var(--border); }
+.cc-tree-note { padding: var(--space-2) var(--space-3); margin: 0; }
+.cc-nav { flex: 0 1 auto; min-height: 0; max-height: 40%; overflow: auto; overscroll-behavior: contain; }
+.cc-group-toggle { background: transparent; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.cc-sidebar.collapsed .cc-nav { padding: var(--space-2) 0; align-items: stretch; max-height: none; overflow: visible; }
+.cc-sidebar.collapsed .cc-nav button { text-align: center; padding: var(--space-2) 0; }
+.cc-nav-icon { font-size: 0.72rem; text-transform: uppercase; }
+.cc-badge-alert { margin-left: var(--space-2); padding: 0 var(--space-1); border: 1px solid var(--bad); color: var(--bad); font-size: 0.68rem; }
+/* The allow-all marker is a word, not a dot: lime text in a 1 px lime frame (V05). */
+.cc-badge-open { display: inline-block; margin-left: var(--space-2); padding: 0 var(--space-1); border: 1px solid var(--accent); color: var(--accent); font-size: 0.62rem; line-height: 1.5; }
+.cc-resizer { position: absolute; top: 0; right: -3px; bottom: 0; width: 6px; cursor: col-resize; z-index: 6; touch-action: none; }
+.cc-resizer:hover, .cc-resizer:focus-visible { background: var(--border-strong); outline: none; }
+.cc-resizer:focus-visible { background: var(--accent); }
+
+/* dock */
+.cc-dock-resizer { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; z-index: 6; touch-action: none; }
+.cc-dock-resizer:hover { background: var(--border-strong); }
+.cc-dock-resizer:focus-visible { background: var(--accent); outline: none; }
+.cc-dock-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cc-dock-bar .cc-bell-count { margin-left: var(--space-1); }
+.cc-dock-fab { display: none; }
+.cc-backdrop { display: none; }
+
+/* page header */
+.cc-page-actions button:focus-visible, .cc-breadcrumb a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-shell *, .cc-shell { transition: none !important; animation: none !important; }
+}
+
+@media (max-width: 1100px) {
+  .cc-shell { grid-template-columns: 1fr; grid-template-areas: "top" "main" "dock"; }
+  .cc-page-header { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .cc-page-actions { justify-content: flex-start; }
+  .cc-sidebar { display: none; }
+  .cc-overlay-open .cc-sidebar { display: flex; position: fixed; top: var(--topbar-height); bottom: 0; left: 0; width: 272px; z-index: 20; }
+  .cc-overlay-open .cc-resizer { display: none; }
+  .cc-overlay-open .cc-backdrop { display: block; position: fixed; inset: var(--topbar-height) 0 0 0; background: #000a; z-index: 19; }
+  .cc-menu-button { display: inline-block; }
+  .cc-search { min-width: 0; }
+}
+@media (max-width: 720px) {
+  .cc-dock { display: none; }
+  .cc-dock-running, .cc-dock-alert { display: none; }
+  .cc-dock.sheet { display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; }
+  .cc-dock-fab { display: inline-flex; gap: var(--space-2); position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 26; cursor: pointer; background: var(--bg-raised); color: var(--fg); border: 1px solid var(--border-strong); padding: var(--space-2) var(--space-3); }
+  .cc-dock-fab:focus-visible { outline: 2px solid var(--accent); }
+  .cc-user, .cc-search span:first-child, .cc-context { display: none; }
+  .cc-search { min-width: 0; margin-left: auto; }
+}

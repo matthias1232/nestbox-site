@@ -1,0 +1,18 @@
+# Run the released, signed images instead of building from source (ADR 0050):
+#
+#   NESTBOX_VERSION=v1.0.0 docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build
+#
+# The images are published by .github/workflows/release.yml to GHCR for amd64 and arm64.
+services:
+  migrate:
+    image: ghcr.io/matthias1232/nestbox-control-api:${NESTBOX_VERSION:-main}
+  control-api:
+    image: ghcr.io/matthias1232/nestbox-control-api:${NESTBOX_VERSION:-main}
+  web-console:
+    image: ghcr.io/matthias1232/nestbox-web-console:${NESTBOX_VERSION:-main}
+  sandbox-runner:
+    image: ghcr.io/matthias1232/nestbox-sandbox-runner:${NESTBOX_VERSION:-main}
+  egress-proxy:
+    image: ghcr.io/matthias1232/nestbox-egress-proxy:${NESTBOX_VERSION:-main}
+  overlay-hub:
+    image: ghcr.io/matthias1232/nestbox-overlay-hub:${NESTBOX_VERSION:-main}

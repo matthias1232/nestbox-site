@@ -60,6 +60,9 @@ pub enum InstallKind {
     Binary,
     /// The pack is its own prebuilt image.
     Image,
+    /// A graphical desktop (VNC, XFCE, Chrome); the install is a fixed script
+    /// shipped with the control plane, not a reference an operator supplies.
+    Desktop,
     None,
 }
 
@@ -72,6 +75,7 @@ impl InstallKind {
             Self::Pip => "pip",
             Self::Binary => "binary",
             Self::Image => "image",
+            Self::Desktop => "desktop",
             Self::None => "none",
         }
     }
@@ -84,6 +88,7 @@ impl InstallKind {
             "pip" => Self::Pip,
             "binary" => Self::Binary,
             "image" => Self::Image,
+            "desktop" => Self::Desktop,
             "none" => Self::None,
             _ => return None,
         })

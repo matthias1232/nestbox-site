@@ -49,7 +49,19 @@ pub async fn login(
         return Err(invalid_credentials());
     }
 
-    let environments = auth_store::environments_for_user(pool, user.id)
+    start_session(pool, user.id, user.display_name, idle_seconds, max_seconds).await
+}
+
+/// Open a session for a user whose identity was already proven, by password or by an
+/// identity provider. Everything after "who is this" is the same either way.
+pub async fn start_session(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    display_name: String,
+    idle_seconds: i64,
+    max_seconds: i64,
+) -> Result<LoginResult, ApiError> {
+    let environments = auth_store::environments_for_user(pool, user_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -66,7 +78,7 @@ pub async fn login(
 
     auth_store::insert_session(
         pool,
-        user.id,
+        user_id,
         &issued.token_hash,
         &issued.csrf_hash,
         expires_at,
@@ -80,7 +92,7 @@ pub async fn login(
         csrf_token: issued.csrf_token,
         environment_id,
         role,
-        display_name: user.display_name,
+        display_name,
         environments,
     })
 }

@@ -50,12 +50,94 @@ async fn main() {
         return;
     }
 
-    let runtime: Arc<dyn RuntimeAdapter> = Arc::new(HttpRunner::new(
+    // The local runner is the default; nodes that joined over the overlay are added by the
+    // loop below, and the router sends each call to the machine the sandbox lives on.
+    let local: Arc<dyn RuntimeAdapter> = Arc::new(HttpRunner::new(
         config.runner_url.clone(),
         config.runtime_network.clone(),
     ));
+    let router = Arc::new(nestbox_control_api::runtime::router::RuntimeRouter::new(local, Some(pool.clone())));
+    let runtime: Arc<dyn RuntimeAdapter> = router.clone();
 
-    let state = AppState::new(config.clone(), runtime, pool);
+    let mut state = AppState::new(config.clone(), runtime, pool);
+    state.services = state.services.clone().with_router(router.clone());
+
+    match nestbox_control_api::services::move_service::settle_interrupted(&state.services).await {
+        Ok(0) => {}
+        Ok(settled) => tracing::info!(settled, "marked moves interrupted by a restart as failed"),
+        Err(error) => tracing::warn!(code = error.code.0, "could not settle interrupted moves"),
+    }
+
+    // Rented machines: deleted when their lifetime is over or they sit empty (ADR 0050).
+    {
+        let services = state.services.clone();
+        let config = state.config.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+            loop {
+                match nestbox_control_api::services::provision_service::reap(&services, &config).await {
+                    Ok(0) => {}
+                    Ok(count) => tracing::info!(count, "rented machines were handed back"),
+                    Err(error) => tracing::debug!(code = error.code.0, "reaper pass skipped"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        });
+    }
+
+    // Snapshots of folders that work away from home, every NESTBOX_SNAPSHOT_MINUTES (default 15),
+    // (pruning old ones is an administrator action: POST /api/v1/snapshots/prune, ADR 0049).
+    {
+        let services = state.services.clone();
+        let config = state.config.clone();
+        tokio::spawn(async move {
+            let minutes: i64 = std::env::var("NESTBOX_SNAPSHOT_MINUTES").ok().and_then(|v| v.parse().ok()).unwrap_or(15).max(1);
+            tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+            loop {
+                match nestbox_control_api::services::snapshot_service::tick(&services, &config, minutes).await {
+                    Ok(0) => {}
+                    Ok(taken) => tracing::info!(taken, "scheduled snapshots were taken"),
+                    Err(error) => tracing::debug!(code = error.code.0, "snapshot pass skipped"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        });
+    }
+
+    // Images: each joined node holds what it was assigned (ADR 0048).
+    {
+        let services = state.services.clone();
+        let router = router.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            loop {
+                match nestbox_control_api::services::image_sync_service::reconcile(&services, &router).await {
+                    Ok(0) => {}
+                    Ok(pulled) => tracing::info!(pulled, "node images brought in step with the registry"),
+                    Err(error) => tracing::debug!(code = error.code.0, "image sync pass skipped"),
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        });
+    }
+
+    // Joined nodes: load their runners into the router and look at each one.
+    {
+        let services = state.services.clone();
+        let router = router.clone();
+        let config = state.config.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) = nestbox_control_api::services::node_join_service::sync(&services, &router).await {
+                    tracing::debug!(code = error.code.0, "node sync pass skipped");
+                }
+                if !config.overlay.dir.as_os_str().is_empty() {
+                    let _ = nestbox_control_api::services::node_join_service::write_peers(&services.pool, &config.overlay.dir).await;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            }
+        });
+    }
 
     // A build that was running when the process died leaves its recipe
     // `building` and its job `running`. Neither will ever finish, so they are
@@ -73,6 +155,18 @@ async fn main() {
         Ok(0) => {}
         Ok(settled) => tracing::info!(settled, "settled model installs interrupted by a restart"),
         Err(error) => tracing::warn!(code = error.code.0, "could not settle interrupted installs"),
+    }
+
+    // And the same for the Control Center's own jobs (bulk action, bulk model
+    // install, drain, quick deploy): they run in a detached task too, so a restart
+    // leaves them `running` and the dock keeps naming one that will never move.
+    match nestbox_control_api::services::job_service::settle_interrupted(&state.services).await {
+        Ok(0) => {}
+        Ok(settled) => tracing::info!(
+            settled,
+            "settled Control Center jobs interrupted by a restart"
+        ),
+        Err(error) => tracing::warn!(code = error.code.0, "could not settle interrupted jobs"),
     }
 
     // The hub's registry entry follows the deployment: its address differs when the
@@ -100,6 +194,11 @@ async fn main() {
                     Err(error) => tracing::debug!(code = error.code.0, "reconcile pass skipped"),
                 }
                 if let Err(error) =
+                    nestbox_control_api::services::quick_allow::expire_due(&services).await
+                {
+                    tracing::warn!(code = error.code.0, message = %error.message, "rule expiry failed");
+                }
+                if let Err(error) =
                     nestbox_control_api::services::telemetry_service::pull_openshell_events(&services).await
                 {
                     tracing::warn!(code = error.code.0, message = %error.message, "OpenShell event pull failed");
@@ -115,11 +214,67 @@ async fn main() {
                     tracing::debug!(code = error.code.0, "supervisor sync skipped");
                 }
                 if let Err(error) =
+                    nestbox_control_api::services::sandbox_service::heal_crashed(&services).await
+                {
+                    tracing::debug!(code = error.code.0, "crash healing pass skipped");
+                }
+                if let Err(error) =
                     nestbox_control_api::services::policy_service::sync_openshell_policies(&services).await
                 {
                     tracing::debug!(code = error.code.0, "OpenShell policy sync skipped");
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        });
+    }
+
+    // The workbox's slow loops: finish an agent restart that waited for an idle
+    // session, honour an egress mode's revert timer, keep warm models answering,
+    // and follow each node's WireGuard tunnel.
+    {
+        let services = state.services.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) =
+                    nestbox_control_api::services::agent_auth_service::run_pending_restarts(&services).await
+                {
+                    tracing::debug!(code = error.code.0, "pending agent restarts skipped");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
+        let services = state.services.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) =
+                    nestbox_control_api::services::egress_live_service::revert_due(&services).await
+                {
+                    tracing::debug!(code = error.code.0, "egress mode revert skipped");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            }
+        });
+        let services = state.services.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) =
+                    nestbox_control_api::services::model_readiness_service::keep_warm_tick(&services).await
+                {
+                    tracing::debug!(code = error.code.0, "keep-warm pass skipped");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            }
+        });
+        let services = state.services.clone();
+        let config = state.config.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) =
+                    nestbox_control_api::services::node_connect_service::refresh_tunnels(&services, &config).await
+                {
+                    tracing::debug!(code = error.code.0, "tunnel refresh skipped");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
     }

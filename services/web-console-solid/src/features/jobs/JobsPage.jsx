@@ -1,135 +1,113 @@
-// Jobs and schedules.
-
-import { For, Show, createSignal, onMount } from 'solid-js';
+// Tasks: every job with a readable label, progress and a drawer for results and logs; schedules in a second drawer.
+import { Show, createMemo, createSignal, onCleanup } from 'solid-js';
+import PageHeader from '../shell/PageHeader.jsx';
+import Breadcrumb from '../shell/Breadcrumb.jsx';
+import Drawer from '../../components/Drawer.jsx';
+import Meter from '../../components/Meter.jsx';
+import SelectTable from '../../components/SelectTable.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import Tabs from '../../components/Tabs.jsx';
+import { usePolling } from '../../components/Poll.js';
+import { useLive } from '../../state/live.jsx';
+import { useUi } from '../../state/ui.jsx';
 import * as api from '../../api/jobs.js';
+import JobDrawer from './JobDrawer.jsx';
+import { durationText, labelFor, summaryLine } from './jobLabels.js';
+import '../../styles/jobs.css';
 
-const TABS = [
-  { id: 'jobs', label: 'Jobs' },
-  { id: 'schedules', label: 'Schedules' },
+const FILTERS = [
+  { id: 'running', label: 'Running', test: (j) => j.status === 'running' || j.status === 'pending' },
+  { id: 'failed', label: 'Failed', test: (j) => j.status === 'failed' || j.status === 'partial' || j.failed > 0 },
+  { id: 'all', label: 'All', test: () => true },
 ];
 
+// The `?id=<uuid>` of the address opens that task's drawer (the dock's "Open" button links here).
+function idFromAddress() {
+  return new URLSearchParams(window.location.search).get('id');
+}
+
 export default function JobsPage() {
-  const [tab, setTab] = createSignal('jobs');
   const [jobs, setJobs] = createSignal([]);
   const [schedules, setSchedules] = createSignal([]);
-  const [logs, setLogs] = createSignal('');
-  const [error, setError] = createSignal(null);
+  const [filter, setFilter] = createSignal('all');
+  const [openId, setOpenId] = createSignal(idFromAddress());
+  const [showSchedules, setShowSchedules] = createSignal(false);
+  const [error, setError] = createSignal('');
+  const live = useLive();
+  const ui = useUi();
 
-  onMount(load);
+  const poll = usePolling(async () => {
+    const [jobList, scheduleList] = await Promise.all([api.list(100), api.schedules()]);
+    return { jobs: jobList.items || [], schedules: scheduleList.items || [] };
+  }, {
+    everyMs: 5000,
+    onData: (data) => { setJobs(data.jobs); setSchedules(data.schedules); setError(''); },
+    onError: (failure) => setError(failure.message),
+  });
+  onCleanup(live.on('job', () => poll.refresh()));
 
-  async function load() {
-    setError(null);
-    try {
-      const [jobList, scheduleList] = await Promise.all([api.list(100), api.schedules()]);
-      setJobs(jobList.items || []);
-      setSchedules(scheduleList.items || []);
-    } catch (failure) {
-      setError(failure.message);
-    }
-  }
-
-  async function showLogs(job) {
-    setError(null);
-    try {
-      const result = await api.logs(job.id, 200);
-      setLogs((result.items || []).map((row) => `${row.ts} [${row.level}] ${row.message}`).join('\n') || 'No log entries.');
-    } catch (failure) {
-      setError(failure.message);
-    }
-  }
+  const shown = createMemo(() => jobs().filter(FILTERS.find((f) => f.id === filter()).test));
+  const count = (id) => jobs().filter(FILTERS.find((f) => f.id === id).test).length;
+  const openJob = () => jobs().find((j) => j.id === openId()) || (openId() ? { id: openId(), kind: '', status: '' } : null);
 
   async function run(schedule) {
-    setError(null);
     try {
       await api.runSchedule(schedule.id);
-      await load();
+      ui.toast.show({ tone: 'ok', text: `Started ${schedule.name}.`, undo: null, ms: 4000 });
+      poll.refresh();
     } catch (failure) {
-      setError(failure.message);
+      ui.toast.show({ tone: 'bad', text: failure.message, undo: null, ms: 6000 });
     }
   }
 
+  const columns = [
+    { key: 'kind', label: 'Task', sortable: true, render: (j) => <strong>{labelFor(j.kind)}</strong> },
+    { key: 'status', label: 'Status', sortable: true, render: (j) => <StatusBadge status={j.status} /> },
+    { key: 'completed', label: 'Progress', render: (j) => <Meter label="" value={(j.completed || 0) + (j.failed || 0)} max={j.total || 0} text={summaryLine(j)} /> },
+    { key: 'started_at', label: 'Started', sortable: true, render: (j) => <span class="mono small">{j.started_at || j.created_at || '—'}</span> },
+    { key: 'duration', label: 'Duration', render: (j) => <span class="mono small">{durationText(j) || '—'}</span> },
+    { key: 'open', label: '', render: (j) => <button class="secondary tiny" onClick={(e) => { e.stopPropagation(); setOpenId(j.id); }}>Open</button> },
+  ];
+  const scheduleColumns = [
+    { key: 'name', label: 'Name', render: (s) => <span class="mono small">{s.name}</span> },
+    { key: 'cron', label: 'Cron', render: (s) => <span class="mono small">{s.cron}</span> },
+    { key: 'enabled', label: 'Enabled', render: (s) => (s.enabled ? 'yes' : 'no') },
+    { key: 'last_run_at', label: 'Last run', render: (s) => <span class="mono small">{s.last_run_at || 'never'}</span> },
+    { key: 'last_status', label: 'Result', render: (s) => (s.last_status ? <StatusBadge status={s.last_status} /> : <span class="muted small">—</span>) },
+    { key: 'run', label: '', render: (s) => <button class="secondary tiny" onClick={() => run(s)}>Run now</button> },
+  ];
+
   return (
-    <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Operations</h1>
-          <p class="muted">{jobs().length} jobs · {schedules().length} schedules</p>
-        </div>
-        <div class="controls">
-          <button class="secondary" onClick={load}>Refresh</button>
-        </div>
-      </header>
-
+    <section class="page jobs-page">
+      <Breadcrumb items={[{ label: 'Operate' }, { label: 'Tasks' }]} />
+      <PageHeader
+        title="Tasks"
+        subtitle={`${jobs().length} tasks · ${schedules().length} schedules`}
+        actions={
+          <>
+            <div class="jobs-filters" role="group" aria-label="Filter tasks">
+              {FILTERS.map((f) => (
+                <button type="button" class="chip" classList={{ active: filter() === f.id }} aria-pressed={filter() === f.id} onClick={() => setFilter(f.id)}>
+                  {f.label}<b>{count(f.id)}</b>
+                </button>
+              ))}
+            </div>
+            <button class="secondary" onClick={() => setShowSchedules(true)}>Schedules…</button>
+            <button class="secondary" onClick={() => poll.refresh()}>Refresh</button>
+          </>
+        }
+      />
       <Show when={error()}><p class="error">{error()}</p></Show>
-
-      <Tabs tabs={TABS} active={tab()} onChange={setTab} />
-
-      <Show when={tab() === 'jobs'}>
-        <Show when={jobs().length > 0} fallback={<p class="muted">No jobs yet.</p>}>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr><th>Kind</th><th>Status</th><th class="narrow">Progress</th>
-                    <th class="narrow">Failed</th><th>Created</th><th /></tr>
-              </thead>
-              <tbody>
-                <For each={jobs()}>
-                  {(job) => (
-                    <tr>
-                      <td class="mono small">{job.kind}</td>
-                      <td><StatusBadge status={job.status} /></td>
-                      <td class="narrow mono small">{job.completed + job.failed}/{job.total}</td>
-                      <td class="narrow mono small">{job.failed}</td>
-                      <td class="mono small">{job.created_at}</td>
-                      <td class="actions">
-                        <button class="tiny" onClick={() => showLogs(job)}>Log</button>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </Show>
-        <Show when={logs()}>
-          <pre class="logs">{logs()}</pre>
-        </Show>
-      </Show>
-
-      <Show when={tab() === 'schedules'}>
-        <Show when={schedules().length > 0} fallback={<p class="muted">No schedules.</p>}>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr><th>Name</th><th>Cron</th><th class="narrow">Enabled</th>
-                    <th>Last run</th><th class="narrow">Result</th><th /></tr>
-              </thead>
-              <tbody>
-                <For each={schedules()}>
-                  {(schedule) => (
-                    <tr>
-                      <td class="mono small">{schedule.name}</td>
-                      <td class="mono small">{schedule.cron}</td>
-                      <td class="narrow">{schedule.enabled ? 'yes' : 'no'}</td>
-                      <td class="mono small">{schedule.last_run_at || 'never'}</td>
-                      <td class="narrow">
-                        <Show when={schedule.last_status} fallback={<span class="muted small">—</span>}>
-                          <StatusBadge status={schedule.last_status} />
-                        </Show>
-                      </td>
-                      <td class="actions">
-                        <button class="tiny" onClick={() => run(schedule)}>Run now</button>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
-        </Show>
-      </Show>
+      <SelectTable
+        columns={columns}
+        rows={shown()}
+        rowKey="id"
+        onRowClick={(j) => setOpenId(j.id)}
+        empty={{ title: 'No tasks here', hint: 'Bulk actions, drains and deployments appear as tasks with their progress.' }}
+      />
+      <JobDrawer job={openJob()} onClose={() => setOpenId(null)} onRetried={(id) => { poll.refresh(); if (id) setOpenId(id); }} />
+      <Drawer open={showSchedules()} title="Schedules" subtitle="Recurring tasks" onClose={() => setShowSchedules(false)}>
+        <SelectTable columns={scheduleColumns} rows={schedules()} rowKey="id" empty={{ title: 'No schedules' }} />
+      </Drawer>
     </section>
   );
 }

@@ -1,0 +1,284 @@
+/* Workbox primitives: switch, segmented, countdown, dialog, banner, presence.
+ *
+ * These six appear on every Workbox card, so they are styled once here instead of
+ * once per card. Colours come from `tokens.css` only: a "denied" toggle and a
+ * "denied" badge must not be two different reds.
+ *
+ * Loaded by the components themselves (`components/Switch.jsx` and friends), not by
+ * `main.jsx`, so the styles travel with the controls that need them.
+ */
+
+/* Switch -------------------------------------------------------------- */
+
+/* A 34 × 18 track with a 14 px knob (V26): the knob fills the height of the
+ * track with a 1 px gap, so it reads as a knob rather than a stray square
+ * floating in a lime bar, and the track keeps its state colour when the control
+ * is disabled instead of fading to a washed-out green. */
+
+.nb-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--fg);
+  line-height: 1;
+}
+
+.nb-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.nb-switch-track {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: 34px;
+  height: 18px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.nb-switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius);
+  background: var(--fg-muted);
+  border: 1px solid var(--border-strong);
+  transition: left 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.nb-switch:hover .nb-switch-track {
+  border-color: var(--fg-faint);
+}
+
+.nb-switch input:checked + .nb-switch-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.nb-switch input:checked + .nb-switch-track .nb-switch-thumb {
+  left: 17px;
+  background: var(--fg-on-accent);
+  border-color: var(--fg-on-accent);
+}
+
+/* The ring is drawn in --fg, not in --accent: on an "on" switch the track is
+ * already lime, so a lime ring would be invisible. */
+.nb-switch input:focus-visible + .nb-switch-track {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.nb-switch input:focus-visible + .nb-switch-track .nb-switch-thumb {
+  background: var(--fg);
+}
+
+.nb-switch input:checked:focus-visible + .nb-switch-track .nb-switch-thumb {
+  background: var(--fg-on-accent);
+}
+
+.nb-switch-label {
+  white-space: nowrap;
+}
+
+/* A switch somebody may not move still shows its state: only the label steps
+ * back, the track keeps the colour that says "on" or "off". */
+.nb-switch:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.nb-switch:has(input:disabled) .nb-switch-label {
+  color: var(--fg-faint);
+}
+
+.nb-switch:has(input:disabled) .nb-switch-track {
+  opacity: 0.75;
+}
+
+/* Segmented ----------------------------------------------------------- */
+
+.nb-segmented {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-inset);
+}
+
+.nb-seg {
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: var(--space-1) var(--space-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.nb-seg:last-child {
+  border-right: 0;
+}
+
+.nb-seg:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border);
+  background: var(--bg-raised);
+}
+
+.nb-seg.active {
+  background: var(--accent);
+  color: var(--fg-on-accent);
+  font-weight: 600;
+}
+
+.nb-seg.active.tone-warn {
+  background: var(--warn);
+  color: var(--bg);
+}
+
+.nb-seg.active.tone-bad {
+  background: var(--bad);
+  color: var(--bg);
+}
+
+.nb-seg.active.tone-ok {
+  background: var(--ok);
+  color: var(--bg);
+}
+
+.nb-seg:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Countdown ----------------------------------------------------------- */
+
+.nb-countdown {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* Confirm dialog ------------------------------------------------------ */
+
+.nb-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  z-index: 20;
+}
+
+.nb-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, 92vw);
+  max-width: 520px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  z-index: 21;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.nb-dialog h3 {
+  margin: 0 0 var(--space-3);
+  font-size: 15px;
+}
+
+.nb-dialog-body {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.nb-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+/* Banner -------------------------------------------------------------- */
+
+.nb-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--info);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: 13px;
+}
+
+.nb-banner.warn {
+  border-left-color: var(--warn);
+}
+
+.nb-banner.bad {
+  border-left-color: var(--bad);
+}
+
+.nb-banner.info {
+  border-left-color: var(--info);
+}
+
+.nb-banner-text {
+  min-width: 0;
+}
+
+.nb-banner-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: none;
+}
+
+/* Presence ------------------------------------------------------------ */
+
+.nb-people {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.nb-person {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
+}
+
+.nb-person-more {
+  color: var(--fg-muted);
+}

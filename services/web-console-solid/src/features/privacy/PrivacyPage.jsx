@@ -8,6 +8,8 @@
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { usePrivacy } from './usePrivacy.js';
 import * as sandboxApi from '../../api/sandboxes.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 // Noise-level severity to a colour that means the same thing as elsewhere in the
 // console; an unknown value stays neutral instead of looking healthy.
@@ -96,14 +98,15 @@ export default function PrivacyPage(props) {
 
   return (
     <div class="page">
-      <header class="page-head">
-        <h2>Content privacy</h2>
-        <p class="muted">
-          What is inspected on its way into a sandbox and on its way out to a cloud
-          provider. A finding is recorded masked; the original text is never stored, and
-          the console cannot show it back to you.
-        </p>
-      </header>
+      <PageHeader
+        title="Content privacy"
+        subtitle={<>What is inspected on its way into a sandbox and on its way out to a cloud provider. A finding is recorded masked; the original text is never stored, and the console cannot show it back to you.</>}
+        actions={<>
+          <HelpTip anchor="policies" />
+        </>}
+      />
+
+      <PrivacyDlpSection />
 
       <Show when={privacy.error()}><p class="error">{privacy.error()}</p></Show>
       <Show when={privacy.notice()}><p class="notice">{privacy.notice()}</p></Show>
@@ -274,6 +277,23 @@ export default function PrivacyPage(props) {
           </label>
           <p class="muted small">
             How long the server keeps incidents. The purge below takes its own day count.
+          </p>
+          <PrivacyExtraSettings privacy={privacy} isAdmin={isAdmin()} />
+          <label class="small">
+            Hosts to check in addition to the model hosts
+            <textarea
+              class="input"
+              rows="3"
+              placeholder="one host per line"
+              value={(privacy.draft().enforce_hosts || []).join('\n')}
+              disabled={!isAdmin()}
+              onInput={(event) => privacy.setEnforceHosts(event.currentTarget.value)}
+            />
+          </label>
+          <p class="muted small">
+            The model providers are always checked. Everything else a sandbox reaches — a browser, a package
+            registry — is only recorded, unless you name it here: rewriting a shop's form because a value looked
+            like an e-mail is breakage, not protection.
           </p>
 
           <Show

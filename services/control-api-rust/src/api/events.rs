@@ -23,6 +23,9 @@ use crate::state::AppState;
 enum StreamFilter {
     Telemetry,
     State,
+    /// The three chat events. Kept apart from `State`, so a console that draws
+    /// the agent map does not receive a token delta per model request.
+    Chats,
 }
 
 /// The telemetry stream: network, DNS, and inference rows.
@@ -36,8 +39,31 @@ pub async fn telemetry_stream(
     )?;
     Ok(build_stream(
         state.bus().clone(),
+        state.services.clone(),
         auth.principal.environment_id,
         StreamFilter::Telemetry,
+        Visibility::for_principal(&state, &auth.principal),
+    ))
+}
+
+/// Live chat events: turns starting, answers growing, turns stored.
+///
+/// A delta is a partial answer, so who may see it is decided per event by the
+/// chat service: an administrator with `admin_chat_view` off sees the event
+/// without its text, and a user sees only their own sandboxes.
+pub async fn chats_stream(
+    State(state): State<AppState>,
+    auth: Auth,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    crate::services::require(
+        &auth.principal,
+        crate::domain::auth::Permission::SandboxRead,
+    )?;
+    Ok(build_stream(
+        state.bus().clone(),
+        state.services.clone(),
+        auth.principal.environment_id,
+        StreamFilter::Chats,
         Visibility::for_principal(&state, &auth.principal),
     ))
 }
@@ -53,6 +79,7 @@ pub async fn state_stream(
     )?;
     Ok(build_stream(
         state.bus().clone(),
+        state.services.clone(),
         auth.principal.environment_id,
         StreamFilter::State,
         Visibility::for_principal(&state, &auth.principal),
@@ -109,12 +136,19 @@ fn event_sandbox(event: &LiveEvent) -> Option<uuid::Uuid> {
     match event {
         LiveEvent::Telemetry(inner) => inner.sandbox_id(),
         LiveEvent::SandboxStateChanged { sandbox_id, .. } => Some(*sandbox_id),
+        LiveEvent::SandboxControlChanged { sandbox_id, .. } => *sandbox_id,
+        LiveEvent::ModelsChanged { sandbox_id, .. } => *sandbox_id,
+        LiveEvent::Alert { sandbox_id, .. } => *sandbox_id,
+        LiveEvent::ChatStarted { .. }
+        | LiveEvent::ChatDelta { .. }
+        | LiveEvent::ChatDone { .. } => event.chat_sandbox(),
         _ => None,
     }
 }
 
 fn build_stream(
     bus: std::sync::Arc<dyn crate::events::EventBus>,
+    services: crate::services::ServiceContext,
     environment_id: uuid::Uuid,
     filter: StreamFilter,
     visibility: Visibility,
@@ -125,7 +159,7 @@ fn build_stream(
     // where the last one stopped. A lagged subscriber skips ahead rather than
     // being disconnected, because a browser that missed a burst is better served
     // by the next event than by a reconnect loop.
-    let stream = futures::stream::unfold((receiver, visibility), move |(mut receiver, mut visibility)| async move {
+    let stream = futures::stream::unfold((receiver, visibility, services), move |(mut receiver, mut visibility, services)| async move {
         loop {
             match receiver.recv().await {
                 Ok(event) => {
@@ -138,10 +172,27 @@ fn build_stream(
                     if !visibility.allows(event_sandbox(&event)).await {
                         continue;
                     }
+                    // A chat event may carry text an administrator is not
+                    // allowed to read. The chat service decides; `None` drops it.
+                    let event = match (&event, &visibility.restricted) {
+                        (event, Some((_, principal))) if event.is_chat() => {
+                            match crate::services::chat_service::redact_live_for(
+                                &services,
+                                principal,
+                                event.clone(),
+                            )
+                            .await
+                            {
+                                Some(redacted) => redacted,
+                                None => continue,
+                            }
+                        }
+                        _ => event,
+                    };
                     let name = event_name(&event);
                     match serde_json::to_string(&event) {
                         Ok(data) => {
-                            return Some((Ok(Event::default().event(name).data(data)), (receiver, visibility)));
+                            return Some((Ok(Event::default().event(name).data(data)), (receiver, visibility, services)));
                         }
                         Err(_) => continue,
                     }
@@ -170,13 +221,21 @@ fn event_name(event: &LiveEvent) -> &'static str {
         LiveEvent::GatewayHealthChanged { .. } => "gateway",
         LiveEvent::JobProgress { .. } => "job",
         LiveEvent::PolicyRollout { .. } => "policy_rollout",
+        LiveEvent::SandboxControlChanged { .. } => "control",
+        LiveEvent::ModelsChanged { .. } => "models",
+        LiveEvent::NodeTunnelChanged { .. } => "node",
+        LiveEvent::Alert { .. } => "alert",
+        LiveEvent::ChatStarted { .. } => "chat_started",
+        LiveEvent::ChatDelta { .. } => "chat_delta",
+        LiveEvent::ChatDone { .. } => "chat_done",
     }
 }
 
 fn matches_filter(event: &LiveEvent, filter: StreamFilter) -> bool {
     match filter {
         StreamFilter::Telemetry => matches!(event, LiveEvent::Telemetry(_)),
-        StreamFilter::State => !matches!(event, LiveEvent::Telemetry(_)),
+        StreamFilter::State => !matches!(event, LiveEvent::Telemetry(_)) && !event.is_chat(),
+        StreamFilter::Chats => event.is_chat(),
     }
 }
 

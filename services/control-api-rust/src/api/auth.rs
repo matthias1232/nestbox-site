@@ -145,7 +145,7 @@ pub async fn me(auth: Auth) -> Json<MeResponse> {
 ///
 /// `HttpOnly` so script cannot read it, `SameSite=Lax` so a cross-site form
 /// cannot ride on it, and `Secure` when the console is served over TLS.
-fn build_session_cookie(token: &str, max_age_seconds: i64, secure: bool) -> HeaderValue {
+pub(crate) fn build_session_cookie(token: &str, max_age_seconds: i64, secure: bool) -> HeaderValue {
     let mut value = format!(
         "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_seconds}"
     );
