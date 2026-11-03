@@ -119,7 +119,7 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 
 | File | Purpose |
 |---|---|
-| `accounting.rs` | Accounting: what a request used, what it cost, and what a window shows. |
+| `accounting.rs` | Accounting: what a request used, what it cost, and what a window shows; a new row carries the proxy's `detail` identifiers (migration 0087) |
 | `cudax.rs` | CUDA-X components and their installation on a node. |
 | `environment.rs` | Organization, environment, cluster, and node. |
 | `mod.rs` | Module root: declares and re-exports the submodules. |

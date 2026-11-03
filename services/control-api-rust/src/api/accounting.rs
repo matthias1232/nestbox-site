@@ -256,6 +256,10 @@ pub struct RecordBody {
     pub privacy_action: Option<String>,
     #[serde(default)]
     pub privacy_detector: Option<String>,
+    /// Extra identifiers the proxy attaches to the row, such as the cluster and
+    /// the member that answered. Identifiers only: the proxy never sends content.
+    #[serde(default)]
+    pub detail: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
@@ -306,6 +310,7 @@ pub async fn ingest(
         reported_cost_micros: None,
         privacy_action: body.privacy_action,
         privacy_detector: body.privacy_detector,
+        detail: body.detail,
     };
     let recorded = accounting_service::record(&state.services, row).await?;
     Ok((StatusCode::CREATED, Json(recorded)))
@@ -473,5 +478,31 @@ async fn sandbox_id_by_name(
         .map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;
     id.ok_or_else(|| ApiError::not_found(ErrorCode::NOT_FOUND, "No such sandbox in this environment."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_record_body_keeps_the_detail_object() {
+        let body: RecordBody = serde_json::from_value(serde_json::json!({
+            "sandbox": "sb-1",
+            "provider": "anthropic",
+            "status": 200,
+            "detail": { "cluster_id": "c1", "install_id": "i1" }
+        }))
+        .expect("the record body should deserialise");
+        let detail = body.detail.expect("the detail object should be kept");
+        assert_eq!(detail["cluster_id"], "c1");
+        assert_eq!(detail["install_id"], "i1");
+    }
+
+    #[test]
+    fn a_record_body_without_detail_has_none() {
+        let body: RecordBody = serde_json::from_value(serde_json::json!({ "sandbox": "sb-1" }))
+            .expect("the record body should deserialise");
+        assert!(body.detail.is_none());
+    }
 }
 

@@ -128,7 +128,7 @@ Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_
 | File | Purpose |
 |---|---|
 | `access.rs` | How an operator reaches a sandbox: SSH keys, published ports, sessions. |
-| `accounting.rs` | Accounting rows, price list, daily rollup, and retention settings |
+| `accounting.rs` | Accounting rows (including the `detail` jsonb of migration 0087), price list, daily rollup, and retention settings |
 | `agent_auth.rs` | Rows of `sandbox_agent_auth`: the chosen sign-in mode per agent of a sandbox. |
 | `backups.rs` | The catalogue of root backups. The archives are files on the node; this layer holds |
 | `control.rs` | The workbox's read models: every sandbox's controls at a glance (ADR 0053). |

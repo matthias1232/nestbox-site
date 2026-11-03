@@ -98,9 +98,9 @@ pub async fn insert_request(
         "INSERT INTO accounting_requests (environment_id, sandbox_id, agent_instance, provider, \
             model, direction, endpoint, status, latency_ms, prompt_tokens, completion_tokens, \
             cached_tokens, reasoning_tokens, content_digest, cost_micros, price_source, \
-            privacy_action, privacy_detector) \
+            privacy_action, privacy_detector, detail) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-            $17, $18) \
+            $17, $18, $19) \
          RETURNING id",
     )
     .bind(scope.environment_id())
@@ -121,6 +121,7 @@ pub async fn insert_request(
     .bind(price_source.as_str())
     .bind(&request.privacy_action)
     .bind(&request.privacy_detector)
+    .bind(&request.detail)
     .fetch_one(scope.connection())
     .await?;
     Ok(id)

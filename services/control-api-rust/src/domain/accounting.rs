@@ -345,6 +345,9 @@ pub struct NewAccountingRow {
     pub privacy_action: Option<String>,
     /// Which detector decided it, when one did.
     pub privacy_detector: Option<String>,
+    /// Extra identifiers the caller attached, such as the cluster and the member
+    /// that answered. Never request content.
+    pub detail: Option<serde_json::Value>,
 }
 
 /// One stored request, as the accounting list shows it.
