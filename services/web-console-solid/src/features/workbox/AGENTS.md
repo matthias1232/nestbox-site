@@ -62,3 +62,11 @@ terminal imports for its presence events so a page keeps one event stream.
 | `MyBoxesPage.jsx` | box cards with status, node, allow-all badge and Open / Shell / Desktop |
 
 Note: `SessionsPanel.jsx` now renders `components/ConsoleFrame.jsx` under the presence line.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `agents.test.js` | Node tests for `agents`. |
+| `move.test.js` | Node tests for `move`. |

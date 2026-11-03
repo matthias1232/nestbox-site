@@ -84,3 +84,31 @@ sandbox after its machine was powered off. DigitalOcean and Vultr drivers: unit 
 Not built, deliberately listed: Brev/AWS/GCP drivers; models, builds and CUDA-X on a joined node;
 node-to-node links; automatic (unattended) failover; site-level roles and a general `role_bindings`
 table; billing. See the amendments of ADR 0044-0050.
+
+## Control Center (2026-11)
+
+### Built
+
+- C1 Console paths: data center, site, node, model, cluster and docs pages, plus pop-out logs and traffic.
+- C2 Shell: tree sidebar, top bar, dock, palette, alert stack, help drawer, shortcuts sheet and tour.
+- C3 Inventory tree with three views (infrastructure, workloads, models).
+- C4 Search across nodes, sandboxes, models and policies.
+- C5 Bulk sandbox actions in one request.
+- C6 Bulk model deploy across many nodes as one job.
+- C7 Model clusters: installs of one model behind one provider profile, round-robin.
+- C8 Node operations: summary, drain, quick deploy.
+- C9 Alerts, with acknowledgement and live delivery.
+- C10 Effective mounts for a sandbox.
+- C11 Policy preview before applying.
+- C12 Quick controls: one-click actions on rows.
+- C13 Permissions: grants and revocation, enforced in the service layer.
+- Help documents shipped with the console, rendered illustrations, and this guide.
+
+### Not built
+
+- Clusters that span data centers (a model cluster lives inside one site's reach).
+- Autoscaling of nodes or model installs.
+- A light theme.
+- Offline export of the docs.
+- Role bindings beyond the shipped model (member grants on sandboxes, tree roles read-only).
+- The Agent situation page's `/live/agents*` routes: the page is restyled and shows an explanation.

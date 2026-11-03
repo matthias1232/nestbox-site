@@ -86,3 +86,10 @@ and its last `synced_at`.
 3. Add a unit test for the parsing (no test may touch the network) and a filter
    test for whatever allowlist the source needs.
 4. Update this file and the `catalog_sync/` row of `../AGENTS.md`.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `mod.rs` | Module root: declares and re-exports the submodules. |

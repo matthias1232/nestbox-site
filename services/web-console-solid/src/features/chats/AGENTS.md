@@ -49,3 +49,13 @@ order without a browser.
 
 `chats.liveWatch('thread')` is F-4's call when a live view is opened; this folder
 never records a watch by itself.
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `chatExport.test.js` | Node tests for `chatExport`. |
+| `chatsFormat.test.js` | Node tests for `chatsFormat`. |
+| `chatsMerge.test.js` | Node tests for `chatsMerge`. |
+| `findingsQueue.test.js` | Node tests for `findingsQueue`. |

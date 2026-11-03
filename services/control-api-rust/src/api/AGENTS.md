@@ -159,3 +159,16 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 | `tours.rs` | `PUT /users/me/tours/{tour}` (F18) |
 | `permissions.rs` | `GET/PUT/DELETE /permissions` (B12) |
 | `tours.rs` | `PUT /users/me/tours/{tour}`, `GET /users/me/tours` (`list_seen`) |
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `accounting.rs` | Accounting and the internal ingest the proxy calls. |
+| `backups.rs` | Backups of persistent roots. |
+| `cudax.rs` | CUDA-X catalogue and per-node installation endpoints. |
+| `privacy.rs` | Content privacy (DLP): the policy, a single filter test, incidents, purge. |
+| `proxies.rs` | Exit proxies over HTTP. |
+| `secrets.rs` | The secret store: write-only keys. |
+| `users.rs` | User administration (admin only). |

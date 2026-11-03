@@ -388,3 +388,29 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `permission_service.rs` | `list set remove`: roles per data center (`user_scopes`), sandbox (via `tenancy_service::grant/revoke`) and organisation (read-only); refuses removing the last direct admin (`permission.last_admin`, 409) |
 | `tour_service.rs` | `mark_seen` (F18) |
 | `tour_service.rs` | `mark_seen` (validated name), `seen` (the caller's finished tours) |
+
+
+## Files added by the Control Center phase
+
+| File | Purpose |
+|---|---|
+| `accounting_service.rs` | Request accounting: what a request used, what it cost, and what a window |
+| `agent_activity_service.rs` | What the agents in a sandbox are doing right now: their tmux panes, whether a |
+| `agent_auth_service.rs` | Switching an agent between the user's own subscription and the gateway |
+| `agent_launch_service.rs` | The launcher inside a sandbox that starts each agent in its chosen sign-in |
+| `audit_service.rs` | Reading the audit trail. |
+| `backup_service.rs` | Backup and restore of persistent roots. |
+| `cudax_service.rs` | CUDA-X catalogue and per-node installation. |
+| `egress_live_service.rs` | Switching a sandbox's egress mode while it runs (ADR 0052). |
+| `environment_service.rs` | Environment membership and summary. |
+| `mod.rs` | Module root: declares and re-exports the submodules. |
+| `model_grant_service.rs` | Which models a sandbox may use, and what it sees of them (ADR 0056). |
+| `model_readiness_service.rs` | Making the models a sandbox was granted ready before it is used (ADR 0057). |
+| `node_connect_service.rs` | Connecting a machine by its address and SSH credentials, and the state of |
+| `presence_service.rs` | Who is connected to a sandbox right now (ADR 0055). |
+| `privacy_service.rs` | Content privacy (DLP) for sandbox chat content. |
+| `proxy_service.rs` | The exit proxy catalogue, and choosing one. |
+| `rule_bulk_service.rs` | Turning a period of observation into rule drafts in one step (ADR 0053). |
+| `secret_service.rs` | The secret store: keys typed into the console, kept encrypted, never shown again. |
+| `snapshot_service.rs` | Snapshots on a timer, and clearing out old ones (ADR 0049). |
+| `user_service.rs` | Users: who may sign in, with what role, in this environment. |
