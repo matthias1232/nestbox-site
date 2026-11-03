@@ -38,3 +38,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 (`--radius`), 1 px olive lines, lime accent, tinted state backgrounds written as
 `color-mix(in srgb, var(--bad) 14%, transparent)`. No hex or rgb colour outside `tokens.css`.
 `app.css` also defines `.eyebrow`, `.figure` and `.num`.
+- `dock.css` — dock tabs, alert cards and the alert stack (F13); imported by `features/dock/AlertStack.jsx`.

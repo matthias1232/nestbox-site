@@ -1,0 +1,19 @@
+/* Dock tabs, alert cards and the alert stack (package F13). */
+.dock-tools { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.dock-tools button[aria-pressed="true"] { color: var(--accent); border-bottom: 1px solid var(--accent); }
+.dock-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.dock-table th { text-align: left; font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-muted); padding: var(--space-1) var(--space-2); position: sticky; top: 0; background: var(--bg-inset); }
+.dock-table td { padding: var(--space-1) var(--space-2); border-top: 1px solid var(--border); vertical-align: middle; }
+.dock-progress { min-width: 180px; }
+.dock-line { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-events { list-style: none; margin: 0; padding: 0; }
+.dock-event { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-2); border-left: 2px solid transparent; font-size: 0.8rem; min-height: var(--row-height); }
+.dock-event.bad { border-left-color: var(--bad); }
+.alert-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.alert-stack { position: fixed; top: calc(var(--topbar-height) + 8px); right: 8px; width: 340px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; gap: var(--space-2); z-index: 40; }
+.alert-card { background: var(--bg-raised); border: 1px solid var(--border-strong); border-left: 2px solid var(--bad); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.alert-card p { margin: 0; }
+.alert-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.alert-flash { animation: alert-flash 600ms ease-out 1; }
+@keyframes alert-flash { 0% { transform: translateY(-6px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .alert-flash { animation: none; } }

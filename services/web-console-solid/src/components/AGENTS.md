@@ -84,3 +84,4 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
 F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
+- `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); `alertAnswers.js` holds the pure answer list and request bodies (tested).
