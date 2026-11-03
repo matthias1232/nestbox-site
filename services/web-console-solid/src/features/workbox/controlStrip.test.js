@@ -8,12 +8,52 @@ import {
 
 const later = new Date(Date.now() + 600000).toISOString();
 
+// One frame of `/api/v1/telemetry/stream`: the event itself, tagged `type` and
+// `kind`, with the fields flat (`sni`, `listener`, `app_protocol` are omitted when
+// they are null).
+const NETWORK_FRAME = {
+  type: 'telemetry', kind: 'network', id: '4d0d8f0e-9a1c-4a3e-8a11-1c2b3d4e5f60',
+  environment_id: '55eb109b-8f9e-4e5d-8e8c-dc832d1f519e',
+  sandbox_id: 'sbx-1', gateway_id: null, ts: '2026-11-03T10:12:00Z', direction: 'outbound',
+  protocol: 'https', source: '10.244.0.2', destination: 'example.org', port: 443,
+  binary: 'curl', decision: 'allow', rule_id: null, rule_name: null, latency_ms: 12,
+  correlation_id: null, enforcement: 'enforced', channel: 'proxy',
+};
+
+// The shape `GET /sandboxes/{id}/control` answers (control_service::summary).
+const SUMMARY = {
+  sandbox_id: '0f0c5b8e-1111-4a3e-8a11-1c2b3d4e5f60',
+  name: 'feat-work',
+  status: 'running',
+  node: { name: 'local', tunnel_state: 'up', endpoint: '10.244.0.2' },
+  egress: {
+    sandbox_id: '0f0c5b8e-1111-4a3e-8a11-1c2b3d4e5f60', mode: 'forward_proxy',
+    trust_ca_ref: null, enabled: true, version: 3, changed_at: null, revert_at: null,
+    revert_to: null, needs_recreate: false,
+  },
+  windows: [{ id: 'w1', sandbox_id: '0f0c5b8e-1111-4a3e-8a11-1c2b3d4e5f60', scope: 'sandbox',
+    mode: 'bypass', channel: 'dns', reason: 'alert example.org', expires_at: later }],
+  allow_all: true,
+  allow_all_until: later,
+  agents: [], presence: [], models: [], move: null, errors: {},
+};
+
 test('a quiet summary has everything off and the forward proxy', () => {
   const state = stripState({});
   assert.equal(state.allowAll.on, false);
   assert.equal(state.mode, 'forward_proxy');
   assert.equal(state.recording, 'full');
   assert.equal(state.channels.dns.on, false);
+});
+
+test('the real control summary reads as its window and its proxy mode', () => {
+  const state = stripState(SUMMARY);
+  assert.equal(state.allowAll.on, true);
+  assert.equal(state.allowAll.until, later);
+  assert.equal(state.mode, 'forward_proxy');
+  assert.equal(state.channels.dns.on, true);
+  assert.equal(state.channels.internet.on, false);
+  assert.equal(state.channels.mcp.on, false);
 });
 
 test('a whole-sandbox window means allow-all with its end', () => {
@@ -34,9 +74,12 @@ test('proxy off counts as allow-all', () => {
   assert.equal(stripState({ egress: { mode: 'off_allow_all' } }).allowAll.on, true);
 });
 
-test('recording comes from the mute columns when the summary has no field', () => {
-  assert.equal(stripState({ telemetry_mute_until: later }).recording, 'off');
-  assert.equal(stripState({ telemetry_mute_bodies_until: later }).recording, 'flows');
+test('the summary carries no recording state, so the strip shows full', () => {
+  // The mutes live on the sandbox row; `/sandboxes/{id}/control` does not return them.
+  assert.equal(stripState({ telemetry_mute_until: later }).recording, 'full');
+  assert.equal(stripState({ telemetry_mute_bodies_until: later }).recording, 'full');
+  assert.equal(stripState(SUMMARY).recording, 'full');
+  // A key the API may grow later is honoured rather than ignored.
   assert.equal(stripState({ recording: 'flows' }).recording, 'flows');
 });
 
@@ -78,6 +121,39 @@ test('log lines of another sandbox are dropped, refused ones are marked', () => 
   assert.equal(line.refused, true);
   assert.equal(line.text, 'x.io:443');
   assert.equal(logLine('dns', { id: 'd', sandbox_id: 's1', hostname: 'a.b' }, 's1').text, 'a.b');
+});
+
+test('a live network frame becomes a log line', () => {
+  const line = logLine('network', NETWORK_FRAME, 'sbx-1');
+  assert.equal(line.text, 'example.org:443');
+  assert.equal(line.kind, 'network');
+  assert.equal(line.decision, 'allow');
+  assert.equal(line.refused, false);
+  assert.equal(line.binary, 'curl');
+  assert.equal(line.protocol, 'https');
+  assert.equal(line.ts, '2026-11-03T10:12:00Z');
+  assert.equal(logLine('network', NETWORK_FRAME, 'sbx-2'), null);
+});
+
+test('a refused dns frame, an inference frame and a history row read the same', () => {
+  const dns = { type: 'telemetry', kind: 'dns', id: 'd1', sandbox_id: 'sbx-1',
+    ts: '2026-11-03T10:12:00Z', hostname: 'ads.example.net', resolver: '10.244.0.53',
+    decision: 'deny', binary: null, correlation_id: null };
+  const refused = logLine('dns', dns, 'sbx-1');
+  assert.equal(refused.text, 'ads.example.net');
+  assert.equal(refused.refused, true);
+  assert.equal(refused.kind, 'dns');
+
+  // `/api/v1/telemetry/events` wraps the same event under `detail`.
+  const row = { id: 'd1', kind: 'dns', sandbox_id: 'sbx-1', ts: '2026-11-03T10:12:00Z', detail: dns };
+  assert.equal(logLine('dns', row, 'sbx-1').text, 'ads.example.net');
+  assert.equal(logLine('dns', row, 'sbx-2'), null);
+
+  const inference = { type: 'telemetry', kind: 'inference', id: 'i1', sandbox_id: 'sbx-1',
+    ts: '2026-11-03T10:12:00Z', provider_key: 'anthropic', endpoint: 'api.anthropic.com',
+    model_key: 'claude-sonnet', method: 'POST', path: '/v1/messages', status_code: 200,
+    latency_ms: 900, tokens_in: 120, tokens_out: 40, decision: 'allow' };
+  assert.equal(logLine('inference', inference, 'sbx-1').text, 'claude-sonnet · 200');
 });
 
 test('lines are newest first, bounded and not doubled', () => {

@@ -1,5 +1,11 @@
 // The live log of one sandbox: network, DNS and inference events, newest on top,
 // with a red lane for refused destinations that carries the answers (contract C9).
+//
+// The events are the ones `/api/v1/telemetry/stream` sends: the SSE name is the
+// kind (`network`, `dns`, `inference`) and the frame is the event itself with the
+// fields flat — `sandbox_id`, `id`, `ts`, `decision`, `destination`/`sni`/`port`
+// or `hostname` or `model_key`/`endpoint`/`status_code`, `binary`, `protocol`.
+// `controlStrip.js` `logLine` turns one into a line.
 
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 
@@ -153,7 +159,11 @@ export default function LiveLogCard(props) {
                   </span>
                   <span class="badge muted"><i />{line.kind}</span>
                   <span class="mono wb-log-text">{line.text}</span>
-                  <Show when={line.binary}><span class="muted small mono">{line.binary}</span></Show>
+                  <Show when={line.protocol || line.binary}>
+                    <span class="muted small mono">
+                      {[line.protocol, line.binary].filter(Boolean).join(' · ')}
+                    </span>
+                  </Show>
                 </li>
               )}
             </For>

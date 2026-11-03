@@ -41,11 +41,8 @@ export const CHANNEL_SWITCHES = [
   { key: 'mcp', label: 'MCP', window: 'mcp' },
 ];
 
-// Whether an ISO time lies in the future (null and unparsable are not).
-function future(iso, now) {
-  const time = Date.parse(iso || '');
-  return Number.isFinite(time) && time > now;
-}
+// The recording levels the API accepts (contract C12).
+export const RECORDING_LEVELS = ['full', 'flows', 'off'];
 
 // The state of one channel: open when a window covers it (or everything), with the
 // latest end among the covering windows, or null when one has no end.
@@ -59,18 +56,23 @@ function channelState(windows, channel) {
 }
 
 // What the strip shows for one control summary (contract C12).
-export function stripState(summary, now = Date.now()) {
+//
+// The summary `GET /sandboxes/{id}/control` answers with `sandbox_id`, `name`,
+// `status`, `node`, `egress` (`mode`, `revert_at`, `version`, …), `windows`
+// (`channel`, `mode`, `scope`, `reason`, `expires_at`), `allow_all`,
+// `allow_all_until`, `agents`, `presence`, `models`, `move` and `errors`. Those
+// are the only keys read here.
+//
+// It carries no recording state: the mutes live in `sandboxes.telemetry_mute_until`
+// and `sandboxes.telemetry_mute_bodies_until` and no route returns them, so the
+// strip says "full" until the API names a `recording` field.
+export function stripState(summary) {
   const control = summary || {};
   const windows = openWindows(control);
   const wholeWindows = windows.filter((entry) => !entry.channel || entry.channel === 'all');
   const proxyOff = control.egress?.mode === 'off_allow_all';
   const on = Boolean(control.allow_all) || wholeWindows.length > 0 || proxyOff;
-  let recording = control.recording;
-  if (!['full', 'flows', 'off'].includes(recording)) {
-    if (future(control.telemetry_mute_until, now)) recording = 'off';
-    else if (future(control.telemetry_mute_bodies_until, now)) recording = 'flows';
-    else recording = 'full';
-  }
+  const recording = RECORDING_LEVELS.includes(control.recording) ? control.recording : 'full';
   return {
     allowAll: { on, until: on ? allowAllUntil(control) : null },
     mode: control.egress?.mode || 'forward_proxy',
@@ -146,24 +148,32 @@ export const LOG_FILTERS = [
 export const LOG_KEEP = 300;
 
 // One telemetry event as a log line, or null when it belongs to another sandbox.
-// `kind` is the stream name (`network`, `dns`, `inference`).
+//
+// Two real shapes reach this function:
+//   - a live event from `/api/v1/telemetry/stream`: the event itself, tagged
+//     `type` (`telemetry`) and `kind` (`network` | `dns` | `inference`), with the
+//     fields flat (`id`, `sandbox_id`, `ts`, `decision`, `destination`, `port`, …);
+//   - a history row from `/api/v1/telemetry/events`: `{ id, kind, sandbox_id, ts,
+//     detail }`, where `detail` is that same event object.
+// `kind` is the stream name, used only when the payload does not name itself.
 export function logLine(kind, event, sandboxId) {
   if (!event || typeof event !== 'object') return null;
-  const data = event.event && typeof event.event === 'object' ? event.event : event;
+  const data = event.detail && typeof event.detail === 'object' ? event.detail : event;
   if (data.sandbox_id !== sandboxId) return null;
+  const name = data.kind || kind;
   const decision = data.decision || 'allow';
   let text;
-  if (kind === 'dns') text = data.hostname || '';
-  else if (kind === 'inference') {
+  if (name === 'dns') text = data.hostname || '';
+  else if (name === 'inference') {
     text = [data.model_key || data.endpoint || 'model request', data.status_code].filter(Boolean).join(' · ');
   } else {
     const host = data.sni || data.destination || '';
     text = data.port ? `${host}:${data.port}` : host;
   }
   return {
-    key: data.id || `${kind}-${data.ts}-${text}`,
+    key: data.id || `${name}-${data.ts}-${text}`,
     ts: data.ts || new Date().toISOString(),
-    kind,
+    kind: name,
     decision,
     refused: decision === 'deny',
     text,
