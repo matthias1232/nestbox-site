@@ -37,6 +37,7 @@ Two different jobs:
 | `metrics.rs` | Sample ingest, the hour/day/week reads, rollup idempotency, partition retention, the process table and the inventory snapshot against a database |
 | `telemetry_ingest.rs` | The proxy batch against a database: node token fail-closed, network/dns rows, redacted bodies, MCP calls, the batch cap, tenant scope (`feat/proxy-telemetry`) |
 | `traffic.rs` | The traffic log: rows, aggregates, the map, and the scoped reads |
+| `node_ops.rs` | Node summary and drain against a database (B07; written, run by the coordinator) |
 | `agent_auth.rs` | Agent sign-in modes against a database: the default from the old `login` choice, a switch stored as waiting, a restart that keeps the mode, and the sign-in rules appearing and disappearing with the mode |
 | `model_grants.rs` | Model grants against a database: an environment grant reaching a sandbox, a member refused the environment scope, the narrower sandbox grant winning, and the accounting router payload |
 | `moves_preflight.rs` | The move preflight against a database: the sandbox's own node, an unknown node, and what the answer says it carries |

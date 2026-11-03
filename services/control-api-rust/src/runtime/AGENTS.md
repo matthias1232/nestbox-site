@@ -100,5 +100,5 @@ node instead of a sandbox (hardware, images, snapshots).
 so both follow `request.node_id` — a joined node fetches and serves on its own disk. `stop_model`
 stays local because a model is named by its key alone and nothing in the call says which machine.
 
-`RuntimeRouter::host_load_for(node)` is a Wave 0 stub for package B07: the local node answers, a remote runner is reported
-unreachable until B07 routes the call to it.
+`RuntimeRouter::host_load_for(node)` asks the runner of that node (a remote adapter for a joined node, the local one otherwise);
+the node summary calls it with a 3 s timeout and shows the load as unknown when it fails.

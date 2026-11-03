@@ -142,7 +142,7 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 | `bulk.rs` | `POST /sandboxes/bulk` (B03) |
 | `models.rs` (`install_bulk`) | `POST /models/{key}/install-bulk` (B04) |
 | `model_clusters.rs` | `/model-clusters`, members, and the proxy's `GET /internal/accounting/clusters/{id}` (B05) |
-| `node_ops.rs` | `GET /nodes/{id}/summary`, `POST /nodes/{id}/drain`, `POST /nodes/quick` (B07) |
+| `node_ops.rs` | `GET /nodes/{id}/summary`, `POST /nodes/{id}/drain`, `POST /nodes/quick` (B07); drain and quick pass `state.config` to the service |
 | `alerts.rs` | `GET /alerts` (B08) |
 | `mounts.rs` | `GET/PUT /sandboxes/{id}/mounts` (B09) |
 | `policy_preview.rs` | `POST /policies/preview`, `GET /policies/{id}/compiled` (B10) |
