@@ -101,6 +101,9 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 | `inventory.rs` | `TreeView`, `TreeNode` (extras flattened), `TreeCounts`, `TreeResponse`, the row types (`EnvironmentRow`, `PlacementRow`, `UserRow`, `InstallRow`, `ClusterRow`) and the pure `build_tree` that groups, sorts, rolls up counts and status |
 | `model_cluster.rs` | `ModelCluster`, `ClusterMember`, `ClusterStrategy` (`as_str`/`parse`) |
 | `search.rs` | `SearchKind`, `SearchHit`, `SearchParams`, `score`, `score_with_id`, `like_pattern`, `console_path` |
+| `inventory.rs` | `TreeView`, `TreeNode`, `TreeCounts`, `PlacementRow` and the pure `build_tree` (B01 fills it) |
+| `model_cluster.rs` | `ModelCluster`, `ClusterMember`, `ClusterStrategy` (`as_str`/`parse`), `validate_name`, `healthy_count` |
+| `search.rs` | `SearchKind`, `SearchHit`, `SearchParams` |
 | `alerts.rs` | `AlertView` and `alert_id` (stable digest of sandbox, host, port) |
 | `search.rs` | `SearchKind`, `SearchHit`, `SearchParams` |
 | `alerts.rs` | `AlertView`, `alert_id` (stable digest of sandbox, host, port), `window` (5m, 15m, 1h or 24h) |

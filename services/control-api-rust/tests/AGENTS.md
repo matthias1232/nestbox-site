@@ -46,3 +46,4 @@ Two different jobs:
 | `moves_preflight.rs` | The move preflight against a database: the sandbox's own node, an unknown node, and what the answer says it carries |
 | `mounts.rs` | B09: mount, change, remove and wrong-node refusal (needs TEST_DATABASE_URL; db `nestbox_cc_b09`) |
 | `model_bulk.rs` | The bulk model install against a database (`nestbox_cc_b04`): two nodes give two targets and a job whose total is the non-skipped count; a request without exactly one selector is refused |
+| `model_clusters.rs` | Cluster create with two installs, provider profile with the cluster endpoint, proxy view, wrong-model refusal, delete removes the profile (DB `nestbox_cc_b05`; compiled only here) |

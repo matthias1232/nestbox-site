@@ -372,6 +372,9 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `model_bulk_service.rs` | `install_bulk` (B04): plans targets with the catalog verdict, creates one `ModelBulkInstall` job, installs up to 4 nodes in parallel via `model_service::install`, waits for each, optionally makes a cluster |
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
 | `node_ops_service.rs` | `summary` (node + load + installs + images + tunnel), `drain` (move or stop every sandbox, job `NodeDrain`) and `quick` (rent/connect/script, probe, install a model, job `NodeQuickDeploy`); `drain` and `quick` also take `&Config` (B07) |
+| `model_bulk_service.rs` | `install_bulk` (B04) |
+| `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05): a cluster plus its `local_openai_compatible` provider profile in one transaction; `proxy_view` reads the appliance data center |
+| `node_ops_service.rs` | `summary drain quick` (B07) |
 | `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
 | `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it; `drain` needs `NodeManage` |
 | `alert_service.rs` | `list` (open alerts), `publish_if_refused` (live `alert` event per refused network or DNS event; no DB read) (B08) |

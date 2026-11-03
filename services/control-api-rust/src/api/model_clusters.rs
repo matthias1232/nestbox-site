@@ -59,6 +59,9 @@ pub async fn delete(
 #[derive(Debug, Deserialize)]
 pub struct MemberRequest {
     pub install_id: Uuid,
+    /// Share of requests, 1 to 100. Defaults to 1.
+    #[serde(default)]
+    pub weight: Option<i32>,
 }
 
 /// Add an install to a cluster.
@@ -68,7 +71,7 @@ pub async fn add_member(
     Path(id): Path<Uuid>,
     Json(body): Json<MemberRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    Ok(Json(model_cluster_service::add_member(&state.services, &auth.principal, id, body.install_id).await?))
+    Ok(Json(model_cluster_service::add_member(&state.services, &auth.principal, id, body.install_id, body.weight).await?))
 }
 
 /// Remove an install from a cluster.
