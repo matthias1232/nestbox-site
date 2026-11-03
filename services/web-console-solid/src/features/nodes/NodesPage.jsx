@@ -19,9 +19,9 @@ import Empty from '../../components/Empty.jsx';
 import * as nodesConnect from '../../api/nodesConnect.js';
 import { stateStream } from '../../api/telemetry.js';
 import BudgetBars from './BudgetBars.jsx';
-import ConnectNode from './ConnectNode.jsx';
 import NodeDrawer from './NodeDrawer.jsx';
-import JoinNode from './JoinNode.jsx';
+import DeleteNodeDialog from './DeleteNodeDialog.jsx';
+import NodeWizard from './NodeWizard.jsx';
 import TunnelBadge from './TunnelBadge.jsx';
 import { kindLabel, statusTone } from './nodeFormat.js';
 import { useNodes } from './useNodes.js';
@@ -43,6 +43,8 @@ export default function NodesPage(props) {
   const [lockSaving, setLockSaving] = createSignal(null);
   const [lockError, setLockError] = createSignal(null);
   const [lockAsk, setLockAsk] = createSignal(null);
+  const [adding, setAdding] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(null);
 
   // One tunnel request at a time: a slow answer must not stack up behind the
   // ten-second poll.
@@ -103,6 +105,8 @@ export default function NodesPage(props) {
   }
 
   onMount(() => {
+    // The one allowed location read: `?add=1` (from the home page and the palette) opens the wizard.
+    if (new URLSearchParams(window.location.search).get('add') === '1') setAdding(true);
     state.load();
     loadTunnels();
     const timer = setInterval(loadTunnels, TUNNEL_REFRESH_MS);
@@ -132,6 +136,9 @@ export default function NodesPage(props) {
           </p>
         </div>
         <div class="controls">
+          <Show when={props.role === 'admin'}>
+            <button class="primary" onClick={() => setAdding(true)}>Add node</button>
+          </Show>
           <button class="secondary" onClick={() => state.load()} disabled={state.loading()}>
             {state.loading() ? 'Refreshing…' : 'Refresh'}
           </button>
@@ -157,6 +164,7 @@ export default function NodesPage(props) {
                 <th class="narrow">Container GPU</th>
                 <th class="narrow">Sandboxes</th>
                 <th>Budget</th>
+                <Show when={props.role === 'admin'}><th class="narrow">Actions</th></Show>
               </tr>
             </thead>
             <tbody>
@@ -273,6 +281,13 @@ export default function NodesPage(props) {
                         compact
                       />
                     </td>
+                    <Show when={props.role === 'admin'}>
+                      <td class="narrow">
+                        <Show when={!node.is_local}>
+                          <button class="danger tiny" onClick={() => setDeleting(node)}>Delete…</button>
+                        </Show>
+                      </td>
+                    </Show>
                   </tr>
                 )}
               </For>
@@ -312,8 +327,13 @@ export default function NodesPage(props) {
       </Show>
 
       <Show when={props.role === 'admin'}>
-        <JoinNode onChanged={() => state.load()} />
-        <ConnectNode onChanged={() => state.load()} />
+        <Show when={adding()}>
+          <NodeWizard onClose={() => setAdding(false)} onDone={() => state.load()} />
+        </Show>
+        <Show when={deleting()}>
+          <DeleteNodeDialog node={deleting()} nodes={state.items()} onClose={() => setDeleting(null)}
+                            onDeleted={() => { setDeleting(null); state.load(); }} />
+        </Show>
       </Show>
 
       <p class="muted small phase-note">
