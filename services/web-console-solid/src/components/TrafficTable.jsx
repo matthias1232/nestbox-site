@@ -10,7 +10,13 @@
 // answer it.
 
 import { Show } from 'solid-js';
-import StatusBadge from './StatusBadge.jsx';
+
+// Tone and word of the decision column; colour never stands alone.
+function decisionTone(row) {
+  if (row.decision === 'deny') return { tone: 'bad', word: 'refused' };
+  if (row.decision === 'audit' || row.would_deny === true) return { tone: 'warn', word: 'would deny' };
+  return { tone: 'ok', word: 'allowed' };
+}
 
 function formatTime(ts) {
   if (!ts) return '—';
@@ -40,8 +46,8 @@ function request(row) {
 
 export default function TrafficTable(props) {
   return (
-    <div class="table-scroll">
-      <table class="dense traffic">
+    <div class="table-scroll traffic-scroll">
+      <table class="dense traffic sticky-head">
         <thead>
           <tr>
             <th class="narrow">Time</th>
@@ -65,10 +71,10 @@ export default function TrafficTable(props) {
                 </Show>
               </td>
               <td>
-                <StatusBadge
-                  status={row.decision === 'allow' ? 'running' : row.decision === 'audit' ? 'degraded' : 'denied'}
-                  label={row.decision}
-                />
+                <span class={`badge ${decisionTone(row).tone}`}>
+                  <i />
+                  {decisionTone(row).word}
+                </span>
               </td>
               <td class="narrow small">{row.channel || '—'}</td>
               <td class="mono small">
@@ -80,12 +86,16 @@ export default function TrafficTable(props) {
               <td class="small muted">{row.reason || '—'}</td>
               <td class="narrow">
                 <Show when={row.decision === 'deny'}>
+                  <Show when={props.onAnswer}>
+                    <button class="tiny secondary" onClick={() => props.onAnswer(row, 'now')}>Allow now</button>
+                    <button class="tiny secondary" onClick={() => props.onAnswer(row, '15')}>15 min</button>
+                  </Show>
                   <button
                     class="tiny"
-                    onClick={() => props.onDraft?.(row)}
+                    onClick={() => (props.onAnswer ? props.onAnswer(row, 'draft') : props.onDraft?.(row))}
                     title="Draft a rule from this event"
                   >
-                    +rule
+                    {props.onAnswer ? 'Draft rule' : '+rule'}
                   </button>
                 </Show>
               </td>

@@ -27,7 +27,7 @@ not gateways and sandboxes.
 | `StatusBadge.jsx` | A coloured label for a status string |
 | `Drawer.jsx` | A side panel with a title and a close action |
 | `TopologyGraph.jsx` | Layered node/edge diagram (gateway → sandbox → destination), with blocked traffic drawn solid and clickable |
-| `TrafficTable.jsx` | A dense event table over normalised rows: sandbox, decision, channel, destination, request, reason |
+| `TrafficTable.jsx` | A dense event table over normalised rows: sandbox, decision, channel, destination, request, reason; sticky header, decision tone word, `onAnswer(row, answer)` for refused rows |
 | `FitBadge.jsx` | Model fit verdict with its reason |
 | `ResourceBars.jsx` | "Have versus need" bars for VRAM, RAM, cores; draws server numbers |
 | `CapacityOverview.jsx` | The machine's own CPU, RAM, and GPU capacity, scaled against the catalog |

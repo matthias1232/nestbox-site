@@ -1,0 +1,22 @@
+/* Live traffic page: filter bar, red lane, side panel, sticky table header. */
+.traffic-filters { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end; margin: var(--space-3) 0; }
+.traffic-filter { display: flex; flex-direction: column; gap: var(--space-1); }
+.traffic-filter .eyebrow, .red-lane .eyebrow { font: 700 0.68rem var(--mono); text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-muted); margin: 0; }
+.red-lane .eyebrow { color: var(--bad); margin-bottom: var(--space-2); }
+
+.traffic-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.traffic-layout.with-panel { grid-template-columns: minmax(0, 1fr) 360px; }
+.traffic-main { min-width: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.traffic-panel { border: 1px solid var(--border); background: var(--bg-raised); padding: var(--space-3); min-width: 0; }
+
+.red-lane { border: 1px solid var(--bad); border-left-width: 3px; background: var(--bg-raised); padding: var(--space-3); }
+.red-lane table { width: 100%; }
+.red-lane .alert-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
+.traffic-scroll { max-height: 60vh; overflow: auto; }
+table.sticky-head thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-raised); }
+table.traffic td .tiny + .tiny { margin-left: var(--space-1); }
+
+@media (max-width: 1100px) {
+  .traffic-layout.with-panel { grid-template-columns: minmax(0, 1fr); }
+}
