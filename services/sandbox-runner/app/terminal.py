@@ -34,12 +34,15 @@ from app.gateway_exec import GatewayPty
 from app.workload import get_container, list_workloads, openshell_name, sandbox_name
 
 import asyncio
+import logging
 import codecs
 import itertools
 import json
 import os
 import threading
 import time
+
+logger = logging.getLogger("nestbox.runner.terminal")
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
