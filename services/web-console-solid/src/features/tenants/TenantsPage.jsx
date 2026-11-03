@@ -2,6 +2,7 @@
 
 import { For, Show, createSignal, onMount } from 'solid-js';
 import * as api from '../../api/tenancy.js';
+import PermissionsTab from '../users/PermissionsTab.jsx';
 
 const KINDS = [
   ['home', 'Home - a machine you run yourself'],
@@ -82,6 +83,8 @@ export default function TenantsPage(props) {
                 </tbody>
               </table>
             </div>
+            <h4 class="eyebrow">Permissions</h4>
+            <PermissionsTab scopeType="organization" scopeId={org.id} />
           </div>
         )}
       </For>
