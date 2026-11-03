@@ -41,3 +41,7 @@ test('paths follow the contract', () => {
   assert.equal(pathFor('node', 'x'), '/node/x');
   assert.equal(pathFor('user', 'x'), null);
 });
+
+test('graphFromTree answers an empty graph before the tree has loaded', () => {
+  assert.deepEqual(graphFromTree(null), { nodes: [], edges: [] });
+});

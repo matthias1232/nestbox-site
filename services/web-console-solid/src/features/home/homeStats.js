@@ -56,6 +56,7 @@ export function graphFromTree(root) {
   const nodes = [];
   const edges = [];
   const visit = (node, parent) => {
+    if (!node) return;
     const keep = LAYERS.includes(node.kind);
     let next = parent;
     if (keep) {
