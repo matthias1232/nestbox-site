@@ -74,6 +74,6 @@ shared live store), `help.js` (static help files; the one module besides `client
 | `privacy.js` | Content privacy: the DLP policy, a single test of the filter, the incidents it |
 | `proxies.js` | Exit proxies: where a sandbox or a provider call leaves the node. |
 | `secrets.js` | The secret store: write-only API keys. |
-| `system.js` | The appliance's own containers: state, live use, limits, and the two writes. |
+| `system.js` | The appliance's own containers: state, live use, limits, and the two writes; plus `readyz` with the free disk |
 | `tenancy.js` | Customers, data centers, sites, sandbox grants and invitations (ADR 0044, 0045, 0046). |
 | `users.js` | User administration (admin only): who may sign in here, with which role. |

@@ -28,9 +28,33 @@ export function totals(root) {
   return out;
 }
 
-// What needs attention, most serious first: offline nodes, failed sandboxes, drifted tunnels,
-// allow-all sandboxes.
-export function health(root) {
+// Free space below this is worth a warning on the home page. The deploy script refuses a build
+// below the same line (S2.1), so the console says it before the deploy has to.
+export const DISK_WARN_BYTES = 15 * 1024 ** 3;
+
+// The appliance disk as one health row, or null while there is nothing to say.
+//
+// `disk_free_bytes` is null when the host did not answer in time, and an unknown
+// amount of free space is not evidence of trouble: the row appears only for a
+// number that is known and low. The whole row is one object so the caller cannot
+// half-render it.
+export function diskHealth(ready) {
+  const raw = ready?.disk_free_bytes;
+  if (raw === null || raw === undefined) return null;
+  const free = Number(raw);
+  if (!Number.isFinite(free) || free < 0 || free >= DISK_WARN_BYTES) return null;
+  const gb = Math.floor(free / 1024 ** 3);
+  return {
+    kind: 'system',
+    name: 'Appliance disk',
+    status: 'bad',
+    why: `Only ${gb} GB free — run docker builder prune`,
+  };
+}
+
+// What needs attention, most serious first: the appliance disk, offline nodes, failed
+// sandboxes, drifted tunnels, allow-all sandboxes.
+export function health(root, ready) {
   const offline = [];
   const failed = [];
   const drifted = [];
@@ -45,7 +69,8 @@ export function health(root) {
       if (node.allow_all) open.push({ ...row, why: 'Allow-all is on: nothing is blocked' });
     }
   });
-  return [...offline, ...failed, ...drifted, ...open];
+  const disk = diskHealth(ready);
+  return [...(disk ? [disk] : []), ...offline, ...failed, ...drifted, ...open];
 }
 
 // The layers of the home map, left to right.

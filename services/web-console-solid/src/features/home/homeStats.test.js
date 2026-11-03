@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { totals, health, graphFromTree, pathFor } from './homeStats.js';
+import { totals, health, graphFromTree, pathFor, diskHealth } from './homeStats.js';
 
 const tree = {
   kind: 'organization', id: 'o', name: 'Platform', children: [
@@ -44,4 +44,37 @@ test('paths follow the contract', () => {
 
 test('graphFromTree answers an empty graph before the tree has loaded', () => {
   assert.deepEqual(graphFromTree(null), { nodes: [], edges: [] });
+});
+
+const GiB = 1024 ** 3;
+
+test('the disk is not a health row while the free space is unknown', () => {
+  assert.equal(diskHealth(null), null);
+  assert.equal(diskHealth(undefined), null);
+  assert.equal(diskHealth({}), null);
+  assert.equal(diskHealth({ status: 'ready', disk_free_bytes: null }), null);
+});
+
+test('the disk is not a health row above the warning line', () => {
+  assert.equal(diskHealth({ disk_free_bytes: 40 * GiB }), null);
+});
+
+test('a nearly full disk is one bad row that names the command', () => {
+  assert.deepEqual(diskHealth({ disk_free_bytes: 9 * GiB }), {
+    kind: 'system',
+    name: 'Appliance disk',
+    status: 'bad',
+    why: 'Only 9 GB free — run docker builder prune',
+  });
+});
+
+test('health puts the disk above every other problem', () => {
+  const rows = health(tree, { disk_free_bytes: 9 * GiB });
+  assert.equal(rows.length, 5);
+  assert.equal(rows[0].kind, 'system');
+  assert.equal(rows[1].id, 'n2');
+});
+
+test('health without a ready answer is the tree alone', () => {
+  assert.deepEqual(health(tree), health(tree, { disk_free_bytes: null }));
 });

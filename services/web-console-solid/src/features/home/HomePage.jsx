@@ -11,6 +11,7 @@ import { useUi } from '../../state/ui.jsx';
 import { navigate, paths } from '../../routing.js';
 import { usePolling } from '../../components/Poll.js';
 import * as jobsApi from '../../api/jobs.js';
+import * as systemApi from '../../api/system.js';
 import StatTile from '../../components/StatTile.jsx';
 import TopologyCanvas from '../../components/TopologyCanvas.jsx';
 import AlertPopup from '../../components/AlertPopup.jsx';
@@ -28,6 +29,9 @@ export default function HomePage() {
   const alerts = useAlerts();
   const [jobs, setJobs] = createSignal([]);
   const [selectedId, setSelectedId] = createSignal(null);
+  // The appliance's free disk, read once a minute. A failure keeps the last answer and
+  // never surfaces as an error: a warning about the disk is not worth a broken page.
+  const [ready, setReady] = createSignal(null);
 
   usePolling(() => jobsApi.list(20), {
     everyMs: 15000,
@@ -35,11 +39,17 @@ export default function HomePage() {
     onError: () => {},
   });
 
+  usePolling(() => systemApi.ready(), {
+    everyMs: 60000,
+    onData: (result) => setReady(result),
+    onError: () => {},
+  });
+
   const member = () => session.identity()?.role === 'member';
   const root = () => inventory.root();
   const stats = createMemo(() => totals(root()));
   const graph = createMemo(() => graphFromTree(root()));
-  const problems = createMemo(() => health(root()));
+  const problems = createMemo(() => health(root(), ready()));
   const running = createMemo(() => jobs().filter((job) => job.status === 'running' || job.status === 'queued' || job.status === 'pending'));
   const latest = () => alerts.open().slice(0, 5);
   const myBoxes = createMemo(() => {

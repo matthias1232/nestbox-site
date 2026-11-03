@@ -11,6 +11,18 @@ export function components() {
   return request('system/components');
 }
 
+/**
+ * The appliance's readiness answer: `{ status, disk_free_bytes }`.
+ *
+ * `disk_free_bytes` is `null` when the host did not answer in time, so a caller
+ * that wants to warn about a filling disk must treat `null` as "unknown", not
+ * as "no space". The route is public, which is why the home page can read it
+ * without a signed-in session.
+ */
+export function ready() {
+  return request('readyz');
+}
+
 /** One component's last log lines. */
 export function logs(service, tail = 200) {
   return request(`system/components/${encodeURIComponent(service)}/logs?tail=${tail}`);
