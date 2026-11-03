@@ -366,7 +366,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 |---|---|
 | `inventory_tree_service.rs` | `tree` (B01) |
 | `search_service.rs` | `search` (B02) |
-| `bulk_service.rs` | `sandboxes` (B03) |
+| `bulk_service.rs` | `sandboxes` (B03): validates, creates the job, runs one action per sandbox with the caller's principal, one log line and one `JobProgress` per target |
 | `model_bulk_service.rs` | `install_bulk` (B04) |
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
 | `node_ops_service.rs` | `summary drain quick` (B07) |
