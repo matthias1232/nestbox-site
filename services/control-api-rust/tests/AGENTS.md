@@ -22,6 +22,7 @@ Two different jobs:
   `TEST_DATABASE_URL` rather than dropping `public` in the shared one, so two
   suites can run in the same `cargo test` without deleting each other's schema.
   `recipes.rs` is the pattern.
+- `policy_preview.rs` previews a policy against database `nestbox_cc_b10` (B10).
 - `policy_bulk.rs`, `tenancy.rs`, `backups.rs`, `stack_topology.rs` and
   `multitenant.rs` each build a `CreateSandbox`; a field added there is one line
   in every one of those helpers (the compiler names them).

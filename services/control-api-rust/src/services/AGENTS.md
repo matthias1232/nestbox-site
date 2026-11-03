@@ -376,6 +376,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `mount_service.rs` | `effective set` (B09) |
 | `mount_service.rs` | `effective set`: C10 mount view; `set` diffs, calls `persist_service` mount/dismount, audits `sandbox.mounts_changed`, recreates on `apply=now` (B09) |
 | `policy_preview_service.rs` | `preview compiled` (B10) |
+| `policy_preview_service.rs` | `preview compiled` — validate, compile, hot/cold split and diff for a spec or a stored policy (B10) |
 | `quick_control_service.rs` | `set` (B11) |
 | `permission_service.rs` | `list set remove` (B12) |
 | `tour_service.rs` | `mark_seen` (F18) |
