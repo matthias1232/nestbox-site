@@ -378,7 +378,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05): a cluster plus its `local_openai_compatible` provider profile in one transaction; `proxy_view` reads the appliance data center |
 | `node_ops_service.rs` | `summary drain quick` (B07) |
 | `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
-| `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it; `drain` needs `NodeManage` |
+| `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it; `drain` needs `NodeManage`; the `connect` source passes `ssh_port` and `wg_port` (the connect body's `wg_listen_port`) through to `node_connect_service::connect` and leaves both to that request's defaults when absent |
 | `alert_service.rs` | `list` (open alerts), `publish_if_refused` (live `alert` event per refused network or DNS event; no DB read) (B08) |
 | `mount_service.rs` | `effective set` (B09) |
 | `mount_service.rs` | `effective set`: C10 mount view; `set` diffs, calls `persist_service` mount/dismount, audits `sandbox.mounts_changed`, recreates on `apply=now` (B09) |

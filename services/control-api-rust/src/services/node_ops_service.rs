@@ -73,12 +73,18 @@ enum QuickSource {
     /// A machine that exists; installed over SSH with credentials that are never stored.
     Connect {
         address: String,
+        /// The SSH port the machine listens on; the connect service default applies when absent.
+        #[serde(default)]
+        ssh_port: Option<u16>,
         #[serde(default)]
         ssh_user: Option<String>,
         #[serde(default)]
         ssh_password: Option<String>,
         #[serde(default)]
         ssh_private_key: Option<String>,
+        /// The UDP port the node's WireGuard listens on (`wg_listen_port` in the connect request).
+        #[serde(default)]
+        wg_port: Option<u16>,
         #[serde(default)]
         egress_lock: Option<String>,
     },
@@ -693,8 +699,8 @@ async fn provision_step(
             .map(|host| (TargetState::Succeeded, format!("machine {} requested ({})", host.node_name, host.state)))
             .map_err(|error| why(error))
         }
-        QuickSource::Connect { address, ssh_user, ssh_password, ssh_private_key, egress_lock } => {
-            let request: ConnectNodeRequest = serde_json::from_value(serde_json::json!({
+        QuickSource::Connect { address, ssh_port, ssh_user, ssh_password, ssh_private_key, wg_port, egress_lock } => {
+            let mut body = serde_json::json!({
                 "node_name": node_name,
                 "site_id": site_id,
                 "host": address,
@@ -702,8 +708,19 @@ async fn provision_step(
                 "password": ssh_password,
                 "private_key": ssh_private_key,
                 "egress_lock": egress_lock.clone().unwrap_or_else(|| "strict".into()),
-            }))
-            .map_err(|_| "the connection details could not be read".to_string())?;
+            });
+            // Both ports are optional in the quick body but not in the connect request, whose
+            // deserialiser defaults would answer for an absent number; only a given port is sent.
+            if let Some(fields) = body.as_object_mut() {
+                if let Some(port) = ssh_port {
+                    fields.insert("ssh_port".into(), serde_json::json!(port));
+                }
+                if let Some(port) = wg_port {
+                    fields.insert("wg_listen_port".into(), serde_json::json!(port));
+                }
+            }
+            let request: ConnectNodeRequest = serde_json::from_value(body)
+                .map_err(|_| "the connection details could not be read".to_string())?;
             node_connect_service::connect(ctx, config, principal, request)
                 .await
                 .map(|_| (TargetState::Succeeded, "installation started over SSH".to_string()))
@@ -798,5 +815,43 @@ mod tests {
         let source: QuickSource = serde_json::from_value(serde_json::json!({ "kind": "script" })).ok().unwrap_or(QuickSource::Script);
         assert!(matches!(source, QuickSource::Script));
         assert!(serde_json::from_value::<QuickSource>(serde_json::json!({ "kind": "nope" })).is_err());
+    }
+
+    #[test]
+    fn a_connect_source_keeps_the_ssh_and_wireguard_ports() {
+        let source: QuickSource = serde_json::from_value(serde_json::json!({
+            "kind": "connect",
+            "address": "10.0.0.7",
+            "ssh_password": "secret",
+            "ssh_port": 2222,
+            "wg_port": 51999
+        }))
+        .ok()
+        .unwrap_or(QuickSource::Script);
+        match source {
+            QuickSource::Connect { ssh_port, wg_port, .. } => {
+                assert_eq!(ssh_port, Some(2222));
+                assert_eq!(wg_port, Some(51999));
+            }
+            _ => panic!("expected a connect source"),
+        }
+    }
+
+    #[test]
+    fn a_connect_source_without_ports_leaves_them_to_the_connect_defaults() {
+        let source: QuickSource = serde_json::from_value(serde_json::json!({
+            "kind": "connect",
+            "address": "10.0.0.7",
+            "ssh_password": "secret"
+        }))
+        .ok()
+        .unwrap_or(QuickSource::Script);
+        match source {
+            QuickSource::Connect { ssh_port, wg_port, .. } => {
+                assert_eq!(ssh_port, None);
+                assert_eq!(wg_port, None);
+            }
+            _ => panic!("expected a connect source"),
+        }
     }
 }
