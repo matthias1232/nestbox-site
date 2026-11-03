@@ -370,7 +370,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `search_service.rs` | `search` (B02) |
 | `bulk_service.rs` | `sandboxes` (B03) |
 | `model_bulk_service.rs` | `install_bulk` (B04): plans targets with the catalog verdict, creates one `ModelBulkInstall` job, installs up to 4 nodes in parallel via `model_service::install`, waits for each, optionally makes a cluster |
-| `bulk_service.rs` | `sandboxes` (B03): validates, creates the job, runs one action per sandbox with the caller's principal, one log line and one `JobProgress` per target |
+| `bulk_service.rs` | `sandboxes` (B03): validates, checks the permission the action needs before a job row exists (a viewer cannot fill the Tasks list with failed jobs), creates the job, runs one action per sandbox with the caller's principal, one log line and one `JobProgress` per target |
 | `model_bulk_service.rs` | `install_bulk` (B04) |
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
 | `node_ops_service.rs` | `summary` (node + load + installs + images + tunnel), `drain` (move or stop every sandbox, job `NodeDrain`) and `quick` (rent/connect/script, probe, install a model, job `NodeQuickDeploy`); `drain` and `quick` also take `&Config` (B07) |
@@ -378,7 +378,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05): a cluster plus its `local_openai_compatible` provider profile in one transaction; `proxy_view` takes the data center from the cluster row through `nb_cluster_environment` (migration 0087), so it works with several data centers, and 404s an unknown cluster; the media bridge is only the fallback when that lookup fails |
 | `node_ops_service.rs` | `summary drain quick` (B07) |
 | `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
-| `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it; `drain` needs `NodeManage`; the `connect` source passes `ssh_port` and `wg_port` (the connect body's `wg_listen_port`) through to `node_connect_service::connect` and leaves both to that request's defaults when absent |
+| `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it, and refuses an unknown site (`site.not_found`), an unknown model (`model.not_found`) and a taken node name (`node.name_taken`) each with its own code and sentence; `drain` needs `NodeManage`; the `connect` source passes `ssh_port` and `wg_port` (the connect body's `wg_listen_port`) through to `node_connect_service::connect` and leaves both to that request's defaults when absent |
 | `alert_service.rs` | `list` (open alerts), `publish_if_refused` (live `alert` event per refused network or DNS event; no DB read) (B08) |
 | `mount_service.rs` | `effective set` (B09) |
 | `mount_service.rs` | `effective set`: C10 mount view; `set` diffs, calls `persist_service` mount/dismount, audits `sandbox.mounts_changed`, recreates on `apply=now` (B09) |
