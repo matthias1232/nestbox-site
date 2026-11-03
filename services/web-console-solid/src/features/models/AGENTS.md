@@ -44,8 +44,16 @@ VRAM arithmetic.
 
 | File | What it shows |
 |---|---|
-| `ModelsPage.jsx` | the catalogue, the install table, the filters |
+| `ModelsPage.jsx` | the catalogue as cards or table, "Fit against" node, filters, opens the wizard (`?deploy=1&model=&node=`) |
+| `ModelPage.jsx` | `/models/<key>`: Installs, Requirements, Grants, Clusters tabs and the actions |
+| `BulkDeployWizard.jsx` | Model → Nodes → Options → Review → live progress; one `installBulk` call |
+| `NodePicker.jsx` | nodes grouped data center › site with checkboxes, fit badges, quick selections |
+| `DeployProgress.jsx` | per-node meters, overall meter, log tail, "Open cluster" |
+| `InstallsTable.jsx` | the installs of one model, enabled switch, logs/metrics drawer, uninstall |
+| `ModelCard.jsx` | one catalogue card |
+| `useModels.js` | catalogue + installs + hardware on one 20 s poll, filters |
+| `bulkDeploy.js` | pure: preview fit per node, selection helpers, request body, progress rows (tested in `bulkDeploy.test.js`) |
 | `ModelRuntimePanel.jsx` | one installed model's flags, logs and metrics |
 | `ModelGrantsSection.jsx` | environment and user model grants (admins only), below the page |
 
-`ModelPage.jsx` (`/models/<key>`) and `BulkDeployWizard.jsx` are placeholders created in Wave 0; package F08 builds them.
+The wizard's per-node fit is a preview computed in `bulkDeploy.js`; the server's `targets[].fit`/`skipped` in the answer always win.
