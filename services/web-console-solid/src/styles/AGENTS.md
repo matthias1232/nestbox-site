@@ -32,7 +32,7 @@ uses it, not from `main.jsx`.
 - Density is a token, not a per-table decision: the console is for scanning.
 - The graph and the table must survive a narrow viewport: horizontal scroll
   rather than a squeezed layout.
-| `login.css` | The login page's two-column layout, form and illustration frame; imported by `LoginPage` |
+| `login.css` | The login page's two-column layout, form and illustration frame; its corner labels are static brand text, not state (P13); imported by `LoginPage` |
 | `dlp.css` | The content-check colour language, the shared table and the chat bubbles |
 
 ## Look (Control Center)
