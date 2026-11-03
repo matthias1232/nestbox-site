@@ -40,3 +40,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 `color-mix(in srgb, var(--bad) 14%, transparent)`. No hex or rgb colour outside `tokens.css`.
 `app.css` also defines `.eyebrow`, `.figure` and `.num`.
 - `dock.css` — dock tabs, alert cards and the alert stack (F13); imported by `features/dock/AlertStack.jsx`.
+- `clusters.css` — model cluster pages and the new-cluster dialog (F09); imported by `features/clusters/`.

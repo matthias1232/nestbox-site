@@ -1,0 +1,18 @@
+/* Model clusters (F09): list, detail and the new-cluster dialog. Colours only from tokens. */
+.clusters-page .select-table-wrap, .cluster-detail .select-table-wrap { margin-top: var(--space-3); }
+.cluster-endpoint { display: inline-flex; align-items: center; gap: var(--space-2); }
+.cluster-detail .card { margin-top: var(--space-4); padding: var(--space-4); }
+.cluster-detail .card h2 { margin: 0 0 var(--space-3); }
+.cluster-dialog { max-height: 86vh; overflow-y: auto; }
+.cluster-form { display: grid; gap: var(--space-4); }
+.cluster-field { display: grid; gap: var(--space-2); border: 0; padding: 0; margin: 0; }
+.cluster-field input[type='text'], .cluster-field select {
+  background: var(--bg-inset); color: var(--fg); border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3); font: inherit;
+}
+.cluster-field input[type='text']:focus-visible, .cluster-field select:focus-visible { border-color: var(--border-strong); outline: 2px solid var(--accent); }
+.cluster-radio { display: flex; gap: var(--space-2); align-items: flex-start; cursor: pointer; }
+.cluster-edit { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
+.cluster-edit-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+.cluster-picklist { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.cluster-picklist li { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding: var(--space-2) 0; }
