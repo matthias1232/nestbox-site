@@ -159,6 +159,14 @@ export default function NodePage(props) {
     return trail.length ? trail : [{ label: 'Nodes', path: paths.menu('nodes') }, { label: title() }];
   });
   const siblings = createMemo(() => nodesBelow(inventory.root()).filter((n) => n.id !== props.id && n.status === 'online'));
+  // V08: the strip carries the sandbox and model counts the summary already knows.
+  const tabs = () => state.tabs().map((tab) => {
+    const data = summary.data();
+    if (!data) return tab;
+    if (tab.id === 'sandboxes') return { ...tab, count: data.sandboxes?.total ?? 0 };
+    if (tab.id === 'models') return { ...tab, count: data.installs?.length ?? 0 };
+    return tab;
+  });
   const toast = (tone, text) => ui?.toast.show({ tone, text, undo: null, ms: 6000 });
 
   async function run(label, work) {
@@ -239,7 +247,7 @@ export default function NodePage(props) {
         actions={actions}
       />
       <Show when={summary.error()}><p class="error">{summary.error()}</p></Show>
-      <Tabs tabs={state.tabs()} active={state.tab()} onChange={state.select} />
+      <Tabs tabs={tabs()} active={state.tab()} onChange={state.select} />
       <Show when={state.tab() === 'summary'}>
         <Show when={summary.data()} fallback={<p class="muted">Loading…</p>}>
           <NodeSummaryTab summary={summary.data()} />

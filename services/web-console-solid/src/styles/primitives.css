@@ -66,6 +66,12 @@
 .status-dot[data-status='warn'], .status-dot[data-status='degraded'], .status-dot[data-status='starting'] { background: var(--warn); }
 .status-dot[data-status='bad'], .status-dot[data-status='offline'], .status-dot[data-status='failed'], .status-dot[data-status='error'] { background: var(--bad); }
 
+/* Tabs (V08): the active tab carries a 2px lime underline; an optional count is muted mono.
+ * Selectors carry `button.` so they win over the legacy strip in app.css whatever the load order. */
+.tabs button.tab { border-bottom: 2px solid transparent; }
+.tabs button.tab.active { color: var(--fg); border-bottom: 2px solid var(--accent); }
+.tabs .tab-count { font: 400 0.72rem var(--mono); color: var(--fg-muted); }
+
 /* SelectTable */
 .select-table-wrap { overflow: auto; border: 1px solid var(--border); }
 .select-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }

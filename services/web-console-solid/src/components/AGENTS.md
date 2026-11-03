@@ -32,7 +32,7 @@ not gateways and sandboxes.
 | `ResourceBars.jsx` | "Have versus need" bars for VRAM, RAM, cores; draws server numbers |
 | `CapacityOverview.jsx` | The machine's own CPU, RAM, and GPU capacity, scaled against the catalog |
 | `ModelFitCell.jsx` | Badge, compact bars, and the shortfall in words |
-| `Tabs.jsx` | Accessible tab strip |
+| `Tabs.jsx` | Accessible tab strip; the active tab carries the 2px lime underline, a tab may carry a numeric `count` drawn as muted mono after the label (V08) |
 | `Empty.jsx` | A consistent empty state |
 | `LoginBadge.jsx` | One sandbox's sign-in state, one mode per agent when the entry carries `agents`, else the single summary badge |
 | `LogViewer.jsx` | One log panel for a sandbox, a supervisor (filtered) and an appliance component: follow, filter, copy; stops following after a failed read |
