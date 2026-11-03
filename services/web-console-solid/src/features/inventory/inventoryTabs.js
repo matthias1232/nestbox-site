@@ -78,6 +78,13 @@ export function toGib(bytes) {
   return typeof bytes === 'number' && Number.isFinite(bytes) ? Math.round((bytes / 1073741824) * 10) / 10 : 0;
 }
 
+// The reading under a gauge arc: "41 / 64 GiB"; a machine that reports no total (VRAM today)
+// reads "–" instead of a fake zero (V09).
+export function pairText(usedBytes, totalBytes) {
+  if (typeof totalBytes !== 'number' || !Number.isFinite(totalBytes) || totalBytes <= 0) return '–';
+  return `${toGib(usedBytes)} / ${toGib(totalBytes)} GiB`;
+}
+
 // "3 min ago" style age of an ISO time; "–" when unknown.
 export function ago(iso, now = Date.now()) {
   const then = Date.parse(iso || '');

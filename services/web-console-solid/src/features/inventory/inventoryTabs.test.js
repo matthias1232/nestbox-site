@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activeTab, ago, countBelow, findNode, gib, nodesBelow, tabFromSearch, tabPath, tabsFor, toGib, worstStatus } from './inventoryTabs.js';
+import { activeTab, ago, countBelow, findNode, gib, nodesBelow, pairText, tabFromSearch, tabPath, tabsFor, toGib, worstStatus } from './inventoryTabs.js';
 
 const ids = (kind, role) => tabsFor(kind, role).map((t) => t.id);
 
@@ -34,6 +34,12 @@ test('sizes use binary units', () => {
   assert.equal(gib(512), '512 B');
   assert.equal(gib(null), '–');
   assert.equal(toGib(2147483648), 2);
+});
+
+test('a gauge reads used over total, or a dash when the machine reports no total', () => {
+  assert.equal(pairText(41 * 1073741824, 64 * 1073741824), '41 / 64 GiB');
+  assert.equal(pairText(0, null), '–');
+  assert.equal(pairText(0, 0), '–');
 });
 
 test('age reads in words', () => {

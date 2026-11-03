@@ -96,6 +96,7 @@
 .cc-search:focus-visible { outline: 2px solid var(--accent); }
 .cc-kbd { border: 1px solid var(--border); padding: 0 var(--space-1); font-size: 0.7rem; color: var(--fg-muted); }
 .cc-bell { display: inline-flex; align-items: center; gap: var(--space-1); }
+.cc-icon-button { display: inline-flex; align-items: center; justify-content: center; }
 .cc-bell-count { min-width: 1.4em; padding: 0 var(--space-1); text-align: center; border: 1px solid var(--border); color: var(--fg-muted); font-size: 0.72rem; }
 .cc-bell-count.hot { border-color: var(--bad); color: var(--bad); }
 .cc-user-menu { position: relative; }

@@ -3,7 +3,7 @@ import { Show } from 'solid-js';
 import Gauge from '../../components/Gauge.jsx';
 import StatTile from '../../components/StatTile.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import { ago, gib, toGib } from './inventoryTabs.js';
+import { ago, gib, pairText, toGib } from './inventoryTabs.js';
 
 // Props: `summary` (the answer of GET /nodes/{id}/summary).
 export default function NodeSummaryTab(props) {
@@ -21,10 +21,10 @@ export default function NodeSummaryTab(props) {
       </Show>
       <Show when={load()}>
         <section class="inv-gauges" aria-label="Load">
-          <Gauge label="CPU" value={Math.round(load().cpu_percent || 0)} max={100} unit="%" />
-          <Gauge label="RAM" value={toGib(load().ram_used_bytes)} max={toGib(load().ram_total_bytes)} unit="GiB" />
-          <Gauge label="VRAM" value={toGib(load().vram_used_bytes)} max={toGib(load().vram_total_bytes)} unit="GiB" />
-          <Gauge label="Disk" value={toGib(load().disk_used_bytes)} max={toGib(load().disk_total_bytes)} unit="GiB" />
+          <Gauge label="CPU" value={Math.round(load().cpu_percent || 0)} max={100} text={`${Math.round(load().cpu_percent || 0)} %`} />
+          <Gauge label="RAM" value={toGib(load().ram_used_bytes)} max={toGib(load().ram_total_bytes)} text={pairText(load().ram_used_bytes, load().ram_total_bytes)} />
+          <Gauge label="VRAM" value={toGib(load().vram_used_bytes)} max={toGib(load().vram_total_bytes)} text={pairText(load().vram_used_bytes, load().vram_total_bytes)} />
+          <Gauge label="Disk" value={toGib(load().disk_used_bytes)} max={toGib(load().disk_total_bytes)} text={pairText(load().disk_used_bytes, load().disk_total_bytes)} />
         </section>
       </Show>
 

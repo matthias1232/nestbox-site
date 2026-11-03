@@ -76,7 +76,7 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `icons.jsx` | Every inline SVG icon (`IconNode`, ...) plus `Icon({ name })`; the one source for the sidebar menu, the palette kind glyph, the topology card glyph and the login eye (X10 — no private stand-ins in a feature) |
 | `IconButton.jsx` | A 28x28 icon-only button with tooltip and accessible name |
 | `StatTile.jsx` | Eyebrow label, big mono figure, unit and trend; a button when clickable |
-| `Gauge.jsx` / `gauge.js` | 270 degree SVG arc and its arc maths |
+| `Gauge.jsx` / `gauge.js` | 270 degree SVG arc and its arc maths; optional `text` is the reading drawn under the arc in mono (V09) |
 | `Sparkline.jsx` / `sparkline.js` | SVG polyline trend and the points calculation |
 | `KeyHint.jsx` | `<kbd>` rendering of a shortcut such as `mod+k` |
 | `Toast.jsx` | The toast stack, reading `ui.toast.queue()` |

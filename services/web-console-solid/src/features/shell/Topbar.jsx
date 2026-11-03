@@ -4,6 +4,7 @@ import { useSession } from '../../state/session.jsx';
 import { useUi } from '../../state/ui.jsx';
 import ContextBar from '../tenants/ContextBar.jsx';
 import KeyHint from '../../components/KeyHint.jsx';
+import { Icon } from '../../components/icons.jsx';
 import { navigate, paths } from '../../routing.js';
 
 export default function Topbar(props) {
@@ -42,10 +43,10 @@ export default function Topbar(props) {
         aria-label={`Alerts, ${ui.alerts.count()} waiting`}
         onClick={() => { ui.dock.setTab('alerts'); ui.dock.setOpen(true); }}
       >
-        <span aria-hidden="true">Alerts</span>
+        <Icon name="Bell" />
         <span class="cc-bell-count mono" classList={{ hot: ui.alerts.count() > 0 }}>{ui.alerts.count()}</span>
       </button>
-      <button class="ghost" aria-label="Help" onClick={() => ui.help.open()}>?</button>
+      <button class="ghost cc-icon-button" aria-label="Help" title="Help" onClick={() => ui.help.open()}><Icon name="Help" /></button>
       <div class="cc-user-menu" ref={userRoot}>
         <button
           class="ghost cc-user"
