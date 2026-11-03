@@ -11,7 +11,7 @@ a new colour asks for a token; it does not invent a hex value.
 |---|---|
 | `tokens.css` | Colour, spacing, radius, and type scale |
 | `app.css` | Reset, shell layout, tables, forms, drawer, graph |
-| `nodes.css` | Node budget bars and the node drawer; imported by `features/nodes/NodesPage.jsx` |
+| `nodes.css` | The node table's fixed columns, the budget bars and the node drawer; imported by `features/nodes/NodesPage.jsx` |
 | `providers-status.css` | Provider status, install origin, and the in-use refusal |
 | `sandbox-resources.css` | The create form's node budget and the Agents tab |
 | `recipes-persist.css` | Recipe table, editor, and detail; persistent roots and their mounts |

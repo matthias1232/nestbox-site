@@ -41,12 +41,24 @@ the only place those two facts are shown together.
 - **A credential never stays on the page.** `ConnectNode` empties its password and
   key fields as soon as the request is answered, and the server is not allowed to
   store them at all.
+- **The table has one column per fact, and every column is visible (V25).** It is
+  `table-layout: fixed` with the widths in `styles/nodes.css`; the NODE column takes
+  what is left and never wraps — the name, the key and the description are one line
+  with an ellipsis and a `title`. A long budget, a wide badge or a wrapped name must
+  not push ACTIONS off the right edge, which is what happened when the budget cell
+  grew its own column.
+- **The budget cell is its own column, not a sidebar.** In the table it is the
+  compact `BudgetBars`: each bar keeps its label and track on one line with the
+  numbers under it, so RAM, GPU memory and the install sentence stay inside 260 px.
+- **A row can be probed without opening it.** PROBE in ACTIONS calls
+  `POST /nodes/{id}/probe` and reloads the list; the button is disabled while the
+  runner answers, so a slow node is not asked twice.
 
 ## Files
 
 | File | Responsibility |
 |---|---|
-| `NodesPage.jsx` | The table: name and key, kind, status, tunnel state, egress lock, container GPU, sandbox count, budget; opens the drawer; keeps the tunnel list fresh |
+| `NodesPage.jsx` | The table: name and key, kind, status, tunnel state, egress lock, container GPU, sandbox count, budget; fixed column widths (V25), a PROBE action per row; opens the drawer; keeps the tunnel list fresh |
 | `NodeDrawer.jsx` | One node: facts, budget, probe, its sandboxes, display rename |
 | `NodeWizard.jsx` | Add node wizard: source (script, connect by IP, rent), placement, details, optional model, review; Finish makes one `POST /nodes/quick` and follows the job |
 | `nodeWizard.js` | Pure wizard logic: `steps`, `validate`, `bodyFor`, `reviewLines`, `progressStates`; no JSX |

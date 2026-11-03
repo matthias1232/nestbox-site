@@ -18,6 +18,7 @@ import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-j
 import { useUi } from '../../state/ui.jsx';
 import Empty from '../../components/Empty.jsx';
 import * as nodesConnect from '../../api/nodesConnect.js';
+import * as nodesApi from '../../api/nodes.js';
 import { stateStream } from '../../api/telemetry.js';
 import BudgetBars from './BudgetBars.jsx';
 import NodeDrawer from './NodeDrawer.jsx';
@@ -49,6 +50,8 @@ export default function NodesPage(props) {
   const [lockAsk, setLockAsk] = createSignal(null);
   const [adding, setAdding] = createSignal(false);
   const [deleting, setDeleting] = createSignal(null);
+  const [probing, setProbing] = createSignal(null);
+  const [probeError, setProbeError] = createSignal(null);
 
   // One tunnel request at a time: a slow answer must not stack up behind the
   // ten-second poll.
@@ -108,6 +111,26 @@ export default function NodesPage(props) {
     applyLock(node, lock);
   }
 
+  /**
+   * Measure one node from the table.
+   *
+   * The row's Probe button stays disabled until the runner answers, so a slow node
+   * is not asked twice; the list reloads afterwards because a probe replaces the
+   * numbers the row is showing.
+   */
+  async function probe(node) {
+    setProbing(node.id);
+    setProbeError(null);
+    try {
+      await nodesApi.probe(node.id);
+      await state.load();
+    } catch (failure) {
+      setProbeError(`${node.display_name} (${node.name}): ${failure.message}`);
+    } finally {
+      setProbing(null);
+    }
+  }
+
   onMount(() => {
     // The one allowed location read: `?add=1` (from the home page and the palette) opens the wizard.
     if (new URLSearchParams(window.location.search).get('add') === '1') setAdding(true);
@@ -154,41 +177,62 @@ export default function NodesPage(props) {
         <p class="muted small">Tunnel states unavailable: {tunnelError()}</p>
       </Show>
       <Show when={lockError()}><p class="error">{lockError()}</p></Show>
+      <Show when={probeError()}><p class="error">{probeError()}</p></Show>
 
       <Show when={state.items().length > 0}>
         <div class="table-scroll">
           <table class="node-table">
+            <colgroup>
+              <col class="col-node" />
+              <col class="col-kind" />
+              <col class="col-status" />
+              <col class="col-tunnel" />
+              <col class="col-egress" />
+              <col class="col-gpu" />
+              <col class="col-sandboxes" />
+              <col class="col-budget" />
+              <Show when={props.role === 'admin'}><col class="col-actions" /></Show>
+            </colgroup>
             <thead>
               <tr>
-                <th class="narrow" />
-                <th>Node</th>
-                <th class="narrow">Kind</th>
-                <th class="narrow">Status</th>
-                <th class="narrow">Tunnel</th>
-                <th class="narrow">Egress</th>
-                <th class="narrow">Container GPU</th>
-                <th class="narrow">Sandboxes</th>
-                <th>Budget</th>
-                <Show when={props.role === 'admin'}><th class="narrow">Actions</th></Show>
+                <th class="col-node">Node</th>
+                <th class="col-kind">Kind</th>
+                <th class="col-status">Status</th>
+                <th class="col-tunnel">Tunnel</th>
+                <th class="col-egress">Egress</th>
+                <th class="col-gpu">Container GPU</th>
+                <th class="col-sandboxes">Sandboxes</th>
+                <th class="col-budget">Budget</th>
+                <Show when={props.role === 'admin'}><th class="col-actions">Actions</th></Show>
               </tr>
             </thead>
             <tbody>
               <For each={state.items()}>
                 {(node) => (
                   <tr class={openId() === node.id ? 'selected' : ''}>
-                    <td class="narrow">
-                      <input type="checkbox" aria-label={`Select ${node.display_name}`} checked={picked(node.id)} onChange={() => ui?.selection.toggle('node', node.id)} />
-                    </td>
-                    <td>
-                      <button class="link" onClick={() => setOpenId(node.id)}>
-                        {node.display_name}
-                      </button>
-                      <div class="muted small mono">{node.name}</div>
+                    <td class="col-node">
+                      <div class="node-line">
+                        <input
+                          class="node-pick"
+                          type="checkbox"
+                          aria-label={`Select ${node.display_name}`}
+                          checked={picked(node.id)}
+                          onChange={() => ui?.selection.toggle('node', node.id)}
+                        />
+                        <button
+                          class="link node-name"
+                          title={node.display_name}
+                          onClick={() => setOpenId(node.id)}
+                        >
+                          {node.display_name}
+                        </button>
+                      </div>
+                      <div class="muted small mono node-key" title={node.name}>{node.name}</div>
                       <Show when={node.description}>
-                        <div class="muted small node-desc">{node.description}</div>
+                        <div class="muted small node-desc" title={node.description}>{node.description}</div>
                       </Show>
                     </td>
-                    <td class="narrow small">
+                    <td class="col-kind small">
                       {kindLabel(node.kind)}
                       <Show when={node.kind === 'kubernetes'}>
                         <span
@@ -204,10 +248,10 @@ export default function NodesPage(props) {
                         </span>
                       </Show>
                     </td>
-                    <td class="narrow">
+                    <td class="col-status">
                       <span class={`badge ${statusTone(node.status)}`}><i />{node.status}</span>
                     </td>
-                    <td class="narrow small">
+                    <td class="col-tunnel small">
                       <Show
                         when={!node.is_local}
                         fallback={
@@ -230,7 +274,7 @@ export default function NodesPage(props) {
                         </Show>
                       </Show>
                     </td>
-                    <td class="narrow small">
+                    <td class="col-egress small">
                       <Show
                         when={!node.is_local}
                         fallback={
@@ -253,7 +297,7 @@ export default function NodesPage(props) {
                         </select>
                       </Show>
                     </td>
-                    <td class="narrow small">
+                    <td class="col-gpu small">
                       <Show
                         when={node.container_gpu}
                         fallback={
@@ -272,7 +316,7 @@ export default function NodesPage(props) {
                         </span>
                       </Show>
                     </td>
-                    <td class="narrow mono">
+                    <td class="col-sandboxes mono">
                       <button
                         class="link"
                         title="Show the sandboxes on this node"
@@ -281,7 +325,7 @@ export default function NodesPage(props) {
                         {node.budget?.sandboxes ?? 0}
                       </button>
                     </td>
-                    <td class="node-budget">
+                    <td class="col-budget node-budget">
                       <BudgetBars
                         budget={node.budget}
                         hardwareKnown={node.hardware_known}
@@ -290,7 +334,15 @@ export default function NodesPage(props) {
                       />
                     </td>
                     <Show when={props.role === 'admin'}>
-                      <td class="narrow">
+                      <td class="col-actions node-actions">
+                        <button
+                          class="ghost tiny"
+                          disabled={probing() === node.id}
+                          title="Measure this node again through its own runner"
+                          onClick={() => probe(node)}
+                        >
+                          {probing() === node.id ? 'Probing…' : 'Probe'}
+                        </button>
                         <Show when={!node.is_local}>
                           <button class="danger tiny" onClick={() => setDeleting(node)}>Delete…</button>
                         </Show>
