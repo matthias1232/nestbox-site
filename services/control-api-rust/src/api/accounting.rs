@@ -283,7 +283,10 @@ pub async fn ingest(
     Json(body): Json<RecordBody>,
 ) -> Result<(StatusCode, Json<RecordedRequest>), ApiError> {
     authorised(&headers)?;
-    let environment = crate::services::media_service::bridge_environment(&state.services).await?;
+    // The tenant comes from the sandbox the proxy named, not from a guess about
+    // how many data centers the appliance holds.
+    let environment =
+        crate::services::media_service::sandbox_environment(&state.services, &body.sandbox).await?;
     let sandbox_id = sandbox_id_by_name(&state.services, environment, &body.sandbox).await?;
     let usage = body.usage.unwrap_or_default();
     let row = NewAccountingRow {
@@ -395,7 +398,8 @@ pub async fn inspect(
 
     ingest_authorised(&state, &headers).await?;
     // Which tenant: from the id when the broker sent one, otherwise from the
-    // appliance's single environment and the name the SDK used.
+    // data center the named sandbox lives in — never from a guess about which
+    // data center exists.
     let (environment, sandbox_id) = match (body.sandbox_id, body.sandbox.as_deref()) {
         (Some(id), _) => {
             let environment =
@@ -412,7 +416,7 @@ pub async fn inspect(
         }
         (None, Some(name)) => {
             let environment =
-                crate::services::media_service::bridge_environment(&state.services).await?;
+                crate::services::media_service::sandbox_environment(&state.services, name).await?;
             let id = sandbox_id_by_name(&state.services, environment, name).await?;
             (environment, id)
         }

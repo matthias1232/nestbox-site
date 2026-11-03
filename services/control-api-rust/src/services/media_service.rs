@@ -423,11 +423,13 @@ async fn sandbox_by_name(
     id.ok_or_else(|| ApiError::not_found(ErrorCode::NOT_FOUND, "No such sandbox in this environment."))
 }
 
-/// The environment the media bridge speaks for.
+/// The environment the media bridge speaks for, when no sandbox names it.
 ///
 /// A deployment with one environment (Phase 1) needs no configuration; more
 /// than one must name it, because rendering for the wrong tenant is exactly
-/// the mistake a default would make silent.
+/// the mistake a default would make silent. A caller that does name a sandbox
+/// asks [`sandbox_environment`] instead: that answer needs no configuration at
+/// all, and works with any number of data centers.
 pub async fn bridge_environment(ctx: &ServiceContext) -> Result<Uuid, ApiError> {
     if let Ok(value) = std::env::var("NESTBOX_MEDIA_ENVIRONMENT_ID") {
         if let Ok(id) = Uuid::parse_str(value.trim()) {
@@ -441,6 +443,44 @@ pub async fn bridge_environment(ctx: &ServiceContext) -> Result<Uuid, ApiError> 
         _ => Err(ApiError::validation(
             "This appliance holds more than one environment; set NESTBOX_MEDIA_ENVIRONMENT_ID.",
         )),
+    }
+}
+
+/// The data center a named sandbox lives in, answered by the database.
+///
+/// The appliance-side callers (usage accounting, the model routes the proxy
+/// fetches before it routes a request, the inspection probe) name a sandbox and
+/// carry no principal, so the tenant cannot come from the request. It comes from
+/// the sandbox row instead: `nb_sandbox_environment(name)` (migration 0088)
+/// answers every data center the name appears in, and only an unambiguous answer
+/// is used.
+///
+/// * one data center — that is the sandbox's tenant, and the caller reads under
+///   that scope as every other tenant read does;
+/// * two — the name exists in both, and picking one would route another tenant's
+///   request, so this is a 409 the operator resolves;
+/// * none — there is no such sandbox (404);
+/// * the function is missing — an installation whose schema predates 0088 can
+///   hold only one data center, so [`bridge_environment`] stays the answer.
+pub async fn sandbox_environment(
+    ctx: &ServiceContext,
+    sandbox_name: &str,
+) -> Result<Uuid, ApiError> {
+    match store::sandbox_environments_by_name(&ctx.pool, sandbox_name).await {
+        Ok(Some(found)) => match found.as_slice() {
+            [only] => Ok(*only),
+            [] => Err(ApiError::not_found(
+                ErrorCode::SANDBOX_NOT_FOUND,
+                "No such sandbox.",
+            )),
+            _ => Err(ApiError::conflict(
+                ErrorCode::CONFLICT,
+                "A sandbox with this name exists in more than one data center. \
+                 Rename one of them or address the sandbox by id.",
+            )),
+        },
+        Ok(None) => bridge_environment(ctx).await,
+        Err(error) => Err(ApiError::from(error)),
     }
 }
 

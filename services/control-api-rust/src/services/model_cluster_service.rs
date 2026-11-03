@@ -320,12 +320,19 @@ pub async fn remove_member(
 /// across tenants and the read then runs under that scope, as every other
 /// tenant read does. A cluster that does not exist is a 404, not a guess. The
 /// media bridge stays as the fallback for an installation whose schema predates
-/// the function, where only one data center can exist anyway.
+/// the function, where only one data center can exist anyway — and only for a
+/// missing function: a database error must surface, because a fallback would
+/// turn it into a misleading validation error.
 pub async fn proxy_view(ctx: &ServiceContext, id: Uuid) -> Result<serde_json::Value, ApiError> {
     let environment = match store::environment_of(&ctx.pool, id).await {
         Ok(Some(environment)) => environment,
         Ok(None) => return Err(not_found()),
-        Err(_) => super::media_service::bridge_environment(ctx).await?,
+        Err(error) => {
+            if !crate::store::postgres::is_missing_function(&error) {
+                return Err(ApiError::from(error));
+            }
+            super::media_service::bridge_environment(ctx).await?
+        }
     };
     let mut scope = TenantScope::begin(&ctx.pool, environment).await.map_err(ApiError::from)?;
     let value = store::proxy_view(&mut scope, id).await.map_err(ApiError::from)?;

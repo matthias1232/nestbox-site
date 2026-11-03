@@ -91,7 +91,7 @@ that push (ADR 0053).
 | `access_service.rs` | SSH key pair as a file with a locator, port pool, sessions; pushes the port set and key to the runner and records what it opened |
 | `stack_topology_service.rs` | Reads the facts for the stack diagram (timeouts, degrade to unknown) and the appliance components |
 | `mcp_service.rs` | Registry validation, attachments, discovery from inside the sandbox, and the agent-config rewrite an attach/detach triggers |
-| `media_service.rs` | Media settings, the effective model per sandbox, the provider call, renders and their assets |
+| `media_service.rs` | Media settings, the effective model per sandbox, the provider call, renders and their assets; `sandbox_environment` answers the data center a named sandbox lives in (one → use it, two → 409, none → 404, function missing → the single-data-center fallback), which is the tenant for every appliance-side caller that has no principal |
 | `persist_service.rs` | Persistent roots: derived host paths, mounts, the one-read-write rule, honest usage |
 | `terminal_service.rs` | The browser terminal: permission, the four-per-sandbox and twenty-per-user limits, the idle clock, the session row and its two audit events, and the stored tab list a reload reopens (`feat/terminal`) |
 | `session_service.rs` | The login overview of running sandboxes: the in-sandbox probe, the assessed login, and per agent the chosen mode with `signed_in` |
@@ -375,7 +375,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
 | `node_ops_service.rs` | `summary` (node + load + installs + images + tunnel), `drain` (move or stop every sandbox, job `NodeDrain`) and `quick` (rent/connect/script, probe, install a model, job `NodeQuickDeploy`); `drain` and `quick` also take `&Config` (B07) |
 | `model_bulk_service.rs` | `install_bulk` (B04) |
-| `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05): a cluster plus its `local_openai_compatible` provider profile in one transaction; `proxy_view` takes the data center from the cluster row through `nb_cluster_environment` (migration 0087), so it works with several data centers, and 404s an unknown cluster; the media bridge is only the fallback when that lookup fails |
+| `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05): a cluster plus its `local_openai_compatible` provider profile in one transaction; `proxy_view` takes the data center from the cluster row through `nb_cluster_environment` (migration 0087), so it works with several data centers, and 404s an unknown cluster; the media bridge is the fallback only when the function itself is missing (SQLSTATE 42883), because any other store error must surface instead of becoming a validation error |
 | `node_ops_service.rs` | `summary drain quick` (B07) |
 | `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
 | `node_ops_service.rs` | `summary drain quick` (B07); `quick` needs `EnvironmentManage` (admin) because the join, SSH-connect and rent services it chains require it, and refuses an unknown site (`site.not_found`), an unknown model (`model.not_found`) and a taken node name (`node.name_taken`) each with its own code and sentence; `drain` needs `NodeManage`; the `connect` source passes `ssh_port` and `wg_port` (the connect body's `wg_listen_port`) through to `node_connect_service::connect` and leaves both to that request's defaults when absent |
@@ -406,7 +406,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `egress_live_service.rs` | Switching a sandbox's egress mode while it runs (ADR 0052). |
 | `environment_service.rs` | Environment membership and summary. |
 | `mod.rs` | Module root: declares and re-exports the submodules. |
-| `model_grant_service.rs` | Which models a sandbox may use, and what it sees of them (ADR 0056). |
+| `model_grant_service.rs` | Which models a sandbox may use, and what it sees of them (ADR 0056). `routes_for_accounting` takes the data center from the sandbox name (`media_service::sandbox_environment`, migration 0088), never from the environment count. |
 | `model_readiness_service.rs` | Making the models a sandbox was granted ready before it is used (ADR 0057). |
 | `node_connect_service.rs` | Connecting a machine by its address and SSH credentials, and the state of |
 | `presence_service.rs` | Who is connected to a sandbox right now (ADR 0055). |

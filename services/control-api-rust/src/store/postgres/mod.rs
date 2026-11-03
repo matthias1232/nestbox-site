@@ -1,5 +1,7 @@
 //! The PostgreSQL repositories, one module per aggregate.
 
+use crate::error::StoreError;
+
 pub mod accounting;
 pub mod agent_activity;
 pub mod agent_auth;
@@ -67,6 +69,23 @@ pub async fn connect(database_url: &str) -> Result<sqlx::PgPool, sqlx::Error> {
         .idle_timeout(Duration::from_secs(600))
         .connect(database_url)
         .await
+}
+
+/// Whether the database refused a statement because the function it names does
+/// not exist.
+///
+/// A schema one migration behind answers SQLSTATE `42883` (`undefined_function`)
+/// instead of rows. Callers that keep a fallback for such an installation check
+/// this and nothing else: a broken statement, a permission error or an
+/// unreachable database must surface as the 500 it is, not as a validation error
+/// or an empty answer.
+pub fn is_missing_function(error: &StoreError) -> bool {
+    match error {
+        StoreError::Database(sqlx::Error::Database(database)) => {
+            database.code().as_deref() == Some("42883")
+        }
+        _ => false,
+    }
 }
 
 /// Whether the database answers at all.
