@@ -52,7 +52,7 @@ what makes the workflow meaningful (ADR 0011).
 
 | File | Purpose |
 |---|---|
-| `PoliciesPage.jsx` | Policies, network rules, and the draft queue. |
+| `PoliciesPage.jsx` | Policies, network rules, and the draft queue. Every tab keeps its table header and puts the empty state under it (`styles/policies.css`): an empty state may not sit in the grid column beside the header, where it reads as a column of the table (V27). |
 | `PolicyForm.jsx` | A policy document as a form, rendered from `/policy-schema`. |
 | `RuleForms.jsx` | Forms for a network rule and a DNS rule. |
 | `SandboxPicker.jsx` | Choose which sandboxes something is applied to: some of them, or all. |

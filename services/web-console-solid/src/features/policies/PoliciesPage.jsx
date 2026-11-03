@@ -1,6 +1,7 @@
 // Policies, network rules, and the draft queue.
 
 import { For, Show, createSignal, onMount } from 'solid-js';
+import Empty from '../../components/Empty.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import Tabs from '../../components/Tabs.jsx';
 import * as api from '../../api/policies.js';
@@ -9,6 +10,7 @@ import PolicyForm from './PolicyForm.jsx';
 import PolicyWizard from './PolicyWizard.jsx';
 import SandboxPicker from './SandboxPicker.jsx';
 import '../../styles/sandbox-hierarchy.css';
+import '../../styles/policies.css';
 import { DnsRuleForm, NetworkRuleForm } from './RuleForms.jsx';
 import { blankSpec } from './policyForms.js';
 
@@ -282,35 +284,51 @@ export default function PoliciesPage() {
           />
         </div>
         <div class="split">
-          <div class="table-scroll">
-            <table>
-              <thead><tr><th>Name</th><th>Scope</th><th class="narrow">Kind</th><th class="narrow">Version</th><th>Updated</th><th /></tr></thead>
-              <tbody>
-                <For each={shownPolicies()}>
-                  {(policy) => (
-                    <tr class={selected()?.id === policy.id ? 'selected' : ''}
-                        onClick={() => open(policy)}>
-                      <td>{policy.name}</td>
-                      <td><StatusBadge status={policy.scope === 'global' ? 'degraded' : 'running'}
-                                       label={policy.scope} /></td>
-                      <td class="narrow">
-                        <StatusBadge
-                          status={policy.kind === 'openshell' ? 'degraded' : 'running'}
-                          label={policy.kind === 'openshell' ? 'OpenShell' : 'Network'}
-                          title={(policy.sections || []).join(', ') || 'no section'}
-                        />
-                      </td>
-                      <td class="narrow mono">{policy.version}</td>
-                      <td class="mono small">{policy.updated_at}</td>
-                      <td>
-                        <button class="tiny secondary" aria-label={`Edit ${policy.name} in wizard`}
-                          onClick={(event) => { event.stopPropagation(); setWizard({ policyId: policy.id }); }}>Edit in wizard</button>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
+          <div class="split-main">
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>Name</th><th>Scope</th><th class="narrow">Kind</th><th class="narrow">Version</th><th>Updated</th><th /></tr></thead>
+                <tbody>
+                  <For each={shownPolicies()}>
+                    {(policy) => (
+                      <tr class={selected()?.id === policy.id ? 'selected' : ''}
+                          onClick={() => open(policy)}>
+                        <td>{policy.name}</td>
+                        <td><StatusBadge status={policy.scope === 'global' ? 'degraded' : 'running'}
+                                         label={policy.scope} /></td>
+                        <td class="narrow">
+                          <StatusBadge
+                            status={policy.kind === 'openshell' ? 'degraded' : 'running'}
+                            label={policy.kind === 'openshell' ? 'OpenShell' : 'Network'}
+                            title={(policy.sections || []).join(', ') || 'no section'}
+                          />
+                        </td>
+                        <td class="narrow mono">{policy.version}</td>
+                        <td class="mono small">{policy.updated_at}</td>
+                        <td>
+                          <button class="tiny secondary" aria-label={`Edit ${policy.name} in wizard`}
+                            onClick={(event) => { event.stopPropagation(); setWizard({ policyId: policy.id }); }}>Edit in wizard</button>
+                        </td>
+                      </tr>
+                    )}
+                  </For>
+                </tbody>
+              </table>
+            </div>
+
+            {/* The empty state belongs under the table header, not beside it (V27): in
+                the second grid column it read as another column of the table. */}
+            <Show when={shownPolicies().length === 0}>
+              <Empty
+                title={policies().length === 0 ? 'No policy yet' : 'No policy matches'}
+                hint={policies().length === 0
+                  ? 'Select a policy to edit it, or create a new one. A policy is one document with filesystem, Landlock, process and network sections.'
+                  : 'Select a policy to edit it, or create a new one. Clear the search or the kind filter to see the policies that exist.'}
+              />
+            </Show>
+            <Show when={shownPolicies().length > 0 && !selected() && !creating()}>
+              <p class="muted">Select a policy to edit it, or create a new one.</p>
+            </Show>
           </div>
 
           <Show when={creating()}>
@@ -416,70 +434,84 @@ export default function PoliciesPage() {
               </details>
             </div>
           </Show>
-          <Show when={!selected() && !creating()}>
-            <p class="muted">Select a policy to edit it, or create a new one.</p>
-          </Show>
         </div>
       </Show>
 
       <Show when={tab() === 'rules'}>
         <NetworkRuleForm policies={policies()} sandboxes={sandboxes()} onCreated={load} />
-        <Show when={rules().length > 0} fallback={<p class="muted">No network rules yet.</p>}>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr><th>Action</th><th>Host</th><th class="narrow">Port</th>
-                    <th>Protocol</th><th>Enforcement</th><th>Binaries</th><th>Applies to</th><th /></tr>
-              </thead>
-              <tbody>
-                <For each={rules()}>
-                  {(rule) => (
-                    <tr>
-                      <td><StatusBadge status={rule.action === 'allow' ? 'running' : 'denied'} label={rule.action} /></td>
-                      <td class="mono small">{rule.host}</td>
-                      <td class="narrow mono">{rule.port ?? '—'}</td>
-                      <td class="small">{rule.protocol}</td>
-                      <td class="small">{rule.enforcement}</td>
-                      <td class="mono small">{rule.binaries.join(', ') || 'any'}</td>
-                      <td class="small">{rule.sandbox_id ? (sandboxes().find((x) => x.id === rule.sandbox_id)?.name || 'one sandbox') : 'every sandbox'}</td>
-                      <td>
-                        <button class="tiny" title="Copy to other sandboxes, or to all" onClick={() => setBulk({ kind: 'copy', rule })}>Copy…</button>
-                        <button class="tiny" onClick={async () => { await api.removeRule(rule.id); load(); }}>Delete</button>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Action</th><th>Host</th><th class="narrow">Port</th>
+                  <th>Protocol</th><th>Enforcement</th><th>Binaries</th><th>Applies to</th><th /></tr>
+            </thead>
+            <tbody>
+              <For each={rules()}>
+                {(rule) => (
+                  <tr>
+                    <td><StatusBadge status={rule.action === 'allow' ? 'running' : 'denied'} label={rule.action} /></td>
+                    <td class="mono small">{rule.host}</td>
+                    <td class="narrow mono">{rule.port ?? '—'}</td>
+                    <td class="small">{rule.protocol}</td>
+                    <td class="small">{rule.enforcement}</td>
+                    <td class="mono small">{rule.binaries.join(', ') || 'any'}</td>
+                    <td class="small">{rule.sandbox_id ? (sandboxes().find((x) => x.id === rule.sandbox_id)?.name || 'one sandbox') : 'every sandbox'}</td>
+                    <td>
+                      <button class="tiny" title="Copy to other sandboxes, or to all" onClick={() => setBulk({ kind: 'copy', rule })}>Copy…</button>
+                      <button class="tiny" onClick={async () => { await api.removeRule(rule.id); load(); }}>Delete</button>
+                    </td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Under the header, where a reader looks after scanning the columns (V27). */}
+        <Show when={rules().length === 0}>
+          <Empty
+            title="No network rule yet"
+            hint="Every connection a sandbox asks for is judged by its policy. A rule here adds one destination to the fleet, above or below the policy."
+          />
         </Show>
       </Show>
 
       <Show when={tab() === 'dns'}>
         <DnsRuleForm policies={policies()} sandboxes={sandboxes()} onCreated={load} />
-        <Show when={dnsRules().length > 0} fallback={<p class="muted">No DNS rules yet. Without one, every name a sandbox asks for is resolved.</p>}>
-          <div class="table-scroll">
-            <table>
-              <thead><tr><th>Action</th><th>Pattern</th><th class="narrow">Priority</th><th /></tr></thead>
-              <tbody>
-                <For each={dnsRules()}>
-                  {(rule) => (
-                    <tr>
-                      <td><StatusBadge status={rule.action === 'allow' ? 'running' : 'denied'} label={rule.action} /></td>
-                      <td class="mono small">{rule.pattern}</td>
-                      <td class="narrow mono">{rule.priority}</td>
-                      <td><button class="tiny" onClick={async () => { await api.removeDnsRule(rule.id); load(); }}>Delete</button></td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Action</th><th>Pattern</th><th class="narrow">Priority</th><th /></tr></thead>
+            <tbody>
+              <For each={dnsRules()}>
+                {(rule) => (
+                  <tr>
+                    <td><StatusBadge status={rule.action === 'allow' ? 'running' : 'denied'} label={rule.action} /></td>
+                    <td class="mono small">{rule.pattern}</td>
+                    <td class="narrow mono">{rule.priority}</td>
+                    <td><button class="tiny" onClick={async () => { await api.removeDnsRule(rule.id); load(); }}>Delete</button></td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
+
+        <Show when={dnsRules().length === 0}>
+          <Empty
+            title="No DNS rule yet"
+            hint="Without one, every name a sandbox asks for is resolved. A rule here allows or refuses one pattern for the whole fleet."
+          />
         </Show>
       </Show>
 
       <Show when={tab() === 'drafts'}>
-        <Show when={drafts().length > 0} fallback={<p class="muted">No pending drafts. Create one from the live traffic console.</p>}>
+        <Show when={drafts().length === 0}>
+          <Empty
+            title="No pending draft"
+            hint="A refused connection can be drafted into a rule from the live traffic console. Drafts wait here until somebody approves or rejects them."
+          />
+        </Show>
+        <Show when={drafts().length > 0}>
           <For each={drafts()}>
             {(draft) => (
               <div class="draft-card">
