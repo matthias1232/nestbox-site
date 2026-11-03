@@ -54,8 +54,8 @@ export default function ChatBrowser(props) {
           <div class="chat-filters">
             <input
               type="text"
-              placeholder="Modell"
-              aria-label="Modell filtern"
+              placeholder="Model"
+              aria-label="Filter by model"
               value={chats.model()}
               onInput={(event) => chats.setModel(event.currentTarget.value)}
             />

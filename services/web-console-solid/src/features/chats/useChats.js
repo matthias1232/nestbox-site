@@ -15,15 +15,15 @@ import { EVENT, applyEvent, emptyState, mergeLive, replaceTurn, sortTurns } from
 /** How the list may be grouped. `by` is the server's word for it. */
 export const GROUPINGS = [
   { value: 'session', label: 'Session' },
-  { value: 'model', label: 'Modell' },
+  { value: 'model', label: 'Model' },
   { value: 'day', label: 'Tag' },
   { value: 'sandbox', label: 'Sandbox' },
-  { value: 'owner', label: 'Nutzer' },
+  { value: 'owner', label: 'User' },
 ];
 
 /** The order of the group list. A thread itself always reads oldest first. */
 export const ORDERS = [
-  { value: 'newest', label: 'neueste' },
+  { value: 'newest', label: 'newest' },
   { value: 'oldest', label: 'oldest' },
 ];
 
@@ -38,7 +38,7 @@ export const DLP_STATES = [
 
 /** Which account paid. The two the server records. */
 export const ACCOUNT_KINDS = [
-  { value: '', label: 'alle Konten' },
+  { value: '', label: 'all accounts' },
   { value: 'subscription', label: 'Abo' },
   { value: 'api_key', label: 'API key' },
 ];

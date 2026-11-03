@@ -48,10 +48,10 @@ export default function ChatThreadHead(props) {
           <span class="chat-fact-value">{head().count}</span>
         </span>
         <Fact label="Sandbox" value={head().sandboxes.join(', ')} />
-        <Fact label="Nutzer" value={head().users.join(', ')} />
+        <Fact label="User" value={head().users.join(', ')} />
         <Fact label="Agent" value={head().agents.join(', ')} />
         <Fact label="Konto" value={head().accounts.join(', ')} />
-        <Fact label="Modell" value={head().models.join(', ')} />
+        <Fact label="Model" value={head().models.join(', ')} />
         <Fact
           label="Zeitraum"
           value={head().first ? `${formatTime(head().first)} – ${formatTime(head().last)}` : null}
