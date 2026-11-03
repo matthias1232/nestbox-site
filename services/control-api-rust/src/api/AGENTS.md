@@ -153,3 +153,5 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 | `quick.rs` | `PUT /sandboxes/{id}/quick` (B11) |
 | `permissions.rs` | `GET/PUT/DELETE /permissions` (B12), contract C13 |
 | `tours.rs` | `PUT /users/me/tours/{tour}` (F18) |
+| `permissions.rs` | `GET/PUT/DELETE /permissions` (B12) |
+| `tours.rs` | `PUT /users/me/tours/{tour}`, `list_seen` for `GET /users/me/tours` (route not yet registered in `mod.rs`) |

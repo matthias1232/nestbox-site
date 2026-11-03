@@ -382,3 +382,4 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `permission_service.rs` | `list set remove` (B12) |
 | `permission_service.rs` | `list set remove`: roles per data center (`user_scopes`), sandbox (via `tenancy_service::grant/revoke`) and organisation (read-only); refuses removing the last direct admin (`permission.last_admin`, 409) |
 | `tour_service.rs` | `mark_seen` (F18) |
+| `tour_service.rs` | `mark_seen` (validated name), `seen` (the caller's finished tours) |
