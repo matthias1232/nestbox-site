@@ -54,6 +54,15 @@ The panel says so in a banner while observation is on. The OpenShell supervisor 
 listed and never switchable: it carries the sandbox's API and MCP forwarding, so
 switching it off would cut the sandbox off from its tools rather than open traffic.
 
+The panel sits in a 280–480 px side column, so each channel is a **card**, never a
+table row: the channel name (bold) and its one-word state (`enforcing`, `open`,
+`audit`) share the header line, the description follows and is clamped to three
+lines, and the duration buttons wrap underneath. While a window is open its
+countdown (`open · 12 min`, `observing · 12 min`) and **Revoke** join that action
+row. A four-column table in the same width squeezes the description to one word
+per line, which is what F17 showed; keep the card layout when the panel gets a
+width of its own.
+
 ## Decisions
 
 Three answers, and only three:
@@ -80,7 +89,7 @@ Three answers, and only three:
 | `trafficFilters.js` | Pure kind / decision / target filters, chip counts and target options (tested in `trafficFilters.test.js`) |
 | `TrafficPopout.jsx` | The `/pop/traffic` window: the same view without the shell |
 | `useWindows.js` | The master switches: read the windows in force, open one, revoke one |
-| `MasterSwitches.jsx` | The switch panel (markup only) |
+| `MasterSwitches.jsx` | The switch panel (markup only): one card per channel, name and state, description, durations |
 | `useDecisions.js` | Denied targets, hide/show, allow-for-a-time, draft |
 | `DecisionsPanel.jsx` | The decisions table (markup only) |
 
