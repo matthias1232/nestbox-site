@@ -58,7 +58,7 @@ the only place those two facts are shown together.
 
 | File | Responsibility |
 |---|---|
-| `NodesPage.jsx` | The table: name and key, kind, status, tunnel state, egress lock, container GPU, sandbox count, budget; fixed column widths (V25), a PROBE action per row; opens the drawer; keeps the tunnel list fresh |
+| `NodesPage.jsx` | The table: name and key, kind, status, tunnel state, egress lock, container GPU, sandbox count, budget; fixed column widths (V25), a PROBE action per row; opens the drawer; keeps the tunnel list fresh (a 10 s poll plus the shared state stream's `node` event with `type: node_tunnel_changed` — no stream of its own) |
 | `NodeDrawer.jsx` | One node: facts, budget, probe, its sandboxes, display rename |
 | `NodeWizard.jsx` | Add node wizard: source (script, connect by IP, rent), placement, details, optional model, review; Finish makes one `POST /nodes/quick` and follows the job |
 | `nodeWizard.js` | Pure wizard logic: `steps`, `validate`, `bodyFor`, `reviewLines`, `progressStates`; no JSX |

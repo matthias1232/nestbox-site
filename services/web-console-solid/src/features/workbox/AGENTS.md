@@ -24,12 +24,12 @@ evaluation windows, plus live chats, the topology and the shared terminals.
 | `TerminalPopout.jsx`, `DesktopPopout.jsx` | the pop-out windows without a sidebar: one tab with its viewers, or the desktop, each filling the window |
 | `LiveChatsPanel.jsx` | the agents' conversation, live |
 | `livechats.js` | turns a recorded call into a turn, groups turns by session, shortens text (pure, tested by `livechats.test.js`) |
-| `TopologyPanel.jsx` | the live topology of the sandbox |
+| `TopologyPanel.jsx` | the live topology of the sandbox: re-reads the deck at most every two seconds while the shared telemetry stream reports traffic for this sandbox (it holds `wantTelemetry()` while mounted) |
 | `ModelsCard.jsx` | the models the sandbox may use, with warm-up |
 | `models.js`, `models.test.js` | the card's logic: readiness badges, scope labels, who may manage |
 | `MoveDialog.jsx` | preflight and progress of a move to another node |
 | `move.js` | the nine move steps, their state map from events and polls, the node order |
-| `useLive.js` | one subscription to the state stream, filtered per sandbox |
+| `useLive.js` | the workbox's filter on the app's one state stream (`useLive().on('control'/'models')`), per sandbox; opens no connection of its own |
 
 ## Rules
 
@@ -49,7 +49,8 @@ no state, no API call.
 that one module from here, because the tab strip in the Admin Center and in the
 Workbox is the same list. It is pure logic — no JSX, no state, no API call — so
 it cannot become a second truth. The same holds for `useLive.js`, which a
-terminal imports for its presence events so a page keeps one event stream.
+terminal imports for its presence events: it is a filter on the app's shared
+state stream, so a page or pop-out keeps one stream and no more.
 | `RequestStreamCard.jsx` | Which models this sandbox uses right now |
 | `WorkboxNotice.jsx` | What the end user is told about who may read the chats |
 | `LiveEventsPanel.jsx` | Proxy, OpenShell and MCP events of this sandbox |

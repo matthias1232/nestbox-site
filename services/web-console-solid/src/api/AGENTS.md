@@ -19,6 +19,9 @@ component never contains a URL.
    or `state/`.
 4. A path is written once. If two features need the same call, they import the
    same function.
+5. An `EventSource` is opened only in `events.js` (the shared state and telemetry
+   streams), plus `chats.js` and `live.js` for their own screens until those move
+   too. A second stream in a page is a connection the browser cannot spare.
 
 ## Files
 
@@ -30,7 +33,7 @@ component never contains a URL.
 | `nodes.js` | nodes with their computed budget: free memory, cores, sandbox count |
 | `packs.js` | the agent-pack catalog, optionally narrowed to a baseline |
 | `policies.js` | policies, rules, drafts, traffic windows |
-| `telemetry.js` | history, facets, the SSE stream |
+| `telemetry.js` | History and facets. No stream: the app holds exactly one telemetry connection in `state/live.jsx`, and a screen subscribes through `useLive()` |
 | `traffic.js` | the environment-wide traffic list, with counts |
 | `cluster.js` | gateways, settings, sync, supervisors, topology |
 | `providers.js` | profiles, probe; locators only, never a value |
@@ -52,8 +55,8 @@ Workbox modules: `control.js` (one summary per sandbox, one overview), `agentAut
 
 Control Center modules (Wave 0): `inventory.js` (tree), `search.js`, `bulk.js` (sandbox bulk job),
 `clusters.js` (model clusters), `nodeOps.js` (summary, drain, quick deploy), `alerts.js`, `mounts.js`,
-`quick.js` (one-click controls), `permissions.js`, `tours.js`, `events.js` (opens an SSE stream for the
-shared live store), `help.js` (static help files; the one module besides `client.js` that calls `fetch`).
+`quick.js` (one-click controls), `permissions.js`, `tours.js`, `events.js` (the only opener of the shared
+streams; every screen subscribes through `state/live.jsx`), `help.js` (static help files; the one module besides `client.js` that calls `fetch`).
 `models.js` gained `installBulk`, `policies.js` gained `preview` and `compiled`.
 
 

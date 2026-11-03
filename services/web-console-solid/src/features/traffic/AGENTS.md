@@ -19,10 +19,12 @@ allow, because "what happened" and "what must I decide" are different questions.
 
 ## How the live view works
 
-- Opening the page reads the environment-wide window first and then opens the
-  stream. The stream only carries what arrives after it opened, so without the
-  read an idle sandbox looks like a broken page and a reload loses the minutes
-  before it.
+- Opening the page reads the environment-wide window first and then subscribes to
+  the app's shared telemetry stream (`state/live.jsx`; the view holds one
+  `wantTelemetry()` while mounted, and the pop-out uses the same connection
+  budget as any other window). The stream only carries what arrives after it
+  opened, so without the read an idle sandbox looks like a broken page and a
+  reload loses the minutes before it.
 - Both sources are normalised to one row shape. The stream carries less than the
   stored row: a live event knows the destination and the decision, a stored row
   also knows the method, path and MCP tool. The table shows the difference rather
@@ -76,7 +78,8 @@ Three answers, and only three:
 ## Rules
 
 - A rule is never created from a click. A click creates a **draft**.
-- A rendering error must not close the stream.
+- A rendering error must not close the stream. It cannot: the connection belongs
+  to `state/live.jsx`, and this page only unsubscribes when it unmounts.
 - Every row names its sandbox. The question is "what is happening, and where"; an
   id alone does not answer it.
 
@@ -84,7 +87,7 @@ Three answers, and only three:
 
 | File | Responsibility |
 |---|---|
-| `useTrafficStream.js` | History read, stream, normalisation, buffer, pause, filters |
+| `useTrafficStream.js` | History read, the app's shared telemetry stream (subscribed with `live.on('network'/'dns'/'inference')`, one `wantTelemetry()` held while the view is mounted), normalisation, buffer, pause, filters |
 | `TrafficPage.jsx` | `TrafficView` (shared with the pop-out) and the page: header, three filters, red lane, table, side panel, draft card |
 | `trafficFilters.js` | Pure kind / decision / target filters, chip counts and target options (tested in `trafficFilters.test.js`) |
 | `TrafficPopout.jsx` | The `/pop/traffic` window: the same view without the shell |

@@ -39,6 +39,12 @@ API enforces the same rule.
    yet" look identical, which is how a broken screen looks healthy.
 5. The CSRF token lives in memory only. `localStorage` is not used for
    credentials, because anything in storage is readable by an injected script.
+6. No `new EventSource` outside `api/events.js` (`api/chats.js` and `api/live.js`
+   still own their streams until their screens move). A screen subscribes with
+   `useLive().on(name, handler)`; a window holds one state stream at most, and one
+   telemetry stream only while a screen holds `wantTelemetry()`. The browser keeps
+   six HTTP/1.1 connections per host for all tabs and pop-outs, so a stream per
+   panel is what freezes the console. `streams.test.js` enforces this.
 
 ## Adding a screen
 

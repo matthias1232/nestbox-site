@@ -1,4 +1,4 @@
-// Live telemetry state: the last window from history, then the stream on top.
+// Live telemetry state: the last window from history, then the shared stream on top.
 //
 // Two sources, one list. Opening the page reads the window that already
 // happened and then appends what arrives, so an idle sandbox does not look like
@@ -7,11 +7,14 @@
 // knows the destination and the decision, while the stored row also knows the
 // method, the path and the MCP tool.
 //
+// The stream is the app's one telemetry connection (`state/live.jsx`): this hook
+// asks for it while the page is mounted and hands it back when the page leaves.
+//
 // The buffer is capped: a live console that grows without bound is a memory leak
 // that shows up an hour into an incident, which is the worst possible moment.
 
 import { createSignal, onCleanup } from 'solid-js';
-import * as telemetry from '../../api/telemetry.js';
+import { useLive } from '../../state/live.jsx';
 import * as trafficApi from '../../api/traffic.js';
 import * as sandboxesApi from '../../api/sandboxes.js';
 
@@ -66,7 +69,7 @@ function stored(item, names) {
   };
 }
 
-function live(event, names) {
+function liveRow(event, names) {
   const isDns = event.kind === 'dns';
   return {
     id: event.id,
@@ -106,6 +109,7 @@ function matches(row, { kind, decision, host, sandbox }) {
 }
 
 export function useTrafficStream() {
+  const live = useLive();
   const [rows, setRows] = createSignal([]);
   const [names, setNames] = createSignal({});
   const [windowSpan, setWindowSpan] = createSignal('15m');
@@ -120,7 +124,8 @@ export function useTrafficStream() {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal(null);
 
-  let close = null;
+  let release = null;
+  let stops = [];
   /** Ids already in view, so a repeated frame or a re-read cannot duplicate. */
   let seen = new Set();
 
@@ -165,27 +170,32 @@ export function useTrafficStream() {
     }
   }
 
-  /** Open the stream. Safe to call twice; the second call is a no-op. */
+  /**
+   * Subscribe to the app's telemetry stream. Safe to call twice; the second call
+   * is a no-op. The stream itself is the one in `state/live.jsx`, opened while
+   * this page (or any other screen) holds a request on it.
+   */
   function start() {
-    if (close) return;
-    close = telemetry.stream(null, {
-      onEvent: (event) => {
-        const row = live(event, names());
-        // While paused the rows are held aside, so resuming shows what arrived.
-        if (paused()) {
-          setPending((current) => [row, ...current].slice(0, MAX_ROWS));
-          return;
-        }
-        append(row);
-      },
-      onError: () => setConnected(false),
-    });
+    if (release) return;
+    release = live.wantTelemetry();
+    const handle = (event) => {
+      const row = liveRow(event, names());
+      // While paused the rows are held aside, so resuming shows what arrived.
+      if (paused()) {
+        setPending((current) => [row, ...current].slice(0, MAX_ROWS));
+        return;
+      }
+      append(row);
+    };
+    stops = [live.on('network', handle), live.on('dns', handle), live.on('inference', handle)];
     setConnected(true);
   }
 
   function stop() {
-    close?.();
-    close = null;
+    for (const halt of stops) halt();
+    stops = [];
+    release?.();
+    release = null;
     setConnected(false);
   }
 
