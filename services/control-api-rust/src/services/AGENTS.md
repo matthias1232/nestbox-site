@@ -364,7 +364,7 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 
 | File | Responsibility |
 |---|---|
-| `inventory_tree_service.rs` | `tree` (B01) |
+| `inventory_tree_service.rs` | `tree`: one scope per reachable data center with the caller's role there, flat rows, then `build_tree`; node budgets only for operators and above, no runner probe |
 | `search_service.rs` | `search` (B02) |
 | `bulk_service.rs` | `sandboxes` (B03) |
 | `model_bulk_service.rs` | `install_bulk` (B04) |
