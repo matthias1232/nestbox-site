@@ -43,3 +43,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 - `models.css` — model cards, node picker, wizard options and deploy progress (F08); imported by `features/models/ModelsPage.jsx` and `ModelPage.jsx`.
 - `clusters.css` — model cluster pages and the new-cluster dialog (F09); imported by `features/clusters/`.
 - `admin-center.css` — Admin Center action bar, console split menu, Summary tiles and grids (F10); imported by `features/sandboxes/AdminCenter.jsx`.
+- `mounts.css` — mount editor chips, path lists (F15); imported by `features/sandboxes/MountEditor.jsx`.
