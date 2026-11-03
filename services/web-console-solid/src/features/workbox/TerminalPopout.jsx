@@ -7,12 +7,12 @@
 // The pop-out shares its opener's CSRF token (the shell does that on load), so
 // closing a tab for everyone works here too.
 
-import { Show, createEffect, createResource, createSignal } from 'solid-js';
+import { Show, createEffect, createResource, createSignal, lazy } from 'solid-js';
 import * as sandboxes from '../../api/sandboxes.js';
 import * as presence from '../../api/presence.js';
 import { usePolling } from '../../components/Poll.js';
 import PresenceDots from '../../components/PresenceDots.jsx';
-import TerminalTab from '../sandboxes/TerminalTab.jsx';
+const TerminalTab = lazy(() => import('../sandboxes/TerminalTab.jsx'));
 import '../../styles/workbox-sessions.css';
 
 export default function TerminalPopout(props) {

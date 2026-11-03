@@ -7,12 +7,12 @@
 // Watching without touching is the server's decision (`?view=1`), set by the
 // checkbox in the panel; this window offers the same control.
 
-import { Show, createEffect, createResource, createSignal } from 'solid-js';
+import { Show, createEffect, createResource, createSignal, lazy } from 'solid-js';
 import * as sandboxes from '../../api/sandboxes.js';
 import * as presence from '../../api/presence.js';
 import { usePolling } from '../../components/Poll.js';
 import PresenceDots from '../../components/PresenceDots.jsx';
-import DesktopTab from '../sandboxes/DesktopTab.jsx';
+const DesktopTab = lazy(() => import('../sandboxes/DesktopTab.jsx'));
 import '../../styles/workbox-sessions.css';
 
 export default function DesktopPopout(props) {
