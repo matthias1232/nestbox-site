@@ -33,6 +33,12 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 
+# The monitor layout the operator or an agent left behind. The agent home is
+# persistent, so a wall of monitors comes back after a reconnect, a restart and
+# a recreate; without it the desktop starts as the one screen the VNC server was
+# given. Before XFCE starts, so panels and the window manager see the monitors.
+[ -r "$HOME/.config/nestbox-display.json" ] && nestbox-display set "$(cat "$HOME/.config/nestbox-display.json")" || true
+
 dbus-launch --exit-with-session startxfce4 >/dev/null 2>&1 &
 
 # When the egress proxy inspects TLS, Chrome has to trust its CA. Chrome ignores

@@ -17,6 +17,7 @@ apt-get install -y --no-install-recommends \
   ca-certificates curl gnupg python3 \
   tigervnc-standalone-server tigervnc-common \
   xfce4 xfce4-terminal dbus-x11 x11-utils xauth xdg-utils \
+  xdotool wmctrl scrot \
   libnss3-tools tmux \
   fonts-dejavu-core fonts-liberation fonts-noto-color-emoji xz-utils
 
