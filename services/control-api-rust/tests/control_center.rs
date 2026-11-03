@@ -30,8 +30,8 @@ use nestbox_control_api::domain::search::{SearchKind, SearchParams};
 use nestbox_control_api::runtime::fake::FakeRuntime;
 use nestbox_control_api::services::telemetry_service::{self, ProxyBatch};
 use nestbox_control_api::services::{
-    alert_service, bulk_service, inventory_tree_service, model_cluster_service, mount_service,
-    node_ops_service, permission_service, policy_preview_service, policy_service,
+    alert_service, bulk_service, inventory_tree_service, job_service, model_cluster_service,
+    mount_service, node_ops_service, permission_service, policy_preview_service, policy_service,
     quick_control_service, search_service, ServiceContext,
 };
 
@@ -794,4 +794,83 @@ async fn tree_keeps_a_node_without_a_site() {
         find(&tree.root, "node", &node_id.to_string()).is_some(),
         "a node without a site still shows in the tree"
     );
+}
+
+#[tokio::test]
+async fn a_restart_settles_the_jobs_it_interrupted() {
+    let Some(pool) = pool().await else {
+        eprintln!("skipping: TEST_DATABASE_URL is not set");
+        return;
+    };
+    let ctx = context(&pool, std::env::temp_dir());
+    let environment = default_environment(&pool).await;
+    let payload = json!({ "test": tag() });
+
+    // The two shapes a restart leaves behind: a job already started, and one
+    // still waiting for the task that would have started it.
+    let mut stranded = Vec::new();
+    for (kind, status) in [
+        ("sandbox_bulk_action", "running"),
+        ("model_bulk_install", "running"),
+        ("node_drain", "pending"),
+        ("node_quick_deploy", "running"),
+    ] {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO jobs (environment_id, kind, status, total, payload)
+             VALUES ($1, $2, $3, 1, $4) RETURNING id",
+        )
+        .bind(environment)
+        .bind(kind)
+        .bind(status)
+        .bind(&payload)
+        .fetch_one(&pool)
+        .await
+        .expect("a job row");
+        stranded.push(id);
+    }
+
+    // A kind the boot does not own: `recipe_build` has its own settle in
+    // `builder_service`, and this one must not steal it.
+    let foreign: Uuid = sqlx::query_scalar(
+        "INSERT INTO jobs (environment_id, kind, status, total, payload)
+         VALUES ($1, 'recipe_build', 'running', 1, $2) RETURNING id",
+    )
+    .bind(environment)
+    .bind(&payload)
+    .fetch_one(&pool)
+    .await
+    .expect("a job row");
+
+    let settled = job_service::settle_interrupted(&ctx).await.expect("the settle");
+    assert!(
+        settled >= stranded.len() as u64,
+        "every stranded job is settled"
+    );
+
+    for id in stranded {
+        let (status, error, finished): (
+            String,
+            Option<String>,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ) = sqlx::query_as("SELECT status, error, finished_at FROM jobs WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("the job row");
+        assert_eq!(status, "failed", "a job nobody can finish ends failed");
+        assert_eq!(error.as_deref(), Some("interrupted by a restart"));
+        assert!(
+            finished.is_some(),
+            "the row gets an end, so it is no longer in flight"
+        );
+    }
+
+    let (status, error): (String, Option<String>) =
+        sqlx::query_as("SELECT status, error FROM jobs WHERE id = $1")
+            .bind(foreign)
+            .fetch_one(&pool)
+            .await
+            .expect("the job row");
+    assert_eq!(status, "running", "a kind with its own settle is left alone");
+    assert!(error.is_none(), "and it carries no reason it did not earn");
 }

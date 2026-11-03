@@ -83,7 +83,7 @@ that push (ADR 0053).
 | `template_service.rs` | Image templates: sharing and default rules, validation, apply-to-recipe |
 | `selection.rs` | The one validation for package names, repository URLs/keys and template names |
 | `gateway_service.rs` | Registry, settings, drift, sync |
-| `job_service.rs` | Job creation and progress |
+| `job_service.rs` | Job creation and progress; `settle_interrupted` closes the Control Center jobs (bulk action, bulk model install, drain, quick deploy) a restart left `pending`/`running`, so the dock stops naming one that can never move |
 | `catalog_sync/` | The model catalogue is rebuilt from Hugging Face, Ollama, NGC, and NIM, never over a curated row |
 | `schedule_service.rs` | Schedule evaluation and runs |
 | `metrics_service.rs` | Sample ingest, ranged query, rollup, partition maintenance, the two metrics jobs; `desktop_target` decides the desktop permission (drive needs `SandboxExec`, view only needs `SandboxRead`) and whether the stream really is view-only |

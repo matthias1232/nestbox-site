@@ -4,10 +4,39 @@ use uuid::Uuid;
 
 use super::{require, ServiceContext};
 use crate::domain::auth::{Permission, Principal};
-use crate::domain::job::{Job, Schedule};
+use crate::domain::job::{Job, JobKind, Schedule};
 use crate::error::{ApiError, ErrorCode};
 use crate::store::TenantScope;
 use crate::store::postgres::jobs as store;
+
+/// The message a job carries when a restart, not a target, stopped it.
+///
+/// Fixed text on purpose: the dock and the Tasks list show it verbatim, and an
+/// operator who sees it twice should recognise it as one situation.
+const INTERRUPTED: &str = "interrupted by a restart";
+
+/// The job kinds the Control Center starts and a restart can strand.
+///
+/// All four run in a bare `tokio::spawn` (`bulk_service`, `model_bulk_service`,
+/// `node_ops_service`), so nothing survives the process to finish them.
+const INTERRUPTED_KINDS: [JobKind; 4] = [
+    JobKind::SandboxBulkAction,
+    JobKind::ModelBulkInstall,
+    JobKind::NodeDrain,
+    JobKind::NodeQuickDeploy,
+];
+
+/// Settle the Control Center jobs a restart interrupted.
+///
+/// Called once at boot, before the first request: every job of those kinds still
+/// `pending` or `running` belongs to a task that no longer exists, so it ends
+/// `failed` with the reason above instead of showing progress that never moves.
+/// Cross-tenant by nature, like the other boot settles — there is no principal.
+pub async fn settle_interrupted(ctx: &ServiceContext) -> Result<u64, ApiError> {
+    store::settle_interrupted(&ctx.pool, &INTERRUPTED_KINDS, INTERRUPTED)
+        .await
+        .map_err(ApiError::from)
+}
 
 /// List recent jobs.
 pub async fn list(

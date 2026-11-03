@@ -41,7 +41,7 @@ the codebase where SQL appears.
 | `model_installs.rs` | One model on one node: reservation, state, provider link, its job |
 | `nodes.rs` | Nodes, the local node, seed marks, display fields, sandbox counts per node |
 | `node_gateway.rs` | A node's tunnel state and egress lock, the gateway columns a join writes, the credentials a node presents (`nodes` has no policy: unscoped reads) |
-| `jobs.rs` | Jobs, targets, schedules |
+| `jobs.rs` | Jobs, targets, schedules; `settle_interrupted` (pool, not scope: the boot has no principal) marks the given kinds' `pending`/`running` rows failed, for the jobs a restart killed |
 | `environments.rs` | Environments, clusters, nodes, overview counts |
 | `providers.rs` | Provider profiles, secret references; `set_endpoint` corrects the address once a server on a joined node reports where it is published |
 | `agent_packs.rs` | Baselines, agent packs, and the tool catalog (global data, no tenant filter) |
