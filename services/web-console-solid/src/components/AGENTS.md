@@ -103,6 +103,7 @@ and the side panel, so the minimap has a reserved corner and can never cover a c
 because a reserve inside the scaled viewBox would shrink below the minimap's fixed 160 px. `layout` reports `width` that
 covers every card's `x + card.w` (tested), and the column titles own a `band` above the first card (`top`, `titleY`).
 | `ConsoleFrame.jsx`, `consoleFrame.js`, `consoleFrame.test.js` | one console per sandbox: Shell/Desktop/SSH split button, toolbar (font, copy, paste, fullscreen, Ctrl+Alt+Del, view-only, pop-out); pure `modes`, `pickMode`, `nextFont`, `sshLines` |
+| `VncSidebar.jsx` | the desktop's Proxmox-style sidebar: Clipboard (send/clear), Full screen, Settings (scaling local/remote/none, view only, dot cursor, shared mode, quality and compression 0–9, automatic reconnect and a 1–60 s delay), Send key (Ctrl+Alt+Del, Ctrl+Alt+F1…F12, Tab, Esc, sticky Ctrl/Alt/Win/Shift), Power (stop, restart, reset = recreate, each behind a `ConfirmDialog` that names the sandbox). Collapsible to a 32 px icon strip; props in, callbacks out. The same file exports `VncStatus`, the line under the picture (`Connected (1440×900, quality 6)` / `Disconnected — <reason>` with Reconnect and Disconnect). Styles: `styles/vnc.css` (U04) |
 
 
 ## Files added by the Control Center phase

@@ -90,6 +90,9 @@ export function adoptOpenerEnvironment() {
 // re-exports without creating a local binding, so calling `withEnvironment` below
 // threw "withEnvironment is not defined" — found live in U03, where that ReferenceError
 // left the terminal, the desktop and every live stream unable to open at all.
+// The local binding matters: `export { x } from` re-exports without defining `x`
+// here, and `environmentUrl` below calls it (U04 found the console dead with
+// "withEnvironment is not defined" on every desktop and terminal).
 import { withEnvironment } from './environmentUrl.js';
 
 export { withEnvironment };

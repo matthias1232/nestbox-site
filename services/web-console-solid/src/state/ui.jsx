@@ -65,6 +65,7 @@ export function UiProvider(props) {
   const [dockHeight, setDockHeight] = createSignal(initial.dockHeight);
   const [treeView, setTreeView] = createSignal(initial.treeView);
   const [consoleModes, setConsoleModes] = createSignal(initial.consoleMode);
+  const [vncPrefs, setVncPrefs] = createSignal(initial.vncOptions);
   const [logPanes, setLogPanes] = createSignal(initial.logPanes);
   const [recent, setRecent] = createSignal(initial.paletteRecent);
   const [alertPopups, setAlertPopups] = createSignal(initial.alertPopups);
@@ -90,6 +91,7 @@ export function UiProvider(props) {
       dockHeight: dockHeight(),
       treeView: treeView(),
       consoleMode: consoleModes(),
+      vncOptions: vncPrefs(),
       logPanes: logPanes(),
       paletteRecent: recent(),
       toursDismissed: initial.toursDismissed,
@@ -235,6 +237,12 @@ export function UiProvider(props) {
       mode: (sandboxId) => consoleModes()[sandboxId] || null,
       setMode(sandboxId, mode) {
         setConsoleModes((all) => ({ ...all, [sandboxId]: mode }));
+      },
+      // The desktop viewer's options of one sandbox, always complete.
+      vncOptions: (sandboxId) => vncPrefs()[sandboxId] || null,
+      // Change some of them; the rest keeps the value this browser stored.
+      setVncOptions(sandboxId, patch) {
+        setVncPrefs((all) => ({ ...all, [sandboxId]: { ...(all[sandboxId] || {}), ...patch } }));
       },
     },
     logs: { panes: logPanes, setPanes: setLogPanes },

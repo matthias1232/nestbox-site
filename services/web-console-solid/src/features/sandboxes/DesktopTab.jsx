@@ -12,20 +12,41 @@
 // with `?view=1` and the control API drops keyboard, pointer, clipboard and
 // resize messages before they reach the desktop. `rfb.viewOnly` alone is a
 // promise from the client to itself, which anybody can take back in DevTools.
-import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+// The sidebar's "View only" sets both, so the switch is honest.
+//
+// Every noVNC option (scaling, quality, compression, dot cursor, shared mode,
+// automatic reconnect) is stored per sandbox in `ui.console`, applied on connect
+// and on change; the panel on the left is `components/VncSidebar.jsx`.
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import RFB from '@novnc/novnc/lib/rfb';
 import * as deck from '../../api/deck.js';
+import * as sandboxes from '../../api/sandboxes.js';
 import { environmentUrl } from '../../api/client.js';
+import { useUi } from '../../state/ui.jsx';
+import VncSidebar, { VncStatus } from '../../components/VncSidebar.jsx';
+import { DEFAULTS, applyOptions, sanitizeOptions, sendCombo, withSticky } from './vncOptions.js';
 import '../../styles/workbox-sessions.css';
 
 export default function DesktopTab(props) {
+  const ui = useUi();
   let screen;
   let rfb;
+  let manualClose = false;
+  let retryTimer = null;
+  let sizeObserver = null;
   const [state, setState] = createSignal('idle');
+  const [reason, setReason] = createSignal(null);
   const [note, setNote] = createSignal(null);
-  const [viewOnly, setViewOnly] = createSignal(props.viewOnly === true);
+  const [size, setSize] = createSignal(null);
+  const [clipboard, setClipboard] = createSignal('');
+  const [retryIn, setRetryIn] = createSignal(0);
+  const [busy, setBusy] = createSignal(false);
   const [browser, setBrowser] = createSignal(null);
   const running = () => props.sandbox.status === 'running';
+
+  // The options of this sandbox: the browser's remembered taste, completed.
+  const options = createMemo(() => sanitizeOptions(ui.console.vncOptions(props.sandbox.id) || DEFAULTS));
+  const toast = (tone, text) => ui.toast.show({ tone, text, undo: null, ms: 5000 });
 
   async function loadBrowser() {
     try {
@@ -36,67 +57,179 @@ export default function DesktopTab(props) {
     }
   }
 
+  // The framebuffer size, read from noVNC's display (it changes on remote resize).
+  function readSize() {
+    const canvas = screen?.querySelector('canvas');
+    const width = rfb?._display?.width || Number(canvas?.getAttribute('width')) || 0;
+    const height = rfb?._display?.height || Number(canvas?.getAttribute('height')) || 0;
+    setSize(width > 0 && height > 0 ? { width, height } : null);
+  }
+
+  function cancelReconnect() {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    setRetryIn(0);
+  }
+
+  // Automatic reconnect: wait the configured delay, counting down in the status
+  // line, then open the stream again. Cancelled when the tab goes away.
+  function scheduleReconnect() {
+    cancelReconnect();
+    if (!options().reconnect || !running()) return;
+    let left = options().reconnectDelay;
+    setRetryIn(left);
+    const tick = () => {
+      left -= 1;
+      if (left <= 0) {
+        retryTimer = null;
+        setRetryIn(0);
+        connect();
+        return;
+      }
+      setRetryIn(left);
+      retryTimer = setTimeout(tick, 1000);
+    };
+    retryTimer = setTimeout(tick, 1000);
+  }
+
+  function onClipboard(event) {
+    // Text copied inside the desktop goes to the person's clipboard too and into
+    // the sidebar's box. A view-only viewer only watches, so nothing is taken out.
+    const text = event.detail?.text || '';
+    setClipboard(text);
+    if (options().viewOnly) return;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand('copy'); } catch { /* the desktop shows its own selection */ }
+    document.body.removeChild(area);
+  }
+
   function connect() {
     disconnect();
+    manualClose = false;
     if (!running()) return;
     setNote(null);
+    setReason(null);
     setState('connecting');
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     // `?view=1` is what the server reads to drop this viewer's input.
-    const view = viewOnly() ? '?view=1' : '';
+    const view = options().viewOnly ? '?view=1' : '';
     // A WebSocket carries no header, so the chosen data center travels in the URL (U01).
-    rfb = new RFB(screen, environmentUrl(`${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/desktop${view}`), {
+    const client = new RFB(screen, environmentUrl(`${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/desktop${view}`), {
       wsProtocols: ['binary'],
+      shared: options().shared,
     });
-    rfb.scaleViewport = true;
-    rfb.resizeSession = false;
-    // Immediate local effect while the reconnect is on its way; the server's
-    // answer is the one that counts.
-    rfb.viewOnly = viewOnly();
-    rfb.addEventListener('connect', () => setState('open'));
-    rfb.addEventListener('disconnect', (event) => {
+    rfb = client;
+    // Local effect at once; the server's answer is the one that counts.
+    applyOptions(client, options());
+    // An old connection's late events must not speak for the one that replaced
+    // it: every handler checks that it still belongs to the current client.
+    const current = () => client === rfb;
+    client.addEventListener('connect', () => {
+      if (!current()) return;
+      setState('open');
+      setReason(null);
+      readSize();
+      sizeObserver = new MutationObserver(readSize);
+      const canvas = screen?.querySelector('canvas');
+      if (canvas) sizeObserver.observe(canvas, { attributes: true, attributeFilter: ['width', 'height'] });
+    });
+    client.addEventListener('disconnect', (event) => {
+      if (!current()) return;
+      sizeObserver?.disconnect();
+      sizeObserver = null;
+      rfb = null;
+      setSize(null);
       setState('closed');
+      // A close this window asked for is the end; anything else is a broken
+      // picture, even when the WebSocket itself closed politely.
+      if (event.detail.clean && manualClose) {
+        setReason('closed from this window');
+        return;
+      }
+      setReason(event.detail.clean ? 'the desktop closed the stream' : 'the desktop did not answer');
       if (!event.detail.clean) {
         setNote('The desktop did not answer. This sandbox probably has no desktop: build it from the "Desktop (XFCE, Chrome, VNC)" pack in the image builder.');
       }
+      scheduleReconnect();
     });
-    rfb.addEventListener('clipboard', (event) => {
-      // Text copied inside the desktop goes to the person's clipboard too. A
-      // view-only viewer only watches, so nothing is taken out of it.
-      if (viewOnly()) return;
-      const area = document.createElement('textarea');
-      area.value = event.detail.text;
-      area.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(area);
-      area.select();
-      try { document.execCommand('copy'); } catch { /* the desktop shows its own selection */ }
-      document.body.removeChild(area);
+    client.addEventListener('clipboard', (event) => {
+      if (current()) onClipboard(event);
     });
   }
 
   function disconnect() {
-    try { rfb?.disconnect(); } catch { /* already closed */ }
+    cancelReconnect();
+    sizeObserver?.disconnect();
+    sizeObserver = null;
+    manualClose = true;
+    const closing = rfb;
+    // Cleared first: the close event arrives later and must not be mistaken for
+    // a broken picture by the connection that is about to open.
     rfb = null;
+    try { closing?.disconnect(); } catch { /* already closed */ }
   }
 
-  /** Switch between watching and taking over. The stream is opened again. */
-  function setWatch(on) {
-    setViewOnly(on);
-    if (running()) connect();
+  /** Change some options; scaling and picture quality apply at once. */
+  function setOptions(patch) {
+    const before = options();
+    ui.console.setVncOptions(props.sandbox.id, patch);
+    // Shared mode is a handshake and view only is the server's decision: both
+    // need the stream opened again.
+    const reopens = ('shared' in patch && patch.shared !== before.shared) || ('viewOnly' in patch && patch.viewOnly !== before.viewOnly);
+    if (reopens && running()) connect();
+  }
+
+  /** Send one named combo (`KEYS`), preceded by any held modifiers. */
+  function sendKey(name, sticky = []) {
+    if (rfb) sendCombo(rfb, withSticky(sticky, name));
+  }
+
+  /** Put text on the desktop's clipboard. */
+  function clipboardSend(text) {
+    if (!rfb || !text) return;
+    rfb.clipboardPasteFrom(text);
+    setClipboard(text);
   }
 
   /**
-   * Open this desktop in a window of its own.
+   * Stop, restart or reset the sandbox from the Power section.
    *
-   * Named per sandbox, so a second click focuses the window that already exists
-   * instead of opening a third viewer on the same screen.
+   * A desktop pack answers noVNC's machine power requests, so these go through the
+   * sandbox's own lifecycle instead: the same calls the action bar makes.
    */
-  function popOut() {
-    window.open(
-      environmentUrl(`/box/${props.sandbox.id}/desktop`),
-      `nb-desk-${props.sandbox.id}`,
-      'popup,width=1440,height=900',
-    );
+  async function power(action) {
+    if (busy()) return;
+    setBusy(true);
+    const name = props.sandbox.name || props.sandbox.id;
+    try {
+      if (action === 'reset') {
+        await deck.recreate(props.sandbox.id);
+        toast('ok', `${name}: reset; a fresh container is on its way.`);
+      } else {
+        await sandboxes.act(props.sandbox.id, action);
+        toast('ok', `${name}: ${action === 'stop' ? 'stopped' : 'restarted'}.`);
+        if (action === 'stop') {
+          disconnect();
+          setState('closed');
+          setReason('the sandbox was stopped');
+        }
+      }
+      props.onChanged?.();
+    } catch (failure) {
+      toast('bad', failure?.message || `The ${action} failed.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function fullscreen() {
+    screen?.requestFullscreen?.();
   }
 
   async function giveBrowser() {
@@ -110,38 +243,40 @@ export default function DesktopTab(props) {
     }
   }
 
-  // The console frame can switch watching on or off; the stream opens again.
-  let lastView = viewOnly();
+  // A change to scaling, quality, compression or the cursor reaches the live
+  // connection without reopening it.
   createEffect(() => {
-    const wanted = props.viewOnly === true;
-    if (wanted === lastView) return;
-    lastView = wanted;
-    setWatch(wanted);
+    const wanted = options();
+    if (!rfb) return;
+    applyOptions(rfb, wanted);
   });
 
   onMount(() => {
     connect();
     loadBrowser();
     props.onReady?.({
-      sendCtrlAltDel: () => rfb?.sendCtrlAltDel(),
-      fullscreen: () => screen?.requestFullscreen?.(),
+      sendCombo: (keys) => (rfb ? sendCombo(rfb, keys) : false),
+      sendKey,
+      setOptions,
+      options,
+      clipboardSend,
+      lastClipboard: clipboard,
+      fullscreen,
+      power,
+      connect,
+      disconnect,
     });
   });
-  onCleanup(disconnect);
+  onCleanup(() => {
+    disconnect();
+    cancelReconnect();
+  });
 
   return (
     <section class={`tab-panel ${props.fullWindow ? 'desktop-fill' : ''}`}>
+      <Show when={!running()}><p class="muted">The sandbox is not running.</p></Show>
+      <Show when={note()}><p class="notice">{note()}</p></Show>
       <div class="controls">
-        <span class={`badge ${state() === 'open' ? 'ok' : state() === 'connecting' ? 'warn' : 'muted'}`}><i />{state()}</span>
-        <button class="tiny" onClick={connect} disabled={!running()}>{state() === 'open' ? 'Reconnect' : 'Connect'}</button>
-        <label class="small" title="Watching only: the server drops this window's keyboard, pointer and clipboard, it is not just a setting here.">
-          <input type="checkbox" checked={viewOnly()} onChange={(e) => setWatch(e.currentTarget.checked)} />
-          {' '}watch only
-        </label>
-        <button class="tiny secondary" onClick={() => screen?.requestFullscreen?.()}>Full screen</button>
-        <Show when={!props.fullWindow}>
-          <button class="tiny secondary" onClick={popOut} title="Show this desktop in a window of its own">Pop out</button>
-        </Show>
         <Show when={browser() === false}>
           <button class="tiny" onClick={giveBrowser} title="Attach the Chrome DevTools MCP server so agents can open pages and take screenshots in this Chrome">Give agents this browser (MCP)</button>
         </Show>
@@ -149,9 +284,36 @@ export default function DesktopTab(props) {
           <span class="muted small">Agents drive this Chrome through the “chrome-browser” MCP server.</span>
         </Show>
       </div>
-      <Show when={!running()}><p class="muted">The sandbox is not running.</p></Show>
-      <Show when={note()}><p class="notice">{note()}</p></Show>
-      <div class={`desktop-screen ${props.fullWindow ? 'full' : ''}`} ref={screen} />
+      <div class="vnc-wrap">
+        <VncSidebar
+          sandbox={props.sandbox}
+          options={options()}
+          onChange={setOptions}
+          state={state()}
+          connected={state() === 'open'}
+          running={running()}
+          busy={busy()}
+          clipboard={clipboard()}
+          onSendClipboard={clipboardSend}
+          onSendKey={sendKey}
+          onFullscreen={fullscreen}
+          onPower={power}
+          onReconnect={connect}
+          onDisconnect={disconnect}
+        />
+        <div class="vnc-main">
+          <div class={`desktop-screen ${props.fullWindow ? 'full' : ''}`} ref={screen} />
+          <VncStatus
+            state={state()}
+            size={size()}
+            quality={options().quality}
+            reason={reason()}
+            retryIn={retryIn()}
+            onReconnect={connect}
+            onDisconnect={disconnect}
+          />
+        </div>
+      </div>
     </section>
   );
 }
