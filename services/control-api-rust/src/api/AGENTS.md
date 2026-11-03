@@ -151,5 +151,5 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 | `policy_preview.rs` | `POST /policies/preview`, `GET /policies/{id}/compiled` (B10) |
 | `policy_preview.rs` | `POST /policies/preview`, `GET /policies/{id}/compiled` (B10) | (built)
 | `quick.rs` | `PUT /sandboxes/{id}/quick` (B11) |
-| `permissions.rs` | `GET/PUT/DELETE /permissions` (B12) |
+| `permissions.rs` | `GET/PUT/DELETE /permissions` (B12), contract C13 |
 | `tours.rs` | `PUT /users/me/tours/{tour}` (F18) |

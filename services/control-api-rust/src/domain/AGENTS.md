@@ -107,5 +107,6 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 | `mounts.rs` | `MountSpec`, `EffectiveMounts` and `validate_mount_path` |
 | `mounts.rs` | `MountSpec`, `EffectiveMounts`, `MountDiff`, `diff` and `validate_mount_path` (no trailing slash, not under /proc /sys /dev /run/secrets) |
 | `permissions.rs` | `ScopeType` and `PermissionRow` |
+| `permissions.rs` | `ScopeType`, `PermissionRow` and `allowed_role_for` (sandbox grants are always member, the organisation tree is read-only) |
 
 `job.rs` gained `ModelBulkInstall`, `NodeDrain` and `NodeQuickDeploy`; `telemetry.rs` gained `LiveEvent::Alert`.
