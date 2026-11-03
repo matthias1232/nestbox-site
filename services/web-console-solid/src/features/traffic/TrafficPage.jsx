@@ -88,7 +88,7 @@ export function TrafficView(props) {
     decisions.load();
   });
 
-  const tree = () => (inventory ? inventory.root() : null);
+  const tree = () => (inventory ? inventory.center() : null);
   const nodeMap = createMemo(() => nodeBySandbox(tree()));
   const options = createMemo(() => {
     const fromTree = targetOptions(tree());
@@ -205,18 +205,23 @@ export function TrafficView(props) {
         <p class="error" role="alert">{traffic.error() || notice()}</p>
       </Show>
 
+      {/* The group label names the chips, it does not wrap them: a <label> around a chip row
+          would forward every chip click to its first button, so "DNS" also activated "All" and
+          the filter snapped back to every row (U06-03). */}
       <div class="traffic-filters" role="group" aria-label="Traffic filters">
-        <label class="traffic-filter">
-          <span class="eyebrow">Kind</span>
+        <div class="traffic-filter">
+          <span class="eyebrow" id="traffic-filter-kind">Kind</span>
           <Segmented
+            labelledby="traffic-filter-kind"
             value={kind()}
             onChange={setKind}
             options={KIND_CHIPS.map((chip) => ({ value: chip.id, label: `${chip.label} ${chipCounts().kind[chip.id]}` }))}
           />
-        </label>
-        <label class="traffic-filter">
-          <span class="eyebrow">Decision</span>
+        </div>
+        <div class="traffic-filter">
+          <span class="eyebrow" id="traffic-filter-decision">Decision</span>
           <Segmented
+            labelledby="traffic-filter-decision"
             value={decision()}
             onChange={setDecision}
             options={DECISION_CHIPS.map((chip) => ({
@@ -225,14 +230,18 @@ export function TrafficView(props) {
               tone: chip.id === 'refused' ? 'bad' : undefined,
             }))}
           />
-        </label>
-        <label class="traffic-filter">
-          <span class="eyebrow">Sandbox or node</span>
-          <select aria-label="Sandbox or node" value={target()} onChange={(event) => setTarget(event.currentTarget.value)}>
+        </div>
+        <div class="traffic-filter">
+          <span class="eyebrow" id="traffic-filter-target">Sandbox or node</span>
+          <select
+            aria-labelledby="traffic-filter-target"
+            value={target()}
+            onChange={(event) => setTarget(event.currentTarget.value)}
+          >
             <option value="">All sandboxes and nodes</option>
             <For each={options()}>{(item) => <option value={item.value}>{item.label}</option>}</For>
           </select>
-        </label>
+        </div>
       </div>
 
       <div class={panel() ? 'traffic-layout with-panel' : 'traffic-layout'}>

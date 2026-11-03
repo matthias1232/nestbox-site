@@ -64,7 +64,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 mkdirSync(OUT, { recursive: true });
 const scenarios = JSON.parse(readFileSync(new URL('./smoke-scenarios.json', import.meta.url), 'utf8'));
 const only = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
-const chosen = only.length ? scenarios.filter((scenario) => only.includes(scenario.name)) : scenarios;
+// A scenario is named by its full name (`14-traffic`) or by its number (`14`), so "run 14 and
+// 18" works as written.
+const chosen = only.length
+  ? scenarios.filter((scenario) => only.some((name) => scenario.name === name || scenario.name.startsWith(`${name}-`)))
+  : scenarios;
 if (!chosen.length) {
   console.log(`No scenario matches ${only.join(', ')}. Known: ${scenarios.map((s) => s.name).join(', ')}`);
   process.exit(2);

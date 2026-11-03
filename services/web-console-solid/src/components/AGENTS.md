@@ -42,7 +42,7 @@ not gateways and sandboxes.
 | `LogViewer.jsx` | One log panel for a sandbox, a supervisor (filtered) and an appliance component: follow, filter, copy; stops following after a failed read |
 | `PendingPanel.jsx` | A tab body that a later package fills: what belongs there, which endpoint, who owns it |
 | `Switch.jsx` | A two-state switch, a hidden checkbox under a 34 × 18 px track with a 14 px knob: lime when on, muted when off, a visible focus ring, and the state stays readable when the control is disabled (V26; the rules live in `styles/controls.css`) |
-| `Segmented.jsx` | A radio group of styled buttons, one active |
+| `Segmented.jsx` | A radio group of styled buttons, one active. Its accessible name comes from the `labelledby` id of a visible label beside it; it is never wrapped in a `<label>`, because that label would forward a click on any chip to the group's first button (U06-03) |
 | `Countdown.jsx` | A live "time left" label; no end time reads as "unlimited" |
 | `countdown.js` | Time formatting behind `Countdown`, pure and node-tested |
 | `bulkActions.js` | Pure bulk-bar rules: `actionsFor(kind, role)`, `paramsValid`, `paramsFor`, `confirmText`, `needsDialog` (F21) |

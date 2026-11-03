@@ -99,6 +99,11 @@ Three answers, and only three:
 ## Control Center layout (F17)
 
 One table with three always-visible filters: Kind (all/proxy/DNS/MCP/inference), Decision
-(all/allowed/refused/would deny) and Sandbox or node. Refused destinations also sit in a red
+(all/allowed/refused/would deny) and Sandbox or node. Each filter group names its chips with a
+`<span class="eyebrow">` and `aria-labelledby`, never with a wrapping `<label>`: a label around a
+chip row forwards every chip click to its first button, so "DNS" also activated "All" and the
+filter snapped back to every row (U06-03). The sandbox/node choices come from the active data
+center's subtree (`useInventory().center()`), so the page names what the topbar names (U06-04).
+Refused destinations also sit in a red
 lane above the table with inline answers (allow now, 15 min, 1 h, draft rule, ignore). The
 master switches and the decisions list moved into a collapsible side panel. Styles: `styles/traffic.css`.
