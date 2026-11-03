@@ -19,6 +19,10 @@ not gateways and sandboxes.
 5. No arithmetic that decides something. `ResourceBars` computes pixel widths
    from server numbers; it must not decide whether a model fits. That decision
    arrives as `status` and `fit`.
+6. User-visible text is English (P08): labels, tooltips, empty states and the
+   CSV file name. `DataTable`, `DlpBadge`, `DlpText` and `RouteChain` were the
+   last ones translated; `src/noGerman.test.js` fails if German characters or a
+   short word list return.
 
 ## Files
 

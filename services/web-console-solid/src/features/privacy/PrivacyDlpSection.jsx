@@ -15,21 +15,21 @@ import DlpExceptionsTable from './DlpExceptionsTable.jsx';
 
 const FRAMES = ['1h', '24h', '7d', '30d'];
 const VIEWS = [
-  { id: 'events', label: 'Vorkommnisse' },
-  { id: 'changes', label: 'Änderungen' },
-  { id: 'exceptions', label: 'Ausnahmen' },
+  { id: 'events', label: 'Findings' },
+  { id: 'changes', label: 'Changes' },
+  { id: 'exceptions', label: 'Exceptions' },
 ];
 const STATES = [
-  { value: 'blocked', label: 'Blockiert' },
-  { value: 'replaced', label: 'Ersetzt' },
-  { value: 'pseudonymized', label: 'Pseudonymisiert' },
-  { value: 'allowed', label: 'Protokolliert' },
-  { value: 'unavailable', label: 'Nicht geprüft' },
-  { value: 'too_large', label: 'Zu groß' },
+  { value: 'blocked', label: 'Blocked' },
+  { value: 'replaced', label: 'Replaced' },
+  { value: 'pseudonymized', label: 'Pseudonymized' },
+  { value: 'allowed', label: 'Recorded' },
+  { value: 'unavailable', label: 'Not checked' },
+  { value: 'too_large', label: 'Too large' },
 ];
 
 const ACCOUNT = { account: 'Subscription', key: 'API-Key', unknown: '—' };
-const DIRECTION = { inbound: '→ Modell', outbound: '← Agent' };
+const DIRECTION = { inbound: '→ model', outbound: '← agent' };
 
 function row(item) {
   const incident = item.incident || item;
@@ -58,17 +58,17 @@ function row(item) {
 }
 
 const columns = [
-  { key: 'ts', label: 'Zeit', sortable: true, filter: 'none', value: (r) => r.ts,
+  { key: 'ts', label: 'When', sortable: true, filter: 'none', value: (r) => r.ts,
     render: (r) => <span class="mono small">{String(r.ts).replace('T', ' ').slice(0, 19)}</span> },
   { key: 'sandbox', label: 'Sandbox', sortable: true, groupable: true, filter: 'select', render: (r) => r.sandbox },
-  { key: 'owner', label: 'Nutzer', sortable: true, groupable: true, filter: 'select', render: (r) => r.owner },
+  { key: 'owner', label: 'User', sortable: true, groupable: true, filter: 'select', render: (r) => r.owner },
   { key: 'agent', label: 'Agent', sortable: true, filter: 'select', render: (r) => r.agent },
-  { key: 'account', label: 'Konto', sortable: true, filter: 'select', render: (r) => r.account },
-  { key: 'direction', label: 'Richtung', sortable: true, filter: 'select', render: (r) => r.direction },
-  { key: 'detector', label: 'Detektor', sortable: true, groupable: true, filter: 'select', render: (r) => r.detector },
+  { key: 'account', label: 'Account', sortable: true, filter: 'select', render: (r) => r.account },
+  { key: 'direction', label: 'Direction', sortable: true, filter: 'select', render: (r) => r.direction },
+  { key: 'detector', label: 'Detector', sortable: true, groupable: true, filter: 'select', render: (r) => r.detector },
   {
     key: 'state',
-    label: 'Was passiert ist',
+    label: 'What happened',
     sortable: true,
     groupable: true,
     filter: 'select',
@@ -77,14 +77,14 @@ const columns = [
       <span>
         <DlpBadge state={r.state} />
         <Show when={r.requested && r.requested !== r.state}>
-          <span class="muted small"> gewünscht: {r.requested}</span>
+          <span class="muted small"> asked for: {r.requested}</span>
         </Show>
       </span>
     ),
   },
   {
     key: 'from',
-    label: 'Von → Auf',
+    label: 'From → to',
     sortable: false,
     render: (r) => (
       <span class="mono small">
@@ -93,16 +93,16 @@ const columns = [
       </span>
     ),
   },
-  { key: 'provider', label: 'Anbieter', sortable: true, groupable: true, filter: 'select', render: (r) => r.provider },
-  { key: 'model', label: 'Modell', sortable: true, groupable: true, filter: 'select', render: (r) => r.model },
-  { key: 'host', label: 'Ziel', sortable: true, render: (r) => r.host },
+  { key: 'provider', label: 'Provider', sortable: true, groupable: true, filter: 'select', render: (r) => r.provider },
+  { key: 'model', label: 'Model', sortable: true, groupable: true, filter: 'select', render: (r) => r.model },
+  { key: 'host', label: 'Destination', sortable: true, render: (r) => r.host },
   {
     key: 'ip',
     label: 'IP',
     sortable: false,
     render: (r) => (
       <span class="mono small">
-        {r.ip || (r.ipWould ? <span class="muted">hätte: {r.ipWould}</span> : '—')}
+        {r.ip || (r.ipWould ? <span class="muted">would: {r.ipWould}</span> : '—')}
       </span>
     ),
   },
@@ -137,7 +137,7 @@ export default function PrivacyDlpSection(props) {
       setReport(overview);
       setError(null);
     } catch (failure) {
-      setError(failure.message || 'Die Vorkommnisse konnten nicht geladen werden.');
+      setError(failure.message || 'The findings could not be loaded.');
     }
   };
   const poll = usePolling(load, { everyMs: 10000, onError: (e) => setError(e.message) });
@@ -148,16 +148,16 @@ export default function PrivacyDlpSection(props) {
     <section class="tab-panel">
       <div class="controls">
         <button class={poll.paused() ? 'secondary tiny' : 'primary tiny'} onClick={poll.toggle}>
-          {poll.paused() ? 'Pausiert' : 'Live'}
+          {poll.paused() ? 'Paused' : 'Live'}
         </button>
-        <span class="muted small">Zeitraum</span>
+        <span class="muted small">Window</span>
         <select value={frame()} onChange={(event) => { setFrame(event.currentTarget.value); poll.refresh(); }}>
           <For each={FRAMES}>{(value) => <option value={value}>{value}</option>}</For>
         </select>
         <input
           class="input"
           type="search"
-          placeholder="Suchen (Detektor, Sandbox, Modell, Host, Nutzer)…"
+          placeholder="Search (detector, sandbox, model, host, user)…"
           value={query()}
           onInput={(event) => { setQuery(event.currentTarget.value); }}
         />
@@ -182,7 +182,7 @@ export default function PrivacyDlpSection(props) {
             </span>
           )}
         </For>
-        <span class="muted small">{totals() ? `${totals().incidents} Zeilen, ${totals().seen} Vorkommnisse` : ''}</span>
+        <span class="muted small">{totals() ? `${totals().incidents} rows, ${totals().seen} findings` : ''}</span>
       </div>
 
       <div class="controls">
@@ -203,7 +203,7 @@ export default function PrivacyDlpSection(props) {
           defaultSort={{ key: 'ts', dir: 'desc' }}
           storageKey={`dlp-${props.sandboxId || 'env'}`}
           onRowClick={(r) => setSelected(r.raw)}
-          emptyText="Kein Fund in diesem Zeitraum. Das ist der gute Fall; es ist kein Beweis, dass nichts gefunden würde."
+          emptyText="No finding in this window. That is the good case; it is not proof that nothing would be found."
         />
       </Show>
       <Show when={view() === 'changes'}>
@@ -221,8 +221,8 @@ export default function PrivacyDlpSection(props) {
       />
 
       <p class="muted small">
-        Nur der maskierte Auszug und der Platzhalter werden gespeichert. Der Wert selbst ist nicht in der
-        Datenbank und kann auch von einem Administrator nicht gelesen werden.
+        Only the masked excerpt and the placeholder are stored. The value itself is not in the
+        database, and not even an administrator can read it.
       </p>
     </section>
   );
@@ -246,7 +246,7 @@ function ChangesTable(props) {
       ts: item.created_at,
       who: item.actor_label,
       kind: item.kind,
-      scope: item.subject_type === 'environment' ? 'Umgebungsvorgabe' : 'Sandbox',
+      scope: item.subject_type === 'environment' ? 'Environment default' : 'Sandbox',
       before: (item.detail?.before?.mode) || '—',
       after: (item.detail?.after?.mode) || item.detail?.mode || '—',
       raw: item,
@@ -258,18 +258,18 @@ function ChangesTable(props) {
       <DataTable
         rows={rows()}
         columns={[
-          { key: 'ts', label: 'Zeit', sortable: true, render: (r) => <span class="mono small">{String(r.ts).replace('T', ' ').slice(0, 19)}</span> },
-          { key: 'who', label: 'Wer', sortable: true, filter: 'text' },
-          { key: 'kind', label: 'Was', sortable: true, filter: 'select' },
-          { key: 'scope', label: 'Bereich', sortable: true, groupable: true, filter: 'select' },
-          { key: 'before', label: 'vorher', sortable: false, render: (r) => <span class="small" style="color:var(--dlp-blocked)">{r.before}</span> },
-          { key: 'after', label: 'nachher', sortable: false, render: (r) => <span class="small" style="color:var(--dlp-clean)">{r.after}</span> },
+          { key: 'ts', label: 'When', sortable: true, render: (r) => <span class="mono small">{String(r.ts).replace('T', ' ').slice(0, 19)}</span> },
+          { key: 'who', label: 'Who', sortable: true, filter: 'text' },
+          { key: 'kind', label: 'What', sortable: true, filter: 'select' },
+          { key: 'scope', label: 'Scope', sortable: true, groupable: true, filter: 'select' },
+          { key: 'before', label: 'before', sortable: false, render: (r) => <span class="small" style="color:var(--dlp-blocked)">{r.before}</span> },
+          { key: 'after', label: 'after', sortable: false, render: (r) => <span class="small" style="color:var(--dlp-clean)">{r.after}</span> },
         ]}
         rowKey={(r) => r.id}
         defaultSort={{ key: 'ts', dir: 'desc' }}
-        emptyText="Keine Änderung in diesem Zeitraum."
+        emptyText="No change in this window."
       />
-      <button class="secondary tiny" onClick={poll.refresh}>Aktualisieren</button>
+      <button class="secondary tiny" onClick={poll.refresh}>Refresh</button>
     </div>
   );
 }

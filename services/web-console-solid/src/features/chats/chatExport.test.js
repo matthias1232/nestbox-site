@@ -17,8 +17,8 @@ const turn = {
 
 test('markdown names the asker, the time and the model', () => {
   const markdown = toMarkdown([turn]);
-  assert.match(markdown, /^\*\*Nutzer\*\* \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}, claude-sonnet\): bitte <IBAN_ab12cd34> prüfen$/m);
-  assert.match(markdown, /^\*\*Modell\*\*: Der Platzhalter <IBAN_ab12cd34> steht für eine IBAN\.$/m);
+  assert.match(markdown, /^\*\*User\*\* \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}, claude-sonnet\): bitte <IBAN_ab12cd34> prüfen$/m);
+  assert.match(markdown, /^\*\*Model\*\*: Der Platzhalter <IBAN_ab12cd34> steht für eine IBAN\.$/m);
 });
 
 test('markdown writes tool calls as a code block', () => {
@@ -40,13 +40,13 @@ test('a blocked turn says it was not delivered', () => {
     dlp: 'blocked',
   };
   const markdown = toMarkdown([blocked]);
-  assert.match(markdown, /\*\*Modell\*\* \(blockiert, nicht zugestellt\):/);
-  assert.match(markdown, /> Nicht an anthropic\/claude-sonnet zugestellt\./);
+  assert.match(markdown, /\*\*Model\*\* \(blocked, not delivered\):/);
+  assert.match(markdown, /> Not delivered to anthropic\/claude-sonnet\./);
 });
 
 test('a running turn is marked as unfinished, not as empty', () => {
   const running = { ...turn, assistant_text: '', pending: true };
-  assert.match(toMarkdown([running]), /\*\*Modell\*\*: …/);
+  assert.match(toMarkdown([running]), /\*\*Model\*\*: …/);
 });
 
 test('two turns are separated, not glued', () => {

@@ -31,12 +31,12 @@ export function toMarkdown(turns = []) {
   for (const turn of turns) {
     const model = modelLabel(turn);
     const lines = [];
-    if (turn?.user_text) lines.push(`**Nutzer** (${formatTime(turn.ts)}, ${model}): ${turn.user_text}`);
+    if (turn?.user_text) lines.push(`**User** (${formatTime(turn.ts)}, ${model}): ${turn.user_text}`);
     const blocked = turn?.delivered === false;
-    const heading = blocked ? '**Modell** (blockiert, nicht zugestellt)' : '**Modell**';
+    const heading = blocked ? '**Model** (blocked, not delivered)' : '**Model**';
     const answer = turn?.assistant_text || (turn?.pending ? '…' : '');
     lines.push(`${heading}: ${answer}`);
-    if (blocked) lines.push(`> Nicht an ${turn?.provider || 'den Anbieter'}/${model} zugestellt.`);
+    if (blocked) lines.push(`> Not delivered to ${turn?.provider || 'the provider'}/${model}.`);
     const tools = toolBlock(turn);
     if (tools) lines.push(tools);
     if (lines.length) blocks.push(lines.join('\n\n'));
