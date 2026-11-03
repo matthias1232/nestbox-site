@@ -26,7 +26,7 @@ pub async fn drain(
     Path(id): Path<Uuid>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
-    let value = node_ops_service::drain(&state.services, &auth.principal, id, body).await?;
+    let value = node_ops_service::drain(&state.services, &state.config, &auth.principal, id, body).await?;
     Ok((StatusCode::ACCEPTED, Json(value)))
 }
 
@@ -36,6 +36,6 @@ pub async fn quick(
     auth: Auth,
     Json(body): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
-    let value = node_ops_service::quick(&state.services, &auth.principal, body).await?;
+    let value = node_ops_service::quick(&state.services, &state.config, &auth.principal, body).await?;
     Ok((StatusCode::ACCEPTED, Json(value)))
 }
