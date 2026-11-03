@@ -8,17 +8,17 @@ import PrivacyDlpSection from '../privacy/PrivacyDlpSection.jsx';
 export default function PrivacyCard(props) {
   const [open, setOpen] = createSignal(false);
   return (
-    <section class="card">
-      <div class="controls">
-        <b>Datenschutz-Funde</b>
-        <span class="muted small">was die Prüfung in dieser Sandbox gefunden hat, maskiert</span>
-        <button class="tiny secondary" onClick={() => setOpen(!open())}>{open() ? 'Ausblenden' : 'Anzeigen'}</button>
+    <section class="wb-card">
+      <div class="wb-card-head">
+        <h2>Privacy findings</h2>
+        <button class="tiny secondary" onClick={() => setOpen(!open())}>{open() ? 'Hide' : 'Show'}</button>
       </div>
+      <p class="muted small">What the check found in this sandbox, masked</p>
       <Show
         when={open()}
         fallback={
           <p class="muted small">
-            Funde werden nur maskiert gespeichert: der Wert selbst ist nicht gespeichert und für niemanden lesbar.
+            Findings are stored masked only: the value itself is never stored and nobody can read it.
           </p>
         }
       >

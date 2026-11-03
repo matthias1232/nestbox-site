@@ -57,6 +57,20 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
+}
+
+/* A row of cards is one row: every card fills its cell, so cards that start
+ * together share their top and bottom edge and the columns keep one width
+ * whatever a card holds. The panels below keep their own height. */
+.wb-cards {
+  align-items: stretch;
+}
+
+.wb-cards > * {
+  min-width: 0;
+}
+
+.wb-main {
   align-items: start;
 }
 
@@ -65,6 +79,32 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-3);
+  min-width: 0;
+}
+
+/* The head of a card: one title on the left, its one action on the right, both
+ * inside the card's padding so a button never floats outside the frame. */
+.wb-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-height: 24px;
+  margin-bottom: var(--space-2);
+}
+
+.wb-card > h2:first-child,
+.wb-card-head h2,
+.wb-card .draft-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* The agents card names itself with an h3 in the mono style; only its top
+ * margin was pushing the first line below the other cards' titles. */
+.wb-card > h3:first-child {
+  margin-top: 0;
 }
 
 /* My sandboxes -------------------------------------------------------- */
@@ -128,17 +168,27 @@
 
 .wb-strip {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3) var(--space-4);
-  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-3);
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--space-3);
+  min-width: 0;
+}
+
+/* One line of groups inside the strip's padding. Nothing here uses a negative
+ * margin or hides an overflow, so the first label of a line is never clipped
+ * and a label never drifts away from the control it names. */
+.wb-strip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  min-width: 0;
 }
 
 .wb-strip-note {
-  flex: 1 1 100%;
   margin: 0;
 }
 
@@ -147,6 +197,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .wb-strip-group.on {
@@ -158,12 +209,14 @@
   font-size: 12px;
   color: var(--fg-muted);
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .wb-strip-for {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
 }
 
 .wb-strip-state {

@@ -289,8 +289,8 @@ export default function ModelsCard(props) {
   }
 
   return (
-    <section>
-      <div class="draft-head">
+    <section class="wb-card">
+      <div class="wb-card-head">
         <h2>Models</h2>
         <Show when={mayManage()}>
           <button class="tiny secondary" disabled={busy()} onClick={openAdd}>

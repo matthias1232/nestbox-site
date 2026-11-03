@@ -5,8 +5,10 @@ import RequestStream from '../live/RequestStream.jsx';
 
 export default function RequestStreamCard(props) {
   return (
-    <section class="card">
-      <b>Meine Modelle live</b>
+    <section class="wb-card">
+      <div class="wb-card-head">
+        <h2>My models live</h2>
+      </div>
       <RequestStream sandboxId={props.sandboxId} />
     </section>
   );

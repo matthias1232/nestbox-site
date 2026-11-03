@@ -1,6 +1,10 @@
 // The one-click control strip of a Workbox: allow everything, proxy mode, recording
 // and three channel switches. Every click is one `quick.set` call and the control
 // summary in the answer redraws the strip (contract C12).
+//
+// Two rows of labelled groups, inside the page padding: a group label is never
+// clipped and never wraps away from its control, so "Internet" always stands
+// directly left of the switch it belongs to.
 
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 
@@ -78,96 +82,102 @@ export default function ControlStrip(props) {
         <p class="muted small wb-strip-note">This box belongs to someone else; the controls are read-only.</p>
       </Show>
 
-      <div class={'wb-strip-group' + (state().allowAll.on ? ' on' : '')}>
-        <span class="wb-strip-label">Allow everything</span>
-        <Segmented
-          options={ALLOW_ALL_CHOICES.map((item) => ({
-            value: item.value,
-            label: item.label,
-            tone: item.value === 'off' ? undefined : 'bad',
-          }))}
-          value={allowAllChoice(state(), lastChoice())}
-          disabled={locked()}
-          onChange={pickAllowAll}
-        />
-        <Show when={state().allowAll.on}>
-          <span class="wb-strip-state">
-            <Show when={state().allowAll.until} fallback={<span class="small">on, until you stop it</span>}>
-              <Countdown prefix="ends in " until={state().allowAll.until} onExpire={() => props.onChanged?.()} />
-            </Show>
-          </span>
-        </Show>
-      </div>
-
-      <div class="wb-strip-group">
-        <span class="wb-strip-label">
-          Proxy mode <HelpTip anchor="egress-modes" />
-        </span>
-        <Segmented
-          options={MODE_CHOICES}
-          value={state().mode}
-          disabled={locked()}
-          onChange={pickMode}
-        />
-        <Show when={summary().egress?.revert_at}>
-          <span class="wb-strip-state">
-            <Countdown prefix="back in " until={summary().egress.revert_at} onExpire={() => props.onChanged?.()} />
-          </span>
-        </Show>
-      </div>
-
-      <div class="wb-strip-group">
-        <span class="wb-strip-label">Recording</span>
-        <Segmented
-          options={RECORDING_CHOICES.map((item) => ({
-            value: item.value,
-            label: item.label,
-            title: item.help,
-          }))}
-          value={state().recording}
-          disabled={locked()}
-          onChange={(value) => value !== state().recording && send(recordingAction(value))}
-        />
-        <span class="wb-strip-state muted small">{labelFor('recording', state().recording).split(' — ')[1]}</span>
-      </div>
-
-      <For each={CHANNEL_SWITCHES}>
-        {(item) => {
-          const channel = () => state().channels[item.key];
-          return (
-            <div class="wb-strip-group">
-              <Switch
-                label={`${item.label} ${channel().on ? 'open' : 'ruled'}`}
-                checked={channel().on}
-                disabled={locked()}
-                onChange={(on) => send(channelAction(item.key, on, forMinutes()[item.key]))}
-              />
-              <label class="wb-strip-for small">
-                <span class="muted">for</span>
-                <select
-                  class="tiny"
-                  aria-label={`How long to open ${item.label}`}
-                  disabled={locked()}
-                  value={forMinutes()[item.key]}
-                  onChange={(event) =>
-                    setForMinutes({ ...forMinutes(), [item.key]: Number(event.currentTarget.value) })}
-                >
-                  <For each={FOR_CHOICES}>
-                    {(choice) => <option value={choice.minutes}>{choice.label}</option>}
-                  </For>
-                </select>
-              </label>
-              <Show when={channel().on}>
-                <span class="wb-strip-state">
-                  <Show when={channel().until} fallback={<span class="small">until you stop it</span>}>
-                    <Countdown prefix="ends in " until={channel().until} onExpire={() => props.onChanged?.()} />
-                  </Show>
-                </span>
+      <div class="wb-strip-row">
+        <div class={'wb-strip-group' + (state().allowAll.on ? ' on' : '')}>
+          <span class="wb-strip-label">Allow everything</span>
+          <Segmented
+            options={ALLOW_ALL_CHOICES.map((item) => ({
+              value: item.value,
+              label: item.label,
+              tone: item.value === 'off' ? undefined : 'bad',
+            }))}
+            value={allowAllChoice(state(), lastChoice())}
+            disabled={locked()}
+            onChange={pickAllowAll}
+          />
+          <Show when={state().allowAll.on}>
+            <span class="wb-strip-state">
+              <Show when={state().allowAll.until} fallback={<span class="small">on, until you stop it</span>}>
+                <Countdown prefix="ends in " until={state().allowAll.until} onExpire={() => props.onChanged?.()} />
               </Show>
-            </div>
-          );
-        }}
-      </For>
+            </span>
+          </Show>
+        </div>
+
+        <div class="wb-strip-group">
+          <span class="wb-strip-label">
+            Proxy mode <HelpTip anchor="egress-modes" />
+          </span>
+          <Segmented
+            options={MODE_CHOICES}
+            value={state().mode}
+            disabled={locked()}
+            onChange={pickMode}
+          />
+          <Show when={summary().egress?.revert_at}>
+            <span class="wb-strip-state">
+              <Countdown prefix="back in " until={summary().egress.revert_at} onExpire={() => props.onChanged?.()} />
+            </span>
+          </Show>
+        </div>
+
+        <div class="wb-strip-group">
+          <span class="wb-strip-label">Recording</span>
+          <Segmented
+            options={RECORDING_CHOICES.map((item) => ({
+              value: item.value,
+              label: item.label,
+              title: item.help,
+            }))}
+            value={state().recording}
+            disabled={locked()}
+            onChange={(value) => value !== state().recording && send(recordingAction(value))}
+          />
+          <span class="wb-strip-state muted small">{labelFor('recording', state().recording).split(' — ')[1]}</span>
+        </div>
+      </div>
+
+      <div class="wb-strip-row">
+        <For each={CHANNEL_SWITCHES}>
+          {(item) => {
+            const channel = () => state().channels[item.key];
+            return (
+              <div class="wb-strip-group">
+                <span class="wb-strip-label">{item.label}</span>
+                <Switch
+                  title={`${item.label} ${channel().on ? 'open' : 'ruled'}`}
+                  label={channel().on ? 'on' : 'off'}
+                  checked={channel().on}
+                  disabled={locked()}
+                  onChange={(on) => send(channelAction(item.key, on, forMinutes()[item.key]))}
+                />
+                <label class="wb-strip-for small">
+                  <span class="muted">for</span>
+                  <select
+                    class="tiny"
+                    aria-label={`How long to open ${item.label}`}
+                    disabled={locked()}
+                    value={forMinutes()[item.key]}
+                    onChange={(event) =>
+                      setForMinutes({ ...forMinutes(), [item.key]: Number(event.currentTarget.value) })}
+                  >
+                    <For each={FOR_CHOICES}>
+                      {(choice) => <option value={choice.minutes}>{choice.label}</option>}
+                    </For>
+                  </select>
+                </label>
+                <Show when={channel().on}>
+                  <span class="wb-strip-state">
+                    <Show when={channel().until} fallback={<span class="small">until you stop it</span>}>
+                      <Countdown prefix="ends in " until={channel().until} onExpire={() => props.onChanged?.()} />
+                    </Show>
+                  </span>
+                </Show>
+              </div>
+            );
+          }}
+        </For>
+      </div>
     </section>
   );
 }

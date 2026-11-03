@@ -2,5 +2,5 @@
 //
 // Stub: F-7 implements the three streams.
 export default function LiveEventsPanel() {
-  return <p class="muted small">Ereignisse erscheinen hier.</p>;
+  return <p class="muted small">Events appear here.</p>;
 }
