@@ -30,3 +30,5 @@ that decide where an operator has to look:
 
 A draft is not a rule. Approval is the only path that writes a rule, which is
 what makes the workflow meaningful (ADR 0011).
+
+`PolicyWizard.jsx` is the placeholder of the policy wizard (F14).

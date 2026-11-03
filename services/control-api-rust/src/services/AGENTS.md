@@ -359,3 +359,20 @@ seen reaching, in audit mode: OpenShell logs them instead of blocking.
 | `chat_live.rs` | The live report of a running model request; nothing stored |
 | `privacy_exceptions.rs` | DLP exceptions: create, list, delete, and the check the filter asks |
 | `quick_allow.rs` | Allow one destination for a while, from the live view |
+
+Control Center services (Wave 0 stubs returning `ApiError::internal("not built: <package>")`; a package replaces the body in place):
+
+| File | Responsibility |
+|---|---|
+| `inventory_tree_service.rs` | `tree` (B01) |
+| `search_service.rs` | `search` (B02) |
+| `bulk_service.rs` | `sandboxes` (B03) |
+| `model_bulk_service.rs` | `install_bulk` (B04) |
+| `model_cluster_service.rs` | `list get create update delete add_member remove_member proxy_view` (B05) |
+| `node_ops_service.rs` | `summary drain quick` (B07) |
+| `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
+| `mount_service.rs` | `effective set` (B09) |
+| `policy_preview_service.rs` | `preview compiled` (B10) |
+| `quick_control_service.rs` | `set` (B11) |
+| `permission_service.rs` | `list set remove` (B12) |
+| `tour_service.rs` | `mark_seen` (F18) |

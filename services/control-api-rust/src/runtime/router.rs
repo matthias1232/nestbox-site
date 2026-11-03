@@ -91,6 +91,15 @@ impl RuntimeRouter {
         self.local.clone()
     }
 
+    /// The host load of one node's runner. Wave 0 stub for package B07: the local node answers,
+    /// a remote runner is reported unreachable until B07 routes the call to it.
+    pub async fn host_load_for(&self, node: Uuid) -> Result<serde_json::Value, RuntimeError> {
+        if self.is_remote(node) {
+            return Err(RuntimeError::Unavailable("not built: B07".into()));
+        }
+        self.local.host_load().await
+    }
+
     /// Whether a node id is one of the remote runners.
     pub fn is_remote(&self, node: Uuid) -> bool {
         self.remotes.read().map(|r| r.contains_key(&node)).unwrap_or(false)

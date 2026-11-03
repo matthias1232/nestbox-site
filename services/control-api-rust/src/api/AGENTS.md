@@ -132,3 +132,20 @@ verifies the node token in the service, with the same check that guards the node
 | `privacy_exceptions.rs` | DLP exceptions: list, create, delete |
 | `privacy_refusal.rs` | A refusal without a finding, reported by the proxy |
 | `quick_allow.rs` | Allow rules with an end |
+
+Control Center routes (Wave 0 stubs; each handler calls a service that answers 500 "not built: <package>" until its package lands):
+
+| File | Routes |
+|---|---|
+| `inventory_tree.rs` | `GET /inventory/tree` (B01). Named apart from `inventory.rs`, which serves a sandbox's installed software |
+| `search.rs` | `GET /search` (B02) |
+| `bulk.rs` | `POST /sandboxes/bulk` (B03) |
+| `models.rs` (`install_bulk`) | `POST /models/{key}/install-bulk` (B04) |
+| `model_clusters.rs` | `/model-clusters`, members, and the proxy's `GET /internal/accounting/clusters/{id}` (B05) |
+| `node_ops.rs` | `GET /nodes/{id}/summary`, `POST /nodes/{id}/drain`, `POST /nodes/quick` (B07) |
+| `alerts.rs` | `GET /alerts` (B08) |
+| `mounts.rs` | `GET/PUT /sandboxes/{id}/mounts` (B09) |
+| `policy_preview.rs` | `POST /policies/preview`, `GET /policies/{id}/compiled` (B10) |
+| `quick.rs` | `PUT /sandboxes/{id}/quick` (B11) |
+| `permissions.rs` | `GET/PUT/DELETE /permissions` (B12) |
+| `tours.rs` | `PUT /users/me/tours/{tour}` (F18) |

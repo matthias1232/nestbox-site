@@ -92,3 +92,16 @@ suspended sandbox may still reach, in audit mode, because OpenShell 0.1.6 has no
 | `privacy_json.rs` | String values of a JSON document by byte span, so a rewrite touches one value and nothing else |
 | `chat_turn.rs` | What one model call says: request, answer, tool calls, tokens, session, provider, agent |
 | `privacy_exception.rs` | A finding allowed on purpose, and the specificity rule that picks it |
+
+Control Center (Wave 0; contracts C3-C13 of the plan):
+
+| File | Responsibility |
+|---|---|
+| `inventory.rs` | `TreeView`, `TreeNode`, `TreeCounts`, `PlacementRow` and the pure `build_tree` (B01 fills it) |
+| `model_cluster.rs` | `ModelCluster`, `ClusterMember`, `ClusterStrategy` (`as_str`/`parse`) |
+| `search.rs` | `SearchKind`, `SearchHit`, `SearchParams` |
+| `alerts.rs` | `AlertView` and `alert_id` (stable digest of sandbox, host, port) |
+| `mounts.rs` | `MountSpec`, `EffectiveMounts` and `validate_mount_path` |
+| `permissions.rs` | `ScopeType` and `PermissionRow` |
+
+`job.rs` gained `ModelBulkInstall`, `NodeDrain` and `NodeQuickDeploy`; `telemetry.rs` gained `LiveEvent::Alert`.

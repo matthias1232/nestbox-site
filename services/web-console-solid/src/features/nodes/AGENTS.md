@@ -69,3 +69,5 @@ Grouping the cluster topology by node. The `/topology` answer carries no node
 identity per sandbox, so the only client-side way is one sandbox request per node
 plus a second placement model in the browser — that duplicates the server's
 placement and would restructure the graph. It belongs in an endpoint change.
+
+`NodeWizard.jsx` is the placeholder of the add-node wizard (F07).

@@ -110,3 +110,5 @@ is request/response, not a PTY: the output comes back when the command ends,
 capped at 64 KiB, with the exit code. That is enough to ask Hermes a question
 or inspect a file, and it keeps every run in the audit trail as an argument
 vector. An interactive terminal is a later transport, not a change to this one.
+
+`MountEditor.jsx` (F15) and `CreateSandboxWizard.jsx` (F24) are placeholders created in Wave 0.

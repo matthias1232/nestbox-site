@@ -303,6 +303,13 @@ pub enum LiveEvent {
         environment_id: Uuid,
         state: String,
     },
+    /// A refused destination nobody answered yet (contract C9).
+    Alert {
+        environment_id: Uuid,
+        sandbox_id: Option<Uuid>,
+        /// The alert view, shape in contract C9.
+        alert: serde_json::Value,
+    },
 }
 
 impl LiveEvent {
@@ -340,6 +347,7 @@ impl LiveEvent {
             Self::SandboxControlChanged { environment_id, .. } => *environment_id,
             Self::ModelsChanged { environment_id, .. } => *environment_id,
             Self::NodeTunnelChanged { environment_id, .. } => *environment_id,
+            Self::Alert { environment_id, .. } => *environment_id,
         }
     }
 }

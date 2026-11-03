@@ -81,3 +81,5 @@ Three answers, and only three:
 | `MasterSwitches.jsx` | The switch panel (markup only) |
 | `useDecisions.js` | Denied targets, hide/show, allow-for-a-time, draft |
 | `DecisionsPanel.jsx` | The decisions table (markup only) |
+
+`TrafficPopout.jsx` is the placeholder of the `/pop/traffic` window (no shell), built by F17.

@@ -33,3 +33,29 @@ test('an unknown role sees only unrestricted entries', () => {
   assert.ok(!flat('nobody').includes('users'));
   assert.ok(flat('nobody').includes('sandboxes'));
 });
+
+test('the plan\'s groups exist in order', () => {
+  assert.deepEqual(GROUPS.map((group) => group.id), ['overview', 'operate', 'setup', 'security', 'admin', 'help']);
+});
+
+test('the new Control Center routes are in the menu', () => {
+  const ids = flat('admin');
+  for (const id of ['home', 'traffic', 'logs', 'alerts', 'my', 'sandboxes', 'models', 'clusters', 'moves',
+    'persistent', 'operations', 'tenants', 'nodes', 'hosting', 'images', 'providers', 'mcp', 'media', 'skills',
+    'cudax', 'builder', 'recipes', 'proxies', 'policies', 'privacy', 'master', 'usage', 'users', 'system',
+    'cluster', 'docs', 'shortcuts']) {
+    assert.ok(ids.includes(id), id);
+  }
+});
+
+test('a member does not see operator entries but sees the docs', () => {
+  const ids = flat('member');
+  assert.ok(!ids.includes('system'));
+  assert.ok(!ids.includes('hosting'));
+  assert.ok(ids.includes('docs'));
+});
+
+test('alerts and shortcuts are actions, not pages', () => {
+  assert.equal(ROUTES.find((route) => route.id === 'alerts').action, 'dock');
+  assert.equal(ROUTES.find((route) => route.id === 'shortcuts').action, 'shortcuts');
+});

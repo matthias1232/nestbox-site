@@ -5,6 +5,8 @@
 //! something about the domain, that `if` belongs in `services/`.
 
 pub mod access;
+pub mod alerts;
+pub mod bulk;
 pub mod accounting;
 pub mod chat_live;
 pub mod chats;
@@ -18,22 +20,28 @@ pub mod hosting;
 pub mod image_templates;
 pub mod images;
 pub mod inventory;
+pub mod inventory_tree;
 pub mod jobs;
 pub mod mcp;
 pub mod media;
 pub mod metrics;
 pub mod model_grants;
+pub mod model_clusters;
 pub mod model_readiness;
 pub mod move_preflight;
+pub mod mounts;
 pub mod models;
 pub mod node_connect;
 pub mod node_join;
 pub mod nodes;
+pub mod node_ops;
 pub mod oidc;
 pub mod packs;
 pub mod backups;
 pub mod persistent_roots;
+pub mod permissions;
 pub mod policies;
+pub mod policy_preview;
 pub mod presence;
 pub mod privacy;
 pub mod privacy_exceptions;
@@ -42,6 +50,7 @@ pub mod principal;
 pub mod providers;
 pub mod proxies;
 pub mod quick_allow;
+pub mod quick;
 pub mod secrets;
 pub mod recipes;
 pub mod rule_bulk;
@@ -54,7 +63,9 @@ pub mod system;
 pub mod telemetry;
 pub mod tenancy;
 pub mod stack;
+pub mod search;
 pub mod topology;
+pub mod tours;
 pub mod traffic;
 pub mod users;
 
@@ -624,6 +635,40 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/jobs/{id}/logs", get(jobs::logs))
         .route("/api/v1/schedules", get(jobs::schedules))
         .route("/api/v1/schedules/{id}/run", post(jobs::run_schedule))
+        // Control Center (Wave 0 stubs; packages B01-B12 fill the services behind them).
+        .route("/api/v1/inventory/tree", get(inventory_tree::tree))
+        .route("/api/v1/search", get(search::search))
+        .route("/api/v1/sandboxes/bulk", post(bulk::sandboxes))
+        .route("/api/v1/models/{key}/install-bulk", post(models::install_bulk))
+        .route(
+            "/api/v1/model-clusters",
+            get(model_clusters::list).post(model_clusters::create),
+        )
+        .route(
+            "/api/v1/model-clusters/{id}",
+            get(model_clusters::get)
+                .put(model_clusters::update)
+                .delete(model_clusters::delete),
+        )
+        .route("/api/v1/model-clusters/{id}/members", post(model_clusters::add_member))
+        .route(
+            "/api/v1/model-clusters/{id}/members/{install_id}",
+            delete(model_clusters::remove_member),
+        )
+        .route("/api/v1/internal/accounting/clusters/{id}", get(model_clusters::internal_view))
+        .route("/api/v1/nodes/{id}/summary", get(node_ops::summary))
+        .route("/api/v1/nodes/{id}/drain", post(node_ops::drain))
+        .route("/api/v1/nodes/quick", post(node_ops::quick))
+        .route("/api/v1/alerts", get(alerts::list))
+        .route("/api/v1/sandboxes/{id}/mounts", get(mounts::get).put(mounts::put))
+        .route("/api/v1/policies/preview", post(policy_preview::preview))
+        .route("/api/v1/policies/{id}/compiled", get(policy_preview::compiled))
+        .route("/api/v1/sandboxes/{id}/quick", put(quick::set))
+        .route(
+            "/api/v1/permissions",
+            get(permissions::list).put(permissions::put).delete(permissions::delete),
+        )
+        .route("/api/v1/users/me/tours/{tour}", put(tours::mark_seen))
         // Audit
         .route("/api/v1/audit-events", get(system::audit_events))
         // A CONNECT's request target is `host:port`, not a path, so no route can

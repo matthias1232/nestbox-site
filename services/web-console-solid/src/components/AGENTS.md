@@ -59,3 +59,10 @@ They hold no rules: the caller decides, the component draws. Their shared styles
 | `dlpText.test.js` | Splitting a masked text into marked parts and recorded-only findings |
 | `liveTicker.test.js` | Bounded size, merging by key, time order and removal |
 | `QuickAllow.jsx` | Four buttons that allow one denied destination for 15 min, 1 h, 24 h or permanently |
+
+Control Center placeholders (Wave 0; each renders a "coming in package" note until its package builds it, props in
+contract C15): `icons.jsx` (F02; only `IconHome` yet), `IconButton`, `StatTile`, `Gauge`, `Sparkline`, `KeyHint`,
+`Toast`, `Tree`, `Wizard`, `HelpTip` (F02), `SelectTable` (F02: the selectable, sortable table of contract C15;
+named `SelectTable` because the existing `DataTable.jsx` is used by many pages and keeps its own props),
+`CommandPalette` (F04), `AlertPopup` (F13), `TopologyCanvas` (F16), `ConsoleFrame` (F20), `BulkBar` (F21).
+`markdown.js` is the dependency-free renderer (F18).

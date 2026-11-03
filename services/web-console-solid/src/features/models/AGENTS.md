@@ -47,3 +47,5 @@ VRAM arithmetic.
 | `ModelsPage.jsx` | the catalogue, the install table, the filters |
 | `ModelRuntimePanel.jsx` | one installed model's flags, logs and metrics |
 | `ModelGrantsSection.jsx` | environment and user model grants (admins only), below the page |
+
+`ModelPage.jsx` (`/models/<key>`) and `BulkDeployWizard.jsx` are placeholders created in Wave 0; package F08 builds them.

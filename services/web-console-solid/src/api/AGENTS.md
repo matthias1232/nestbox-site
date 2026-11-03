@@ -49,3 +49,9 @@ and a row to the table above.
 Workbox modules: `control.js` (one summary per sandbox, one overview), `agentAuth.js`,
 `presence.js`, `modelGrants.js`, `nodesConnect.js`; `moves.js` gained `preflight` and
 `policies.js` gained `bulkDrafts` and the revert timer.
+
+Control Center modules (Wave 0): `inventory.js` (tree), `search.js`, `bulk.js` (sandbox bulk job),
+`clusters.js` (model clusters), `nodeOps.js` (summary, drain, quick deploy), `alerts.js`, `mounts.js`,
+`quick.js` (one-click controls), `permissions.js`, `tours.js`, `events.js` (opens an SSE stream for the
+shared live store), `help.js` (static help files; the one module besides `client.js` that calls `fetch`).
+`models.js` gained `installBulk`, `policies.js` gained `preview` and `compiled`.

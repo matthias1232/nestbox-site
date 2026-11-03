@@ -138,6 +138,7 @@ fn event_sandbox(event: &LiveEvent) -> Option<uuid::Uuid> {
         LiveEvent::SandboxStateChanged { sandbox_id, .. } => Some(*sandbox_id),
         LiveEvent::SandboxControlChanged { sandbox_id, .. } => *sandbox_id,
         LiveEvent::ModelsChanged { sandbox_id, .. } => *sandbox_id,
+        LiveEvent::Alert { sandbox_id, .. } => *sandbox_id,
         LiveEvent::ChatStarted { .. }
         | LiveEvent::ChatDelta { .. }
         | LiveEvent::ChatDone { .. } => event.chat_sandbox(),
@@ -223,6 +224,7 @@ fn event_name(event: &LiveEvent) -> &'static str {
         LiveEvent::SandboxControlChanged { .. } => "control",
         LiveEvent::ModelsChanged { .. } => "models",
         LiveEvent::NodeTunnelChanged { .. } => "node",
+        LiveEvent::Alert { .. } => "alert",
         LiveEvent::ChatStarted { .. } => "chat_started",
         LiveEvent::ChatDelta { .. } => "chat_delta",
         LiveEvent::ChatDone { .. } => "chat_done",

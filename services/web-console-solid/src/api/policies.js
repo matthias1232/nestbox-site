@@ -165,3 +165,13 @@ export function quickAllow(sandboxId, host, port, minutes) {
 export function quickAllowList(sandboxId) {
   return request(`sandboxes/${sandboxId}/quick-allow`);
 }
+
+// Compile a spec that is not saved yet: `{ spec, sandbox_id }` (contract C11).
+export function preview(body) {
+  return request('policies/preview', { method: 'POST', body });
+}
+
+// The compiled OpenShell document of a stored policy.
+export function compiled(id) {
+  return request(`policies/${id}/compiled`);
+}

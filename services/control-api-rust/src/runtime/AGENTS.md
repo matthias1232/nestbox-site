@@ -99,3 +99,6 @@ node instead of a sandbox (hardware, images, snapshots).
 `download_model` and `serve_model` belong to that second group: the request names the install's node,
 so both follow `request.node_id` — a joined node fetches and serves on its own disk. `stop_model`
 stays local because a model is named by its key alone and nothing in the call says which machine.
+
+`RuntimeRouter::host_load_for(node)` is a Wave 0 stub for package B07: the local node answers, a remote runner is reported
+unreachable until B07 routes the call to it.
