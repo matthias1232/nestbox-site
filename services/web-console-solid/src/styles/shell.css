@@ -36,7 +36,6 @@
   overflow-y: auto;
   min-height: 0;
 }
-.cc-tree { min-height: 0; }
 .cc-nav { padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-4); }
 .cc-nav-group { display: flex; flex-direction: column; gap: 2px; }
 .cc-nav-group h2 { padding: 0 var(--space-2) var(--space-1); }
@@ -111,7 +110,13 @@
 .cc-collapse { background: transparent; border: 0; color: var(--fg-muted); cursor: pointer; padding: var(--space-1) var(--space-2); }
 .cc-collapse:hover { color: var(--fg); }
 .cc-collapse:focus-visible, .cc-group-toggle:focus-visible, .cc-tree-filter:focus-visible { outline: 2px solid var(--accent); }
-.cc-tree-controls { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+.cc-tree-controls { flex: 0 0 auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+/* The view tabs (V13): one row of its own with a definite height. It may neither shrink when the
+ * sidebar is short nor be overlapped: the segmented fills the row, its buttons share the width,
+ * and the tree follows in normal flow after this block. No negative margins, no positioning. */
+.cc-view-tabs { display: block; flex: none; }
+.cc-view-tabs .nb-segmented { display: flex; width: 100%; height: 26px; overflow: hidden; }
+.cc-view-tabs .nb-seg { flex: 1 1 0; min-width: 0; height: 100%; margin: 0; padding: 0 var(--space-2); line-height: 1; overflow: hidden; text-overflow: ellipsis; }
 .cc-tree-filter { width: 100%; box-sizing: border-box; background: var(--bg-inset); color: var(--fg); border: 1px solid var(--border); padding: var(--space-1) var(--space-2); font: inherit; font-size: 0.8rem; }
 .cc-tree-filter:focus { border-color: var(--border-strong); }
 .cc-tree { flex: 1 1 auto; min-height: 120px; overflow: auto; border-bottom: 1px solid var(--border); }

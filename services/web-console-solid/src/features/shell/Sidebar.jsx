@@ -204,7 +204,11 @@ export default function Sidebar(props) {
           </p>
         </Show>
         <div class="cc-tree-controls">
-          <Segmented options={VIEWS} value={inv.view()} onChange={(value) => inv.setView(value)} />
+          {/* One fixed row: the view tabs own their height, so the tree below starts under
+              them and nothing can squeeze or draw across the control (V13). */}
+          <div class="cc-view-tabs">
+            <Segmented options={VIEWS} value={inv.view()} onChange={(value) => inv.setView(value)} />
+          </div>
           <input
             class="cc-tree-filter"
             type="search"
