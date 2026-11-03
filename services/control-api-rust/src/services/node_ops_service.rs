@@ -489,15 +489,17 @@ async fn move_one(
 ///
 /// Steps are `provision`, `join`, `probe` and, when a model is wanted, `install_model`; each is a
 /// job target with a `{step, ok, message}` log line. The underlying rent, connect and join-token
-/// services need the environment-manage permission, so an operator who can only manage nodes is
-/// refused there with their own message.
+/// services (join token, SSH connect, rent) check the environment-manage permission themselves and
+/// have no internal variant without that check, so `quick` requires the same permission up front:
+/// a node-manage operator is refused immediately with a clear message instead of failing in step one
+/// after a job was created (ADR 0064).
 pub async fn quick(
     ctx: &ServiceContext,
     config: &Config,
     principal: &Principal,
     body: serde_json::Value,
 ) -> Result<serde_json::Value, ApiError> {
-    require(principal, Permission::NodeManage)?;
+    require(principal, Permission::EnvironmentManage)?;
     let request: QuickRequest = serde_json::from_value(body)
         .map_err(|error| ApiError::validation(format!("A quick deploy needs 'site_id', 'name' and a 'source': {error}")))?;
     let node_name = node_join_service::valid_node_name(&request.name)?;

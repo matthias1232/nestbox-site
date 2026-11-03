@@ -37,8 +37,8 @@ The egress lock decides what the node's own proxy allows its sandboxes to reach 
 
 Draining empties a node before maintenance.
 
-1. Open the node page and press **Drain**.
-2. Choose a target node; Nestbox moves every sandbox there after a preflight check (see [Moving a sandbox](/docs/moves)). Or choose **Stop only** to stop the sandboxes where they are.
+1. Open the node page and press **Drain…**.
+2. Choose a target node; Nestbox moves every sandbox there after a preflight check (see [Moving a sandbox](/docs/moves)). Or switch on **Stop only** to stop the sandboxes where they are.
 3. Follow the job in the dock's *Tasks* tab. The result lists what moved, what stopped and what failed.
 
 Model installs are not touched by a drain.

@@ -46,7 +46,7 @@ If a node has died, the sandbox cannot be moved normally. On the Moves page, tic
 
 ## Moves and nodes
 
-A node that still holds sandboxes, models or folders cannot be deleted. Use **Drain** on the node page to move everything off it (see [Nodes](/docs/nodes)).
+A node that still holds sandboxes, models or folders cannot be deleted. Use **Drain…** on the node page to move everything off it (see [Nodes](/docs/nodes)).
 
 ## Related
 

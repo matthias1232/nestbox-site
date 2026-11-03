@@ -37,7 +37,7 @@ Hidden buttons are only a convenience. The server refuses anything your role doe
 2. Open **Sandboxes** in the sidebar menu and choose **New sandbox**.
 3. Pick a tool image (for example Claude Code) and give the sandbox a name. Names are unique on the whole installation.
 4. Choose a policy. If you are unsure, keep the default; you can change it later without losing work.
-5. Press **Create**. The sandbox appears in the tree and in the dock's *Tasks* tab while it starts.
+5. Press **Create the sandbox** (or **Create from recipe** when you started from a recipe). The sandbox appears in the tree and in the dock's *Tasks* tab while it starts.
 6. When its status reads *running*, press **Console** to open a shell.
 
 If a node is missing, an administrator adds one first: see [Nodes](/docs/nodes).

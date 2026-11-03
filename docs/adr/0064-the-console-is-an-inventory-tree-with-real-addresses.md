@@ -71,3 +71,12 @@ Drag-and-drop moves in the tree, user-defined folders, and saved tree filters.
 
 If the tree grows past what one response can carry (many thousands of sandboxes per data
 center), it becomes lazy per level with the same node shape.
+
+## Addendum: who may run a quick deploy
+
+`POST /nodes/quick` chains the join-token, SSH-connect and rent services. Each of them requires
+`EnvironmentManage` (admin) and none has an internal variant without that check. So `quick`
+requires `EnvironmentManage` itself, up front: an operator who holds only `NodeManage` is refused
+at once with a clear message, instead of a job that fails in its first step. Drain, summary and
+the other node actions keep `NodeManage`. If operators should one day deploy nodes, the three
+services need an internal function that takes a checked principal; that is a separate decision.
