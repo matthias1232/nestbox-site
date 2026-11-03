@@ -102,9 +102,18 @@
 .cc-search:focus-visible { outline: 2px solid var(--accent); }
 .cc-kbd { border: 1px solid var(--border); padding: 0 var(--space-1); font-size: 0.7rem; color: var(--fg-muted); }
 .cc-bell { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* The bell is a split control (U05): the bell opens the dock, the ▾ opens the pop-up menu. */
+.cc-bell-group { position: relative; display: inline-flex; align-items: center; }
+.cc-bell-more { padding: 0 var(--space-1); line-height: 1; color: var(--fg-muted); border: 0; background: transparent; cursor: pointer; }
+.cc-bell-more:hover { color: var(--fg); }
+.cc-bell-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cc-bell-menu { min-width: 250px; }
 .cc-icon-button { display: inline-flex; align-items: center; justify-content: center; }
 .cc-bell-count { min-width: 1.4em; padding: 0 var(--space-1); text-align: center; border: 1px solid var(--border); color: var(--fg-muted); font-size: 0.72rem; }
 .cc-bell-count.hot { border-color: var(--bad); color: var(--bad); }
+/* A new refusal while the pop-ups are muted: the count flashes once, 600 ms, and nothing else. */
+.cc-bell-count.flash { animation: cc-bell-flash 600ms ease-out 1; }
+@keyframes cc-bell-flash { 0% { background: var(--bad); color: var(--bg); } 100% { background: transparent; color: var(--bad); } }
 .cc-user-menu { position: relative; }
 .cc-menu-pop { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 140px; background: var(--bg-raised); border: 1px solid var(--border-strong); }
 .cc-menu-pop button { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: var(--fg); padding: var(--space-2) var(--space-3); cursor: pointer; }

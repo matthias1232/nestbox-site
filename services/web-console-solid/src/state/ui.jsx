@@ -1,11 +1,12 @@
 // UI preferences and small shared UI state (contract C16, pattern J7).
 //
 // Persisted under localStorage['nestbox:ui'], and only presentation: sidebar, dock, tree view,
-// last console choice per sandbox, log panes, palette recents, dismissed tours. Ignored alerts,
-// selections and toasts live in memory only.
+// last console choice per sandbox, log panes, palette recents, dismissed tours, the alert pop-up
+// mute. Ignored alerts, hidden pop-up cards, selections and toasts live in memory only.
 
 import { createContext, createEffect, createSignal, onCleanup, useContext } from 'solid-js';
 import { STORAGE_KEY, parse, serialize } from './uiPrefs.js';
+import { resolvePopups, popupsUntil } from './alertMute.js';
 import { createMatcher, isTypingTarget } from './shortcuts.js';
 
 const UiContext = createContext();
@@ -66,6 +67,7 @@ export function UiProvider(props) {
   const [consoleModes, setConsoleModes] = createSignal(initial.consoleMode);
   const [logPanes, setLogPanes] = createSignal(initial.logPanes);
   const [recent, setRecent] = createSignal(initial.paletteRecent);
+  const [alertPopups, setAlertPopups] = createSignal(initial.alertPopups);
 
   const [selectionKind, setSelectionKind] = createSignal(null);
   const [selectionIds, setSelectionIds] = createSignal(new Set());
@@ -76,6 +78,7 @@ export function UiProvider(props) {
   const [shortcutsOpen, setShortcutsOpen] = createSignal(false);
   const [alertCount, setAlertCount] = createSignal(0);
   const [ignored, setIgnored] = createSignal(new Set());
+  const [hidden, setHidden] = createSignal(new Set());
 
   // Write the preferences whenever one of them changes.
   createEffect(() => {
@@ -90,6 +93,7 @@ export function UiProvider(props) {
       logPanes: logPanes(),
       paletteRecent: recent(),
       toursDismissed: initial.toursDismissed,
+      alertPopups: alertPopups(),
     });
     try {
       localStorage.setItem(STORAGE_KEY, text);
@@ -101,6 +105,27 @@ export function UiProvider(props) {
   const timers = new Set();
   onCleanup(() => timers.forEach((timer) => clearTimeout(timer)));
   let toastSeq = 0;
+  let popupTimer = null;
+
+  // Remember a pop-up choice and wake the console when a timed mute ends, so the bell and the
+  // Alerts tab stop saying "muted" on their own, without a reload.
+  function choosePopups(value) {
+    setAlertPopups(value);
+    if (popupTimer !== null) {
+      timers.delete(popupTimer);
+      clearTimeout(popupTimer);
+      popupTimer = null;
+    }
+    const until = popupsUntil(value, Date.now());
+    if (until !== null) {
+      popupTimer = setTimeout(() => {
+        timers.delete(popupTimer);
+        popupTimer = null;
+        choosePopups('on');
+      }, Math.max(0, until - Date.now()) + 50);
+      timers.add(popupTimer);
+    }
+  }
 
   const ui = {
     sidebar: {
@@ -191,6 +216,20 @@ export function UiProvider(props) {
         setIgnored((set) => new Set(set).add(id));
       },
       isIgnored: (id) => ignored().has(id),
+      // The stored pop-up choice: 'on', 'off' (until the operator turns them on), or { until }.
+      popupsValue: alertPopups,
+      // Resolved now: an expired timed mute counts as 'on'. `choosePopups` wakes the console at
+      // the end of the mute, so this does not need a polling clock of its own.
+      popups: () => resolvePopups(alertPopups(), Date.now()),
+      // The end of a live timed mute, for "muted until 15:40"; null when on or untimed.
+      popupEnds: () => popupsUntil(alertPopups(), Date.now()),
+      // Mute or unmute the pop-ups. The count (`count`) is never part of this.
+      setPopups: choosePopups,
+      // Hide one pop-up card until the page reloads; the alert stays open, so the count keeps it.
+      hide(id) {
+        setHidden((set) => new Set(set).add(id));
+      },
+      isHidden: (id) => hidden().has(id),
     },
     console: {
       mode: (sandboxId) => consoleModes()[sandboxId] || null,

@@ -11,7 +11,13 @@
 .dock-event.bad { border-left-color: var(--bad); }
 .alert-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .alert-stack { position: fixed; top: calc(var(--topbar-height) + 8px); right: 8px; width: 340px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; gap: var(--space-2); z-index: 40; }
-.alert-card { background: var(--bg-raised); border: 1px solid var(--border-strong); border-left: 2px solid var(--bad); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.alert-card { background: var(--bg-raised); border: 1px solid var(--border-strong); border-left: 2px solid var(--bad); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); position: relative; }
+/* The card's × hides this pop-up only; the alert stays open and the bell keeps counting (U05). */
+.alert-hide { position: absolute; top: 2px; right: 2px; padding: 0 var(--space-1); line-height: 1.4; border: 0; background: transparent; color: var(--fg-muted); cursor: pointer; }
+.alert-hide:hover { color: var(--fg); }
+.alert-hide:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The Alerts tab's own head line: the pop-up state on the left, its toggle on the right (U05). */
+.alert-popup-state { justify-content: space-between; }
 .alert-card p { margin: 0; }
 .alert-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .alert-flash { animation: alert-flash 600ms ease-out 1; }
