@@ -37,7 +37,7 @@ not gateways and sandboxes.
 | `LoginBadge.jsx` | One sandbox's sign-in state, one mode per agent when the entry carries `agents`, else the single summary badge |
 | `LogViewer.jsx` | One log panel for a sandbox, a supervisor (filtered) and an appliance component: follow, filter, copy; stops following after a failed read |
 | `PendingPanel.jsx` | A tab body that a later package fills: what belongs there, which endpoint, who owns it |
-| `Switch.jsx` | A two-state switch, a hidden checkbox under a styled track |
+| `Switch.jsx` | A two-state switch, a hidden checkbox under a 34 × 18 px track with a 14 px knob: lime when on, muted when off, a visible focus ring, and the state stays readable when the control is disabled (V26; the rules live in `styles/controls.css`) |
 | `Segmented.jsx` | A radio group of styled buttons, one active |
 | `Countdown.jsx` | A live "time left" label; no end time reads as "unlimited" |
 | `countdown.js` | Time formatting behind `Countdown`, pure and node-tested |
@@ -49,7 +49,9 @@ not gateways and sandboxes.
 
 Workbox primitives: `Switch`, `Segmented`, `Countdown`, `ConfirmDialog`, `Banner`, `PresenceDots`.
 They hold no rules: the caller decides, the component draws. Their shared styles live in
-`styles/controls.css`, which each of them imports.
+`styles/controls.css`, which each of them imports. `Switch` is 34 × 18 px with a 14 px knob
+(V26): the track keeps its colour (lime on / inset off) when the control is disabled, because a
+half-faded lime bar with a floating square was unreadable on the Users page.
 | `dataTable.js` | Sort, filter, search, group and CSV as pure functions |
 | `DataTable.jsx` | The shared table: toolbar, filters, groups, export, live rows |
 | `DlpBadge.jsx` | One badge per content-check state, in the shared colours |

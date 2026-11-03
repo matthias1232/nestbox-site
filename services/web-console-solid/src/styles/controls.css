@@ -10,6 +10,11 @@
 
 /* Switch -------------------------------------------------------------- */
 
+/* A 34 × 18 track with a 14 px knob (V26): the knob fills the height of the
+ * track with a 1 px gap, so it reads as a knob rather than a stray square
+ * floating in a lime bar, and the track keeps its state colour when the control
+ * is disabled instead of fading to a washed-out green. */
+
 .nb-switch {
   display: inline-flex;
   align-items: center;
@@ -18,6 +23,7 @@
   user-select: none;
   font-size: 13px;
   color: var(--fg);
+  line-height: 1;
 }
 
 .nb-switch input {
@@ -26,12 +32,14 @@
   height: 1px;
   opacity: 0;
   margin: 0;
+  pointer-events: none;
 }
 
 .nb-switch-track {
   position: relative;
   display: inline-block;
   flex: none;
+  box-sizing: border-box;
   width: 34px;
   height: 18px;
   border-radius: var(--radius);
@@ -42,13 +50,19 @@
 
 .nb-switch-thumb {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
+  top: 1px;
+  left: 1px;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
   border-radius: var(--radius);
   background: var(--fg-muted);
-  transition: left 120ms ease, background 120ms ease;
+  border: 1px solid var(--border-strong);
+  transition: left 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.nb-switch:hover .nb-switch-track {
+  border-color: var(--fg-faint);
 }
 
 .nb-switch input:checked + .nb-switch-track {
@@ -57,18 +71,42 @@
 }
 
 .nb-switch input:checked + .nb-switch-track .nb-switch-thumb {
-  left: 18px;
+  left: 17px;
   background: var(--fg-on-accent);
+  border-color: var(--fg-on-accent);
 }
 
+/* The ring is drawn in --fg, not in --accent: on an "on" switch the track is
+ * already lime, so a lime ring would be invisible. */
 .nb-switch input:focus-visible + .nb-switch-track {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--fg);
   outline-offset: 2px;
 }
 
+.nb-switch input:focus-visible + .nb-switch-track .nb-switch-thumb {
+  background: var(--fg);
+}
+
+.nb-switch input:checked:focus-visible + .nb-switch-track .nb-switch-thumb {
+  background: var(--fg-on-accent);
+}
+
+.nb-switch-label {
+  white-space: nowrap;
+}
+
+/* A switch somebody may not move still shows its state: only the label steps
+ * back, the track keeps the colour that says "on" or "off". */
 .nb-switch:has(input:disabled) {
   cursor: not-allowed;
-  opacity: 0.5;
+}
+
+.nb-switch:has(input:disabled) .nb-switch-label {
+  color: var(--fg-faint);
+}
+
+.nb-switch:has(input:disabled) .nb-switch-track {
+  opacity: 0.75;
 }
 
 /* Segmented ----------------------------------------------------------- */
