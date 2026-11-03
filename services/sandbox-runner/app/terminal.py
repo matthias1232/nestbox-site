@@ -468,9 +468,12 @@ async def terminal(websocket: WebSocket, name: str) -> None:
     client gets an HTTP 403 on the handshake instead of a WebSocket it must
     parse to learn it was refused.
     """
+    logger.info("ws terminal: enter %s", name)
     if not authorised(websocket):
+        logger.info("ws terminal: refused (no token) %s", name)
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="node token required")
         return
+    logger.info("ws terminal: authorised %s", name)
 
     import docker
     from docker.errors import DockerException, NotFound
@@ -489,7 +492,9 @@ async def terminal(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=CLOSE_INTERNAL, reason="sandbox is not running")
         return
 
+    logger.info("ws terminal: accepting %s", name)
     await websocket.accept(subprotocol=SUBPROTOCOL)
+    logger.info("ws terminal: accepted %s", name)
 
     tab = websocket.query_params.get("tab", "")
     if not tab or len(tab) > 64 or not all(ch.isascii() and (ch.isalnum() or ch in "_-") for ch in tab):

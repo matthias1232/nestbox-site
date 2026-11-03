@@ -246,7 +246,9 @@ async def vnc(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=CLOSE_INTERNAL, reason="sandbox is not running")
         return
 
+    logger.info("ws vnc: accepting %s", name)
     await websocket.accept(subprotocol=SUBPROTOCOL)
+    logger.info("ws vnc: accepted %s", name)
     tag = uuid.uuid4().hex[:12]
     try:
         stream = await asyncio.to_thread(open_bridge, container, tag)
