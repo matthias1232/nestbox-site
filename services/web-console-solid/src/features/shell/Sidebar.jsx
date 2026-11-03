@@ -211,6 +211,13 @@ export default function Sidebar(props) {
       </div>
 
       <Show when={!props.collapsed}>
+        {/* The console opened a data center by itself on a first sign-in. Say it once, with no
+            button: the choice is not remembered until the user makes one (U02). */}
+        <Show when={session.autoSwitched()}>
+          <p class="muted small cc-tree-note cc-dc-empty">
+            Opened {session.autoSwitched().name}: {session.autoSwitched().currentName} has no nodes yet.
+          </p>
+        </Show>
         <Show when={emptyCenter()}>
           <p class="muted small cc-tree-note cc-dc-empty">
             This data center has no nodes. {emptyCenter().currentName} is empty; switch to{' '}
