@@ -11,10 +11,15 @@ import PresenceDots from '../../components/PresenceDots.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import * as deck from '../../api/deck.js';
 import * as sandboxApi from '../../api/sandboxes.js';
-import { navigate } from '../../routing.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import { navigate, paths } from '../../routing.js';
 import { useSession } from '../../state/session.jsx';
+import { useUi } from '../../state/ui.jsx';
 import AgentsCard from './AgentsCard.jsx';
 import AllowAllBanner from './AllowAllBanner.jsx';
+import ControlStrip from './ControlStrip.jsx';
+import LiveLogCard from './LiveLogCard.jsx';
+import RulesFromLogCard from './RulesFromLogCard.jsx';
 import LiveChatsPanel from './LiveChatsPanel.jsx';
 import ModelsCard from './ModelsCard.jsx';
 import MoveDialog from './MoveDialog.jsx';
@@ -54,12 +59,21 @@ export default function WorkboxPage(props) {
 // One sandbox, with the state and the actions its header needs.
 function Workbox(props) {
   const session = useSession();
+  const ui = useUi();
   const state = useWorkbox(() => props.id);
 
   const [busy, setBusy] = createSignal(false);
   const [actionError, setActionError] = createSignal(null);
   const [recreating, setRecreating] = createSignal(false);
   const [moving, setMoving] = createSignal(false);
+  const [consoleMenu, setConsoleMenu] = createSignal(false);
+
+  // Remember the choice and bring the sessions panel into view.
+  function openConsole(mode) {
+    ui.console.setMode(props.id, mode);
+    setConsoleMenu(false);
+    document.getElementById('wb-sessions')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const sandbox = () => state.sandbox();
   const summary = () => state.control() || {};
@@ -113,50 +127,53 @@ function Workbox(props) {
       </Show>
 
       <Show when={sandbox() || summary().sandbox_id}>
-        <div class="wb-header">
-          <h1>{name()}</h1>
-          <StatusBadge status={status()} />
-          <span class="muted small wb-node">{nodeName()}</span>
-          <PresenceDots people={people()} />
-          <div class="wb-actions">
-            <Show when={resting()}>
-              <button
-                class="primary"
-                disabled={busy()}
-                onClick={() => run(() => sandboxApi.act(props.id, 'start'))}
-              >
-                Start
-              </button>
-            </Show>
-            <Show when={running()}>
-              <button
-                class="secondary"
-                disabled={busy()}
-                onClick={() => run(() => sandboxApi.act(props.id, 'stop'))}
-              >
-                Stop
-              </button>
-              <button
-                class="secondary"
-                disabled={busy()}
-                onClick={() => run(() => sandboxApi.act(props.id, 'restart'))}
-              >
-                Restart
-              </button>
-            </Show>
-            <button class="secondary" disabled={busy()} onClick={() => setRecreating(true)}>
-              Recreate
-            </button>
-            <button class="secondary" disabled={busy()} onClick={() => setMoving(true)}>
-              Move…
-            </button>
-            <Show when={canAdmin()}>
-              <button class="ghost" onClick={() => navigate(`/sandboxes/${props.id}`)}>
-                Admin view
-              </button>
-            </Show>
-          </div>
-        </div>
+        <PageHeader
+          title={name()}
+          status={<StatusBadge status={status()} />}
+          subtitle={nodeName()}
+          actions={
+            <div class="wb-actions">
+              <PresenceDots people={people()} />
+              <Show when={resting()}>
+                <button class="primary" disabled={busy()} onClick={() => run(() => sandboxApi.act(props.id, 'start'))}>
+                  Start
+                </button>
+              </Show>
+              <Show when={running()}>
+                <button class="secondary" disabled={busy()} onClick={() => run(() => sandboxApi.act(props.id, 'stop'))}>
+                  Stop
+                </button>
+                <button class="secondary" disabled={busy()} onClick={() => run(() => sandboxApi.act(props.id, 'restart'))}>
+                  Restart
+                </button>
+              </Show>
+              <button class="secondary" disabled={busy()} onClick={() => setRecreating(true)}>Recreate</button>
+              <button class="secondary" disabled={busy()} onClick={() => setMoving(true)}>Move…</button>
+              <Show when={canAdmin()}>
+                <button class="ghost" onClick={() => navigate(paths.sandbox(props.id))}>Admin view</button>
+              </Show>
+              <div class="wb-split">
+                <button class="primary" onClick={() => openConsole(ui.console.mode(props.id) || 'shell')}>
+                  Console
+                </button>
+                <button
+                  class="primary wb-split-more"
+                  aria-label="Choose the console"
+                  aria-expanded={consoleMenu()}
+                  onClick={() => setConsoleMenu(!consoleMenu())}
+                >
+                  ▾
+                </button>
+                <Show when={consoleMenu()}>
+                  <div class="wb-split-menu" role="menu">
+                    <button role="menuitem" class="ghost" onClick={() => openConsole('shell')}>Shell</button>
+                    <button role="menuitem" class="ghost" onClick={() => openConsole('desktop')}>Desktop</button>
+                  </div>
+                </Show>
+              </div>
+            </div>
+          }
+        />
 
         <Show when={actionError()}>
           <p class="error">{actionError()}</p>
@@ -164,14 +181,21 @@ function Workbox(props) {
 
         <AllowAllBanner control={summary()} sandboxId={props.id} onChanged={state.refresh} />
 
+        <ControlStrip sandboxId={props.id} control={summary()} onChanged={state.refresh} />
+
         <WorkboxNotice sandboxId={props.id} />
 
         <div class="wb-cards">
           <AgentsCard sandboxId={props.id} control={summary()} onChanged={state.refresh} />
-          <NetworkCard sandboxId={props.id} control={summary()} onChanged={state.refresh} />
-          <RequestStreamCard sandboxId={props.id} />
-          <PrivacyCard sandboxId={props.id} />
           <ModelsCard sandboxId={props.id} control={summary()} />
+          <NetworkCard sandboxId={props.id} control={summary()} onChanged={state.refresh} />
+          <PrivacyCard sandboxId={props.id} />
+          <RequestStreamCard sandboxId={props.id} />
+        </div>
+
+        <div class="wb-main">
+          <LiveLogCard sandboxId={props.id} onChanged={state.refresh} />
+          <RulesFromLogCard sandboxId={props.id} control={summary()} />
         </div>
 
         <Show when={sandbox()}>
@@ -181,7 +205,9 @@ function Workbox(props) {
             <LiveEventsPanel sandbox={sandbox()} />
           </div>
 
-          <SessionsPanel sandbox={sandbox()} control={summary()} />
+          <div id="wb-sessions">
+            <SessionsPanel sandbox={sandbox()} control={summary()} />
+          </div>
         </Show>
 
         <MoveDialog

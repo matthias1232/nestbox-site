@@ -19,6 +19,7 @@ import {
   readinessFromEvents,
   sourceLabel,
 } from './models.js';
+import { notYetGranted } from './controlStrip.js';
 import { onControl } from './useLive.js';
 
 // How many readiness events are kept. Only the last one per model is shown, so
@@ -46,6 +47,10 @@ export default function ModelsCard(props) {
   const [grants, setGrants] = createSignal([]);
   const [adding, setAdding] = createSignal(false);
   const [form, setForm] = createSignal({ profile: '', model_name: '', is_default: false });
+  // Models the user may use that this sandbox does not have yet, and the chosen one
+  // (`''` nothing yet, `'__other'` the free form below).
+  const [candidates, setCandidates] = createSignal([]);
+  const [pick, setPick] = createSignal('');
   const [error, setError] = createSignal(null);
   const [notice, setNotice] = createSignal(null);
   const [busy, setBusy] = createSignal(false);
@@ -115,10 +120,26 @@ export default function ModelsCard(props) {
     return grants().find((grant) => grant.scope === 'sandbox' && grant.model_name === row.model_name);
   }
 
+  // The grants the user already holds, minus the names this sandbox has: the
+  // two-click path is "pick one, grant".
+  async function loadCandidates() {
+    const identity = session.identity();
+    try {
+      const mine = asRows(await modelGrants.list({ user_id: identity?.user_id }));
+      setCandidates(notYetGranted(mine, rows()));
+    } catch {
+      setCandidates([]);
+    }
+  }
+
   async function openAdd() {
     setError(null);
     setNotice(null);
     setAdding(true);
+    setPick('');
+    await loadCandidates();
+    if (candidates().length) return;
+    setPick('__other');
     try {
       const list = await loadProfiles();
       if (!list.length) {
@@ -143,8 +164,27 @@ export default function ModelsCard(props) {
     setForm({ ...form(), profile: profileId, model_name: untouched ? (next?.model || '') : current });
   }
 
+  // Choosing "another endpoint" needs the provider list for the free form.
+  async function choosePick(value) {
+    setPick(value);
+    if (value !== '__other') return;
+    try {
+      const list = await loadProfiles();
+      if (!form().profile && list.length) {
+        setForm({ ...form(), profile: list[0].id, model_name: list[0].model || '' });
+      }
+    } catch (failure) {
+      setError(failure.message);
+    }
+  }
+
   async function submitAdd(event) {
     event.preventDefault();
+    const chosen = candidates().find((item) => item.model_name === pick());
+    if (chosen) {
+      await grantChosen(chosen);
+      return;
+    }
     const name = form().model_name.trim();
     if (!name) {
       setError('A model name is required; the agents ask for it by that name.');
@@ -164,6 +204,29 @@ export default function ModelsCard(props) {
       setNotice(`${name} is granted to this sandbox. The agents see it after their next start.`);
       setAdding(false);
       setForm({ profile: '', model_name: '', is_default: false });
+      await afterChange();
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function grantChosen(chosen) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await modelGrants.create({
+        scope: 'sandbox',
+        sandbox_id: sandboxId(),
+        model_name: chosen.model_name,
+        provider_profile_id: chosen.provider_profile_id,
+        is_default: false,
+      });
+      setNotice(`${chosen.model_name} is granted to this sandbox. The agents see it after their next start.`);
+      setAdding(false);
+      setPick('');
       await afterChange();
     } catch (failure) {
       setError(failure.message);
@@ -244,6 +307,19 @@ export default function ModelsCard(props) {
 
       <Show when={adding()}>
         <form class="draft-card" onSubmit={submitAdd}>
+          <Show when={candidates().length > 0}>
+            <label class="field">
+              <span>Model you may use</span>
+              <select required value={pick()} onChange={(event) => choosePick(event.currentTarget.value)}>
+                <option value="">Choose …</option>
+                <For each={candidates()}>
+                  {(item) => <option value={item.model_name}>{item.model_name}</option>}
+                </For>
+                <option value="__other">Another endpoint …</option>
+              </select>
+            </label>
+          </Show>
+          <Show when={pick() === '__other'}>
           <div class="form-grid">
             <label class="field">
               <span>Provider profile</span>
@@ -273,8 +349,10 @@ export default function ModelsCard(props) {
                    onChange={(event) => setForm({ ...form(), is_default: event.currentTarget.checked })} />
             {' '}Make this the model the agents start with.
           </label>
+          </Show>
           <div class="actions">
-            <button type="submit" class="primary tiny" disabled={busy() || !form().profile}>
+            <button type="submit" class="primary tiny"
+                    disabled={busy() || !pick() || (pick() === '__other' && !form().profile)}>
               {busy() ? 'Granting…' : 'Grant model'}
             </button>
             <button type="button" class="tiny secondary"
