@@ -20,6 +20,7 @@ a new colour asks for a token; it does not invent a hex value.
 | `controls.css` | Workbox primitives: switch, segmented, countdown, dialog, banner, presence dots; imported by those components |
 | `workbox-sessions.css` | The shared terminal tab strip with its per-tab menu and SSH line, the desktop panel, and the two pop-out layouts; imported by `TerminalTab`, `DesktopTab`, `SessionsPanel` and the pop-outs |
 | `vnc.css` | The desktop console: the 228 px noVNC sidebar (or its 32 px strip), the stacked scaling choices, the key grid, and the status line under the picture; imported by `components/VncSidebar.jsx` (U04) |
+| `display.css` | The desktop's monitor tabs with their per-monitor menu and the `+` popover, and the display arrangement (rectangles, counters, status line); imported by `components/MonitorTabs.jsx` and `components/DisplayArrange.jsx` (U10b, U10c) |
 | `workbox.css` | The Workbox header, its card and panel grids, and the "my sandboxes" tiles |
 | `users.css` | Permissions tab, invite dialog and Users page extras (F22) |
 

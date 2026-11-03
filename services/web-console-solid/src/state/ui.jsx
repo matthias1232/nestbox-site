@@ -65,6 +65,7 @@ export function UiProvider(props) {
   const [dockHeight, setDockHeight] = createSignal(initial.dockHeight);
   const [treeView, setTreeView] = createSignal(initial.treeView);
   const [consoleModes, setConsoleModes] = createSignal(initial.consoleMode);
+  const [monitorTabs, setMonitorTabs] = createSignal(initial.monitorTabs);
   const [vncPrefs, setVncPrefs] = createSignal(initial.vncOptions);
   const [logPanes, setLogPanes] = createSignal(initial.logPanes);
   const [recent, setRecent] = createSignal(initial.paletteRecent);
@@ -91,6 +92,7 @@ export function UiProvider(props) {
       dockHeight: dockHeight(),
       treeView: treeView(),
       consoleMode: consoleModes(),
+      monitorTabs: monitorTabs(),
       vncOptions: vncPrefs(),
       logPanes: logPanes(),
       paletteRecent: recent(),
@@ -243,6 +245,11 @@ export function UiProvider(props) {
       // Change some of them; the rest keeps the value this browser stored.
       setVncOptions(sandboxId, patch) {
         setVncPrefs((all) => ({ ...all, [sandboxId]: { ...(all[sandboxId] || {}), ...patch } }));
+      },
+      // The monitor tab this browser watches in one sandbox: `all`, or a monitor id.
+      monitor: (sandboxId) => monitorTabs()[sandboxId] || 'all',
+      setMonitor(sandboxId, monitor) {
+        setMonitorTabs((all) => ({ ...all, [sandboxId]: monitor || 'all' }));
       },
     },
     logs: { panes: logPanes, setPanes: setLogPanes },

@@ -58,7 +58,10 @@ export default function ConsoleFrame(props) {
     if (props.onPopOut) return props.onPopOut(mode(), term()?.activeTab?.());
     const id = props.sandbox.id;
     if (mode() === 'desktop') {
-      window.open(environmentUrl(desktopPath(id)), `nb-desk-${id}`, 'popup,width=1440,height=900');
+      // The window shows the monitor this console is showing; `All` is the whole
+      // framebuffer. `DesktopTab` renders the same strip inside that window (U10b).
+      const monitor = ui.console.monitor(id);
+      window.open(environmentUrl(desktopPath(id, monitor)), `nb-desk-${id}-${monitor}`, 'popup,width=1440,height=900');
     } else {
       const tab = term()?.activeTab?.();
       if (tab) window.open(terminalPath(id, tab), `nb-term-${tab}`, 'popup,width=1200,height=800');

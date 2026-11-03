@@ -1,0 +1,157 @@
+/* The monitor tabs of the desktop console and the display arrangement (U10b, U10c).
+ *
+ * The tab strip keeps the terminal strip's look (.terminal-tab in
+ * workbox-sessions.css): a bordered tab, the active one lime, an icon button
+ * inside it, and a menu that drops under the tab so the strip never moves.
+
+ *
+ * Only the tokens from tokens.css are used, so a theme change needs no second
+ * palette here.
+ */
+
+/* ---- the tab strip ------------------------------------------------------- */
+
+.monitor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border);
+  min-height: 30px;
+}
+
+.monitor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  position: relative;
+}
+
+/* The `All` tab is the element itself; a monitor's tab holds the buttons. */
+button.monitor-tab {
+  padding: 2px 8px;
+  color: var(--fg-muted);
+  background: var(--bg-raised);
+}
+
+.monitor-tab.active {
+  border-color: var(--accent);
+  background: var(--bg-inset);
+}
+
+.monitor-tab > button:not(.icon-button) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  background: transparent;
+  padding: 2px 6px;
+  color: var(--fg-muted);
+}
+
+.monitor-tab.active > button:not(.icon-button) {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.monitor-primary {
+  color: var(--accent);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.monitor-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 190px;
+  margin-top: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.monitor-menu button {
+  text-align: left;
+}
+
+.monitor-menu button.danger {
+  color: var(--bad);
+}
+
+.monitor-size {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border);
+}
+
+.monitor-size label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.monitor-size input {
+  width: 64px;
+}
+
+/* The `+` and its popover. */
+
+.monitor-add {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.monitor-add-form {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 220px;
+  margin-top: 4px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.monitor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.monitor-field select,
+.monitor-field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.monitor-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+}

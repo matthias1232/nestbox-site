@@ -12,8 +12,10 @@ export const boxPath = (id) => `/box/${id}`;
 export const myPath = () => '/my';
 /** The address of one terminal tab in its own window. */
 export const terminalPath = (id, tab) => `/box/${id}/terminal/${tab}`;
-/** The address of the desktop in its own window. */
-export const desktopPath = (id) => `/box/${id}/desktop`;
+/** The address of the desktop in its own window; one monitor when `monitor` names one. */
+export const desktopPath = (id, monitor) => (monitor && monitor !== 'all'
+  ? `/box/${id}/desktop?monitor=${encodeURIComponent(monitor)}`
+  : `/box/${id}/desktop`);
 
 /** Every address the console builds, by name. */
 export const paths = {
@@ -51,7 +53,6 @@ const MENU_IDS = new Set(ROUTES.map((route) => route.id));
 // Order matters: the longer, more specific patterns come first.
 const PATTERNS = [
   { re: new RegExp(`^/box/${UUID}/terminal/([A-Za-z0-9_-]{1,64})/?$`), make: (m) => ({ kind: 'terminal', id: m[1], tab: m[2] }) },
-  { re: new RegExp(`^/box/${UUID}/desktop/?$`), make: (m) => ({ kind: 'desktop', id: m[1] }) },
   { re: new RegExp(`^/box/${UUID}/?$`), make: (m) => ({ kind: 'box', id: m[1] }) },
   { re: /^\/my\/?$/, make: () => ({ kind: 'my' }) },
   { re: new RegExp(`^/dc/${UUID}/?$`), make: (m) => ({ kind: 'dc', id: m[1] }) },
@@ -80,6 +81,12 @@ export function parsePath(pathname, search = '') {
   if (admin) {
     const tab = new URLSearchParams(search).get('tab');
     return { kind: 'admin', id: admin[1], tab: tab || null };
+  }
+  // The desktop pop-out reads `?monitor=` so a window can show one screen (U10b).
+  const desktop = new RegExp(`^/box/${UUID}/desktop/?$`).exec(pathname);
+  if (desktop) {
+    const monitor = new URLSearchParams(search).get('monitor');
+    return { kind: 'desktop', id: desktop[1], monitor: monitor || null };
   }
   for (const pattern of PATTERNS) {
     const match = pattern.re.exec(pathname);

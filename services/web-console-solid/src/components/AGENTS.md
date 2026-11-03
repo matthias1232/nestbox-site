@@ -75,6 +75,11 @@ named `SelectTable` because the existing `DataTable.jsx` is used by many pages a
 `CommandPalette` (F04), `AlertPopup` (F13), `ConsoleFrame` (F20), `BulkBar` (F21).
 `markdown.js` is the dependency-free renderer (F18).
 
+U10b/U10c note: `MonitorTabs.jsx` and `DisplayArrange.jsx` import `features/sandboxes/displayLayout.js`,
+which is pure (no state, no fetching, no DOM). That is the same exception `TerminalTab` makes for
+`features/workbox/sessions.js`: a second copy of the layout rules would be a second truth, and the server
+refuses with exactly these sentences.
+
 Control Center primitives (package F02; styles in `styles/primitives.css`):
 
 | File | Responsibility |
@@ -104,6 +109,7 @@ because a reserve inside the scaled viewBox would shrink below the minimap's fix
 covers every card's `x + card.w` (tested), and the column titles own a `band` above the first card (`top`, `titleY`).
 | `ConsoleFrame.jsx`, `consoleFrame.js`, `consoleFrame.test.js` | one console per sandbox: Shell/Desktop/SSH split button, toolbar (font, copy, paste, fullscreen, Ctrl+Alt+Del, view-only, pop-out); pure `modes`, `pickMode`, `nextFont`, `sshLines` |
 | `VncSidebar.jsx` | the desktop's Proxmox-style sidebar: Clipboard (send/clear), Full screen, Settings (scaling local/remote/none, view only, dot cursor, shared mode, quality and compression 0–9, automatic reconnect and a 1–60 s delay), Send key (Ctrl+Alt+Del, Ctrl+Alt+F1…F12, Tab, Esc, sticky Ctrl/Alt/Win/Shift), Power (stop, restart, reset = recreate, each behind a `ConfirmDialog` that names the sandbox). Collapsible to a 32 px icon strip; props in, callbacks out. The same file exports `VncStatus`, the line under the picture (`Connected (1440×900, quality 6)` / `Disconnected — <reason>` with Reconnect and Disconnect). Styles: `styles/vnc.css` (U04) |
+| `MonitorTabs.jsx` | the desktop's monitor tabs: `All`, one tab per monitor with its size in mono and a `●` for the primary one, and `+`. `⋯` on a tab opens Rename, Resolution… (a W/H form), Make primary, Pop out and Remove (disabled for the last monitor); `+` opens a preset picker with `Custom…` and Right of / Below. Props in (`monitors`, `active`, `presets`), callbacks out (`onSelect`, `onAdd`, `onRename`, `onResize`, `onPrimary`, `onPopOut`, `onRemove`). Styles: `styles/display.css` (U10b) |
 
 
 ## Files added by the Control Center phase
