@@ -69,6 +69,17 @@ import ConfirmDialog from '../../components/ConfirmDialog.jsx';
 // pure logic (no JSX, no state), which is the one kind of module a feature may
 // take from another: it cannot create a second truth.
 import { mergeTabs, sshCommand, puttyHint } from '../workbox/sessions.js';
+// The status line's words and the backoff are pure, and tested without a browser.
+import {
+  MAX_TRIES,
+  closeReasonText,
+  nextDelay,
+  retryText,
+  shouldRetry,
+  socketReasonText,
+  statusText,
+  statusTone,
+} from './terminalState.js';
 // One EventSource per page: the stream is shared with every other workbox panel.
 import { onControl } from '../workbox/useLive.js';
 import '../../styles/deck.css';
@@ -109,7 +120,9 @@ export default function TerminalTab(props) {
   const [everyone, setEveryone] = createSignal([]);
   const tabs = () => mergeTabs(mine(), showAll() ? everyone() : []);
   const [active, setActive] = createSignal(fixed());
+  // `connecting` | `open` | `closed`, and why it closed when it did.
   const [state, setState] = createSignal('connecting');
+  const [reason, setReason] = createSignal(null);
   // Text the browser refused to copy by itself; shown so it can be copied by hand.
   const [copyFallback, setCopyFallback] = createSignal(null);
   const cleanups = [];
@@ -126,40 +139,137 @@ export default function TerminalTab(props) {
   // How to reach this sandbox from outside, read the first time somebody asks for
   // the SSH line. The answer costs a runtime query, so it is not asked for before.
   const [access, setAccess] = createSignal(null);
+  // Where the right-click menu was opened, and whether a mouse button is down (a
+  // drag in progress must not copy on every pixel).
+  const [menuAt, setMenuAt] = createSignal(null);
 
-  const closeSocket = () => {
-    try {
-      socket?.close();
-    } catch {
-      /* gone */
-    }
-    socket = null;
+  // ---- the connection ------------------------------------------------------
+  //
+  // A dropped socket is not the end of the tab: the tmux session is still on the
+  // other side, so the console rejoins it by itself, waiting 1 s, 2 s, 5 s and then
+  // 10 s between tries, ten tries in all (Proxmox's habit). Everything is cancelled
+  // on unmount, because a page you left must not keep reconnecting into a disposed
+  // terminal. `Reconnect` starts the count over.
+  let retryTimer = null;
+  let retryAttempt = 0;
+  let stopped = false;
+  // Bumped whenever the socket is replaced, so a late handler of the old socket
+  // cannot change the state of the new one.
+  let generation = 0;
+  // The text the selection watcher copied last; the same text is not copied twice.
+  let lastCopied = '';
+  let selectionTimer = null;
+  let pressing = false;
+  // A connection counts as healthy after a moment: resetting the backoff on the
+  // bare `open` event would turn a crash-looping sandbox into a 1 s hammer.
+  let healthyTimer = null;
+
+  const clearRetry = () => {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
   };
 
-  function connect(tab = active()) {
-    if (!tab) return;
-    closeSocket();
+  /**
+   * Drop the socket on purpose: its handlers are removed and its generation is
+   * spent, so a tab switch cannot look like a dropped connection and start a
+   * reconnect of its own.
+   */
+  const closeSocket = () => {
+    generation += 1;
+    clearTimeout(healthyTimer);
+    const old = socket;
+    socket = null;
+    if (!old) return;
+    old.onopen = null;
+    old.onmessage = null;
+    old.onclose = null;
+    old.onerror = null;
+    try {
+      old.close();
+    } catch {
+      /* already gone */
+    }
+  };
+
+  /**
+   * Ask the API what it thinks of this tab, for the failures the browser cannot see.
+   *
+   * A refused WebSocket handshake reaches JavaScript as code 1006 with no text: the
+   * browser hides the HTTP status on purpose. The tab-list call sits behind the same
+   * checks (session, permission, data center, sandbox), so its answer is the status
+   * the status line shows instead of a bare "closed".
+   */
+  async function explainFailure() {
+    try {
+      await api.terminalTabs(props.sandbox.id);
+      return 'the server refused the terminal handshake';
+    } catch (failure) {
+      if (failure?.status) return `the server answered ${failure.status}: ${failure.message}`;
+      return 'the console could not reach the API';
+    }
+  }
+
+  /** Schedule the next automatic try, or stop and say so after the last one. */
+  function reconnectLater(tab, why) {
+    if (stopped) return;
+    const attempt = retryAttempt;
+    if (!shouldRetry(attempt)) {
+      setState('closed');
+      setReason(
+        `${typeof why === 'string' && why.trim() ? `${why.trim()} · ` : ''}gave up after ${MAX_TRIES} tries — press Reconnect`,
+      );
+      return;
+    }
+    retryAttempt = attempt + 1;
     setState('connecting');
+    setReason(retryText(why, attempt));
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      attemptConnect(tab);
+    }, nextDelay(attempt));
+  }
+
+  /** One connection attempt; `connect` is the fresh start that resets the count. */
+  function attemptConnect(tab) {
+    clearRetry();
+    closeSocket();
+    // Everything below belongs to this socket only.
+    const run = generation;
+    setState('connecting');
+    setReason(null);
     setNote(null);
     term?.reset();
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     // A WebSocket carries no header, so the chosen data center travels in the URL (U01).
-    socket = new WebSocket(
-      environmentUrl(`${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/terminal?tab=${encodeURIComponent(tab)}`),
-      ['nestbox-terminal'],
-    );
-    socket.onopen = () => {
+    const path = `${scheme}://${location.host}/api/v1/sandboxes/${props.sandbox.id}/terminal?tab=${encodeURIComponent(tab)}`;
+    const ws = new WebSocket(environmentUrl(path), ['nestbox-terminal']);
+    socket = ws;
+    let opened = false;
+    let serverClose = null;
+    ws.onopen = () => {
+      if (run !== generation) return;
+      opened = true;
       setState('open');
+      setReason(null);
+      // The backoff starts over once the connection has proven to hold.
+      clearTimeout(healthyTimer);
+      healthyTimer = setTimeout(() => { retryAttempt = 0; }, 3000);
       fit?.fit();
-      socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      // The operator opened this tab to type, so the cursor is where they look.
       term.focus();
     };
-    socket.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (run !== generation) return;
       const text = typeof event.data === 'string' ? event.data : '';
       if (text.startsWith('{')) {
         try {
           const frame = JSON.parse(text);
           if (frame?.type === 'close') {
+            // The server says why it ended the session; the status line and the
+            // note both carry that sentence.
+            serverClose = frame;
+            setReason(closeReasonText(frame));
             setNote(
               frame.message ||
                 `Terminal detached (${frame.reason || 'closed'}). Reconnect attaches it again.`,
@@ -172,9 +282,40 @@ export default function TerminalTab(props) {
       }
       term.write(text);
     };
-    socket.onclose = () => setState('closed');
-    socket.onerror = () =>
-      setNote('The terminal could not be opened. The sandbox must be running and include the terminal runtime.');
+    ws.onclose = (event) => {
+      if (run !== generation) return;
+      socket = null;
+      clearTimeout(healthyTimer);
+      const text = closeReasonText(serverClose) || socketReasonText(event, opened);
+      // Two reasons the server sends are final: the person closed the session, or
+      // the sandbox stopped. Repeating a handshake that cannot succeed only makes
+      // the page busy.
+      const final = serverClose && (serverClose.reason === 'user' || serverClose.reason === 'sandbox_stopped');
+      // While a reconnect is pending the line stays "Connecting…": showing
+      // "Disconnected" for the fraction of a second before the next try makes the one
+      // line an operator watches jump for no reason.
+      setState(final ? 'closed' : 'connecting');
+      setReason(text || 'the connection closed');
+      if (final) return;
+      if (!text && !opened) {
+        // A refused handshake: the browser kept the status to itself, so ask the
+        // API, and retry after that answer is known.
+        explainFailure().then((detail) => {
+          if (run !== generation) return;
+          reconnectLater(tab, detail);
+        });
+        return;
+      }
+      reconnectLater(tab, text);
+    };
+    // No `onerror` note: the close event follows every failed handshake and the status
+    // line already says the reason, so a second sentence under the toolbar is noise.
+  }
+
+  function connect(tab = active()) {
+    if (!tab) return;
+    retryAttempt = 0;
+    attemptConnect(tab);
   }
 
   /** Persist the set, then render what the server stored. */
@@ -342,6 +483,49 @@ export default function TerminalTab(props) {
     (access()?.ports || []).find((port) => port.purpose === 'ssh')?.public_port || null;
   const sshLine = () => sshCommand(sshHost(), sshPort(), sshFor(), access()?.ssh_user);
 
+  // ---- the clipboard -------------------------------------------------------
+
+  /** Copy the selection, if there is one; the same text is not copied twice. */
+  function copySelection() {
+    const text = term?.hasSelection() ? term.getSelection() : '';
+    if (!text) return;
+    lastCopied = text;
+    copyText(text, setCopyFallback);
+  }
+
+  /**
+   * The text to paste, from the clipboard where the browser allows reading it.
+   *
+   * `navigator.clipboard.readText` needs a secure context and a permission the
+   * browser may refuse. The console is reached by IP over plain HTTP, where the API
+   * does not exist at all, so the fallback is a prompt: it works from a click or a
+   * key press, which is exactly when somebody asks to paste.
+   */
+  async function readClipboard() {
+    if (window.isSecureContext && navigator.clipboard?.readText) {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        /* refused; ask below */
+      }
+    }
+    return window.prompt('Paste the text to send to the terminal:');
+  }
+
+  async function pasteFromClipboard() {
+    const text = await readClipboard();
+    if (text) term?.paste(text);
+    term?.focus();
+  }
+
+  /** Focus the terminal after a click into the frame, unless the click was a control. */
+  function focusFromClick(event) {
+    const tag = event.target?.tagName?.toLowerCase?.() || '';
+    if (['button', 'a', 'input', 'textarea', 'select', 'label', 'option'].includes(tag)) return;
+    if (event.target?.closest?.('.terminal-menu')) return;
+    term?.focus();
+  }
+
   onMount(() => {
     // A terminal that cannot attach must explain itself on its own tab instead
     // of taking the whole sandbox view down with it.
@@ -363,8 +547,9 @@ export default function TerminalTab(props) {
       // xterm keeps its selection internally, so the browser's own copy never
       // sees it. Copy on release of the mouse (a user gesture, which the old
       // clipboard path needs on plain HTTP) and on Ctrl+Shift+C / Ctrl+Insert /
-      // Ctrl+C while something is selected. Paste (Ctrl+V, Ctrl+Shift+V,
-      // Shift+Insert, middle-click) already arrives through the browser.
+      // Ctrl+C while something is selected. Ctrl+Shift+V pastes from the
+      // clipboard, with a prompt when the browser cannot read it (plain HTTP);
+      // a right-click opens a small Paste menu for the same thing.
       // xterm finishes the selection in its own document-level mouseup handler,
       // which runs after one on `host`. A zero timeout runs after both, and is
       // still inside the browser's short window in which a click counts as the
@@ -375,6 +560,7 @@ export default function TerminalTab(props) {
       // (the default), a plain click-and-drag is turned into the Shift form
       // before xterm sees it, so selecting and copying always work.
       const onPress = (event) => {
+        if (event.button === 0) pressing = true;
         if (!selectMode() || event.shiftKey || event.button !== 0 || event.isTrusted === false) return;
         event.stopImmediatePropagation();
         event.target.dispatchEvent(new MouseEvent('mousedown', {
@@ -385,20 +571,62 @@ export default function TerminalTab(props) {
       };
       host.addEventListener('mousedown', onPress, true);
       cleanups.push(() => host.removeEventListener('mousedown', onPress, true));
-      const onRelease = () => setTimeout(() => {
-        if (term?.hasSelection()) copyText(term.getSelection(), setCopyFallback);
-      }, 0);
+      // Anything chosen without the mouse — a keyboard selection, a program
+      // selecting text — is copied as well, once it has settled.
+      const selectionWatch = term.onSelectionChange(() => {
+        if (pressing) return;
+        clearTimeout(selectionTimer);
+        selectionTimer = setTimeout(() => {
+          const text = term?.hasSelection() ? term.getSelection() : '';
+          if (!text || text === lastCopied) return;
+          copySelection();
+        }, 120);
+      });
+      cleanups.push(() => {
+        clearTimeout(selectionTimer);
+        selectionWatch?.dispose?.();
+      });
+      const onRelease = () => {
+        pressing = false;
+        setTimeout(() => copySelection(), 0);
+      };
       document.addEventListener('mouseup', onRelease);
       cleanups.push(() => document.removeEventListener('mouseup', onRelease));
+      // The right-click menu: Proxmox's console has one, and on plain HTTP the
+      // browser's own Paste is the only other way to get text in. It is not shown
+      // when "select text" is off, because then the right button belongs to the
+      // program in the terminal (tmux, vim).
+      const onContextMenu = (event) => {
+        if (!selectMode()) return;
+        event.preventDefault();
+        setMenuAt({ x: event.clientX, y: event.clientY });
+      };
+      host.addEventListener('contextmenu', onContextMenu);
+      cleanups.push(() => host.removeEventListener('contextmenu', onContextMenu));
+      const closeMenu = (event) => {
+        if (!menuAt()) return;
+        if (event.type === 'keydown' && event.key !== 'Escape') return;
+        if (event.type === 'mousedown' && event.target?.closest?.('.terminal-menu')) return;
+        setMenuAt(null);
+      };
+      document.addEventListener('mousedown', closeMenu);
+      document.addEventListener('keydown', closeMenu);
+      cleanups.push(() => document.removeEventListener('mousedown', closeMenu));
+      cleanups.push(() => document.removeEventListener('keydown', closeMenu));
       term.attachCustomKeyEventHandler((event) => {
-        if (event.type !== 'keydown' || !term.hasSelection()) return true;
+        if (event.type !== 'keydown') return true;
         const key = event.key.toLowerCase();
+        if (event.ctrlKey && event.shiftKey && key === 'v') {
+          pasteFromClipboard();
+          return false;
+        }
+        if (!term.hasSelection()) return true;
         const copy =
           (event.ctrlKey && event.shiftKey && key === 'c') ||
           (event.ctrlKey && event.key === 'Insert') ||
           (event.ctrlKey && !event.shiftKey && key === 'c');
         if (!copy) return true;
-        copyText(term.getSelection(), setCopyFallback);
+        copySelection();
         return false;
       });
       observer = new ResizeObserver(() => {
@@ -410,8 +638,9 @@ export default function TerminalTab(props) {
       observer.observe(host);
       // The console frame drives copy, paste, focus and fit from its toolbar.
       props.onReady?.({
-        copy: () => { if (term?.hasSelection()) copyText(term.getSelection(), setCopyFallback); },
+        copy: copySelection,
         paste: (text) => { if (text) term?.paste(text); },
+        pasteFromClipboard,
         focus: () => term?.focus(),
         fit: () => fit?.fit(),
         activeTab: () => active(),
@@ -448,6 +677,12 @@ export default function TerminalTab(props) {
   );
 
   onCleanup(() => {
+    // Nothing may reconnect after the tab is gone: a timer into a disposed
+    // terminal throws, and a page you left must not keep asking.
+    stopped = true;
+    clearRetry();
+    clearTimeout(selectionTimer);
+    clearTimeout(healthyTimer);
     cleanups.forEach((undo) => undo());
     observer?.disconnect();
     stopLive?.();
@@ -456,7 +691,7 @@ export default function TerminalTab(props) {
   });
 
   return (
-    <section class={`tab-panel ${fixed() ? 'sessions-fill' : ''}`}>
+    <section class={`tab-panel ${fixed() ? 'sessions-fill' : ''}`} onMouseUp={focusFromClick}>
       <Show when={!fixed()}>
         <div class="controls">
           <Show when={!loading()} fallback={<span class="muted small">Reading the tabs…</span>}>
@@ -513,12 +748,17 @@ export default function TerminalTab(props) {
           </Show>
         </div>
       </Show>
-      <div class="controls">
-        <span class={`badge ${state() === 'open' ? 'ok' : state() === 'connecting' ? 'warn' : 'muted'}`}>
+      <div class="controls terminal-bar">
+        <span
+          class={`terminal-status ${statusTone(state())}`}
+          role="status"
+          aria-live="polite"
+          title={reason() || undefined}
+        >
           <i />
-          {state()}
+          {statusText(state(), reason())}
         </span>
-        <Show when={state() === 'closed'}>
+        <Show when={state() !== 'open'}>
           <button class="primary tiny" onClick={() => connect()}>Reconnect</button>
         </Show>
         <label class="small" title="Drag with the mouse to select and copy, even inside claude, vim or tmux. Turn off to let those programs use the mouse.">
@@ -526,7 +766,7 @@ export default function TerminalTab(props) {
         </label>
         <span class="muted small">
           Tabs are stored on the server, so a reload or another machine reopens the same shells.
-          Leaving the browser detaches; × removes the tab from your list and leaves the shell running.
+          Selecting copies; Ctrl+Shift+V or a right-click pastes.
         </span>
       </div>
       <Show when={sshFor()}>
@@ -568,6 +808,27 @@ export default function TerminalTab(props) {
       <div class="term-wrap">
         <div ref={host} style="height:100%" />
       </div>
+      <Show when={menuAt()}>
+        <div
+          class="terminal-menu"
+          role="menu"
+          aria-label="Terminal clipboard"
+          style={{ left: `${menuAt().x}px`, top: `${menuAt().y}px` }}
+        >
+          <button type="button" role="menuitem" class="tiny" onClick={() => { setMenuAt(null); pasteFromClipboard(); }}>
+            Paste
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tiny"
+            disabled={!term?.hasSelection()}
+            onClick={() => { setMenuAt(null); copySelection(); }}
+          >
+            Copy
+          </button>
+        </div>
+      </Show>
       <ConfirmDialog
         open={confirmTab() !== null}
         title="Close this tab for everyone?"
