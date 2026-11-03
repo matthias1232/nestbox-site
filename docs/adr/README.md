@@ -72,6 +72,10 @@ supersedes the old one and note the supersession in both files.
 | [0061](0061-pseudonymise-and-restore-on-the-way-back.md) | Pseudonymise on the way out, restore on the way back | Accepted |
 | [0062](0062-a-finding-can-be-allowed-on-purpose.md) | A finding can be allowed on purpose, and an exception is a row, not a mode change | Accepted |
 | [0063](0063-who-may-read-a-chat.md) | Who may read a chat, and what the reader leaves behind | Accepted |
+| [0064](0064-the-console-is-an-inventory-tree-with-real-addresses.md) | The console is an inventory tree, and every view has a real address | Accepted |
+| [0065](0065-a-model-cluster-is-installs-behind-one-provider-routed-by-the-proxy.md) | A model cluster is installs behind one provider, routed by the proxy | Accepted |
+| [0066](0066-an-alert-is-a-refused-destination-awaiting-an-answer.md) | An alert is a refused destination awaiting an answer | Accepted |
+| [0067](0067-help-and-docs-ship-inside-the-console.md) | Help and documentation ship inside the console | Accepted |
 
 ## Writing a new ADR
 
