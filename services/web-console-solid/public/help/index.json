@@ -1,1 +1,579 @@
-[]
+[
+  {
+    "slug": "deploy-a-model",
+    "title": "Deploy one model",
+    "tags": [
+      "models",
+      "deploy",
+      "fit",
+      "provider",
+      "grants"
+    ],
+    "summary": "A model deployed on a node runs on your own hardware and is offered to sandboxes like any other provider. This page shows the one-node path. For many nodes at once see [Deploy one model on twenty node",
+    "headings": [
+      {
+        "id": "the-catalogue",
+        "text": "The catalogue"
+      },
+      {
+        "id": "check-the-fit",
+        "text": "Check the fit"
+      },
+      {
+        "id": "deploy-the-model",
+        "text": "Deploy the model"
+      },
+      {
+        "id": "the-provider-is-created-for-you",
+        "text": "The provider is created for you"
+      },
+      {
+        "id": "give-people-access",
+        "text": "Give people access"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "deploy-on-many-nodes",
+    "title": "Deploy one model on twenty nodes",
+    "tags": [
+      "models",
+      "nodes",
+      "bulk",
+      "cluster",
+      "deploy"
+    ],
+    "summary": "Example: you have just added twenty GPU nodes to a site and you want DeepSeek on every one that can run it. One wizard does it as one job.",
+    "headings": [
+      {
+        "id": "pick-the-model",
+        "text": "Pick the model"
+      },
+      {
+        "id": "choose-nodes",
+        "text": "Choose nodes"
+      },
+      {
+        "id": "set-the-options",
+        "text": "Set the options"
+      },
+      {
+        "id": "review-and-deploy",
+        "text": "Review and deploy"
+      },
+      {
+        "id": "watch-progress",
+        "text": "Watch progress"
+      },
+      {
+        "id": "make-a-cluster",
+        "text": "Make a cluster"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "egress-modes",
+    "title": "Egress modes and observation",
+    "tags": [
+      "egress",
+      "proxy",
+      "ca",
+      "windows",
+      "allow all",
+      "recording"
+    ],
+    "summary": "*Egress* is traffic leaving a sandbox. The egress mode decides how Nestbox sees and controls it.",
+    "headings": [
+      {
+        "id": "the-four-modes",
+        "text": "The four modes"
+      },
+      {
+        "id": "switch-the-mode",
+        "text": "Switch the mode"
+      },
+      {
+        "id": "the-ca-certificate",
+        "text": "The CA certificate"
+      },
+      {
+        "id": "allow-everything-for-a-while",
+        "text": "Allow everything for a while"
+      },
+      {
+        "id": "recording",
+        "text": "Recording"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "getting-started",
+    "title": "Getting started",
+    "tags": [
+      "start",
+      "shell",
+      "tree",
+      "roles",
+      "sandbox"
+    ],
+    "summary": "Nestbox runs AI agents in isolated sandboxes and shows you what each sandbox does on the network. You decide what it may reach. This page explains the screen and gets you to a first working sandbox.",
+    "headings": [
+      {
+        "id": "the-screen",
+        "text": "The screen"
+      },
+      {
+        "id": "roles",
+        "text": "Roles"
+      },
+      {
+        "id": "create-your-first-sandbox",
+        "text": "Create your first sandbox"
+      },
+      {
+        "id": "where-to-go-next",
+        "text": "Where to go next"
+      }
+    ]
+  },
+  {
+    "slug": "glossary",
+    "title": "Glossary",
+    "tags": [
+      "glossary",
+      "terms",
+      "definitions"
+    ],
+    "summary": "Short definitions of the words the console uses.",
+    "headings": [
+      {
+        "id": "sandbox",
+        "text": "Sandbox"
+      },
+      {
+        "id": "node",
+        "text": "Node"
+      },
+      {
+        "id": "site",
+        "text": "Site"
+      },
+      {
+        "id": "data-center",
+        "text": "Data center"
+      },
+      {
+        "id": "organisation",
+        "text": "Organisation"
+      },
+      {
+        "id": "policy",
+        "text": "Policy"
+      },
+      {
+        "id": "window",
+        "text": "Window"
+      },
+      {
+        "id": "grant",
+        "text": "Grant"
+      },
+      {
+        "id": "model-cluster",
+        "text": "Model cluster"
+      },
+      {
+        "id": "egress-mode",
+        "text": "Egress mode"
+      },
+      {
+        "id": "openshell",
+        "text": "OpenShell"
+      },
+      {
+        "id": "gateway",
+        "text": "Gateway"
+      },
+      {
+        "id": "supervisor",
+        "text": "Supervisor"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "live-logs-and-alerts",
+    "title": "Live logs and alerts",
+    "tags": [
+      "logs",
+      "alerts",
+      "red lane",
+      "pop-out",
+      "dock",
+      "allow"
+    ],
+    "summary": "An *alert* is a destination a sandbox tried to reach and was refused, which nobody has answered yet. This page shows where alerts appear and what to do with them.",
+    "headings": [
+      {
+        "id": "open-the-logs",
+        "text": "Open the logs"
+      },
+      {
+        "id": "panes",
+        "text": "Panes"
+      },
+      {
+        "id": "the-red-lane",
+        "text": "The red lane"
+      },
+      {
+        "id": "answer-an-alert",
+        "text": "Answer an alert"
+      },
+      {
+        "id": "the-dock-and-the-bell",
+        "text": "The dock and the bell"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "model-cluster-round-robin",
+    "title": "A round-robin model cluster",
+    "tags": [
+      "models",
+      "cluster",
+      "round robin",
+      "failover",
+      "provider"
+    ],
+    "summary": "A model cluster puts several installs of the same model behind one address. Requests are spread over the members, and a broken member is skipped.",
+    "headings": [
+      {
+        "id": "what-a-cluster-is",
+        "text": "What a cluster is"
+      },
+      {
+        "id": "example-four-deepseek-nodes",
+        "text": "Example: four DeepSeek nodes"
+      },
+      {
+        "id": "strategies",
+        "text": "Strategies"
+      },
+      {
+        "id": "health",
+        "text": "Health"
+      },
+      {
+        "id": "use-it-in-a-sandbox",
+        "text": "Use it in a sandbox"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "mounts",
+    "title": "Mounts and folders",
+    "tags": [
+      "mounts",
+      "folders",
+      "persistent",
+      "read-only",
+      "read-write",
+      "recreate"
+    ],
+    "summary": "A sandbox's own disk is discarded when it is recreated. A *persistent root* is a folder that survives: it lives on one node and can be mounted into sandboxes on that node (ADR 0049).",
+    "headings": [
+      {
+        "id": "what-a-root-is",
+        "text": "What a root is"
+      },
+      {
+        "id": "see-what-a-sandbox-can-touch",
+        "text": "See what a sandbox can touch"
+      },
+      {
+        "id": "mount-another-folder",
+        "text": "Mount another folder"
+      },
+      {
+        "id": "read-only-or-read-write",
+        "text": "Read-only or read-write"
+      },
+      {
+        "id": "apply-the-change",
+        "text": "Apply the change"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "moves",
+    "title": "Moving a sandbox",
+    "tags": [
+      "move",
+      "node",
+      "preflight",
+      "rollback",
+      "recover",
+      "snapshot"
+    ],
+    "summary": "A move puts a sandbox on another node together with its files (ADR 0049). Use it to free a machine, to use a bigger one, or to leave a node that is going away.",
+    "headings": [
+      {
+        "id": "what-travels",
+        "text": "What travels"
+      },
+      {
+        "id": "move-a-sandbox",
+        "text": "Move a sandbox"
+      },
+      {
+        "id": "the-steps",
+        "text": "The steps"
+      },
+      {
+        "id": "roll-back",
+        "text": "Roll back"
+      },
+      {
+        "id": "recover-from-a-lost-node",
+        "text": "Recover from a lost node"
+      },
+      {
+        "id": "moves-and-nodes",
+        "text": "Moves and nodes"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "nodes",
+    "title": "Nodes",
+    "tags": [
+      "nodes",
+      "add node",
+      "tunnel",
+      "drain",
+      "delete",
+      "egress lock"
+    ],
+    "summary": "A node is a machine that runs sandboxes. It joins the control plane through an encrypted tunnel (ADR 0047), so it needs outbound internet and no open port.",
+    "headings": [
+      {
+        "id": "add-a-node",
+        "text": "Add a node"
+      },
+      {
+        "id": "run-a-script",
+        "text": "Run a script"
+      },
+      {
+        "id": "connect-by-ip",
+        "text": "Connect by IP"
+      },
+      {
+        "id": "rent-a-machine",
+        "text": "Rent a machine"
+      },
+      {
+        "id": "tunnel-state",
+        "text": "Tunnel state"
+      },
+      {
+        "id": "egress-lock",
+        "text": "Egress lock"
+      },
+      {
+        "id": "drain-a-node",
+        "text": "Drain a node"
+      },
+      {
+        "id": "delete-a-node",
+        "text": "Delete a node"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "policies",
+    "title": "Policies and the wizard",
+    "tags": [
+      "policies",
+      "wizard",
+      "network",
+      "hot reload",
+      "recreate",
+      "drafts"
+    ],
+    "summary": "A policy says what a sandbox may do. Nestbox compiles it into the document that OpenShell enforces.",
+    "headings": [
+      {
+        "id": "the-four-sections",
+        "text": "The four sections"
+      },
+      {
+        "id": "hot-or-recreate",
+        "text": "Hot or recreate"
+      },
+      {
+        "id": "open-the-wizard",
+        "text": "Open the wizard"
+      },
+      {
+        "id": "review-before-you-apply",
+        "text": "Review before you apply"
+      },
+      {
+        "id": "drafts-from-real-traffic",
+        "text": "Drafts from real traffic"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "shortcuts",
+    "title": "Keyboard shortcuts",
+    "tags": [
+      "shortcuts",
+      "keyboard",
+      "palette",
+      "navigation"
+    ],
+    "summary": "Everything in the console can be done with a mouse. These shortcuts are faster. Press `?` at any time to see the list in the console itself.",
+    "headings": [
+      {
+        "id": "search-and-help",
+        "text": "Search and help"
+      },
+      {
+        "id": "go-to-a-page",
+        "text": "Go to a page"
+      },
+      {
+        "id": "tabs-and-dock",
+        "text": "Tabs and dock"
+      },
+      {
+        "id": "tree",
+        "text": "Tree"
+      },
+      {
+        "id": "when-shortcuts-do-not-work",
+        "text": "When shortcuts do not work"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "tenant-tree",
+    "title": "Customers, data centers, sites",
+    "tags": [
+      "tenants",
+      "organisation",
+      "data center",
+      "site",
+      "roles",
+      "context"
+    ],
+    "summary": "Nestbox can serve several customers from one installation. Everything hangs off one tree (ADR 0044).",
+    "headings": [
+      {
+        "id": "the-tree",
+        "text": "The tree"
+      },
+      {
+        "id": "the-context-picker",
+        "text": "The context picker"
+      },
+      {
+        "id": "who-sees-what",
+        "text": "Who sees what"
+      },
+      {
+        "id": "add-a-person",
+        "text": "Add a person"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  },
+  {
+    "slug": "workbox",
+    "title": "Your sandbox (for end users)",
+    "tags": [
+      "workbox",
+      "member",
+      "control strip",
+      "models",
+      "console",
+      "move"
+    ],
+    "summary": "If you are a member, **My sandboxes** is your home. Each sandbox you own has a page, the *workbox*, where you work and decide what the sandbox may do.",
+    "headings": [
+      {
+        "id": "the-control-strip",
+        "text": "The control strip"
+      },
+      {
+        "id": "models",
+        "text": "Models"
+      },
+      {
+        "id": "the-live-log",
+        "text": "The live log"
+      },
+      {
+        "id": "console",
+        "text": "Console"
+      },
+      {
+        "id": "move-your-sandbox",
+        "text": "Move your sandbox"
+      },
+      {
+        "id": "related",
+        "text": "Related"
+      }
+    ]
+  }
+]
