@@ -17,3 +17,5 @@ mounts the overlays once. `App.jsx` wraps every page except the pop-outs in `<Sh
 | `BulkHost.jsx` | Bulk selection bar host (F21) |
 
 `data-tour` markers: `tree`, `context`, `search`, `actions`, `dock` (the first-run tour, F18).
+
+F04: `PaletteHost.jsx` registers `mod+k`, loads the help index on first open, feeds `CommandPalette` (search, menu, docs, recents, data centers) and navigates on Enter. Style: `styles/palette.css`.

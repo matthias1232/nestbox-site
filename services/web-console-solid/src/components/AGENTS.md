@@ -66,3 +66,5 @@ contract C15): `icons.jsx` (F02; only `IconHome` yet), `IconButton`, `StatTile`,
 named `SelectTable` because the existing `DataTable.jsx` is used by many pages and keeps its own props),
 `CommandPalette` (F04), `AlertPopup` (F13), `TopologyCanvas` (F16), `ConsoleFrame` (F20), `BulkBar` (F21).
 `markdown.js` is the dependency-free renderer (F18).
+
+F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
