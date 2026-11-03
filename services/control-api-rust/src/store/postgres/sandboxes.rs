@@ -284,6 +284,11 @@ pub struct NewSandbox<'a> {
     pub spec: &'a serde_json::Value,
     /// The lead of the stack this sandbox joins, already checked by the service.
     pub parent_id: Option<Uuid>,
+    /// Who created it. Set in the statement that writes the row rather than in a
+    /// second one: a member's insert has to carry its owner to pass the
+    /// row-level policy (migration 0090), which only lets them write a sandbox
+    /// that is theirs or handed to them.
+    pub owner_user_id: Option<Uuid>,
 }
 
 /// Insert a sandbox and return it.
@@ -296,8 +301,8 @@ pub async fn insert(
         "WITH inserted AS (
             INSERT INTO sandboxes
                 (environment_id, cluster_id, gateway_id, node_id, name, pack_key,
-                 image, image_digest, spec, status, health, parent_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'unknown', $10)
+                 image, image_digest, spec, status, health, parent_id, owner_user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'unknown', $10, $11)
             RETURNING *
          )
          SELECT {SANDBOX_COLUMNS}
@@ -317,6 +322,7 @@ pub async fn insert(
         .bind(new.image_digest)
         .bind(new.spec)
         .bind(new.parent_id)
+        .bind(new.owner_user_id)
         .fetch_one(scope.connection())
         .await?;
 

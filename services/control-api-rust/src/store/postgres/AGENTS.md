@@ -28,7 +28,7 @@ the codebase where SQL appears.
 | File | Aggregate |
 |---|---|
 | `mod.rs` | Re-exports and shared row helpers, and `is_missing_function`: whether an error is SQLSTATE 42883, the only case a caller may answer with a fallback for a schema that predates a function (review finding F11) |
-| `sandboxes.rs` | Sandbox list, read, insert, status change, delete; `set_telemetry_mute` and `telemetry_mute` (recording mutes, B11) |
+| `sandboxes.rs` | Sandbox list, read, insert, status change, delete; `set_telemetry_mute` and `telemetry_mute` (recording mutes, B11). The insert writes `owner_user_id` in the same statement as the row: the policy that lets a member write only what is theirs (migration 0090) has no window for an unowned row |
 | `auth.rs` | Users, sessions, API tokens, scopes |
 | `policies.rs` | Policy documents, versions, network rules, drafts, the compiled rule-set hash, traffic windows (open, list, revoke, the environment's `max_window_minutes`) |
 | `egress.rs` | Compilation hash record, decisions, open windows for the decider, node token locator, deployment comparison |

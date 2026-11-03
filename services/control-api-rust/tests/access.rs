@@ -160,6 +160,7 @@ async fn sandbox(ctx: &ServiceContext, environment_id: Uuid, pack_key: &str) -> 
             image_digest: None,
             spec: &serde_json::json!({ "pack_key": pack_key }),
             parent_id: None,
+            owner_user_id: None,
         },
     )
     .await

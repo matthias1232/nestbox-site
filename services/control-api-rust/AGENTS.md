@@ -37,7 +37,12 @@ deployment failure even when the library tests are green.
    `tests/architecture.rs` fails a violation.
 2. No `unwrap`/`expect` outside tests.
 3. Every query that touches tenant data filters by `environment_id`, and
-   row-level security refuses the rest (ADR 0004).
+   row-level security refuses the rest (ADR 0004). The policy on `sandboxes` is
+   also what makes a member's view narrow: a member and a viewer see the
+   sandboxes they own or were granted, an admin, an operator and the control
+   plane see every one, and an unowned ("shared") row is for the last three
+   (migration 0090). A list therefore needs no visibility filter of its own —
+   and must not add one that disagrees with the policy.
 4. Every public function has a doc comment saying what it does and why.
 5. A route registered in `api/mod.rs` has an entry in `openapi.rs`; a stub
    answers `501 server.not_implemented` until its handler exists.

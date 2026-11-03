@@ -859,6 +859,10 @@ pub async fn instantiate(
             image_digest: None,
             spec: &spec,
             parent_id: None,
+            // Building a recipe produces a sandbox of the person who asked for it, like
+            // `sandbox_service::create` does; a row nobody owns is shared with the whole data
+            // center, which is not what a build is.
+            owner_user_id: Some(principal.user_id),
         },
     )
     .await

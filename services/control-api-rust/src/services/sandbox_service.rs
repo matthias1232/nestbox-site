@@ -904,19 +904,16 @@ pub async fn create(
             image_digest: request.image_digest.as_deref(),
             spec: &spec,
             parent_id,
+            owner_user_id: Some(principal.user_id),
         },
     )
     .await
     .map_err(ApiError::from)?;
 
     // The creator owns the sandbox: they manage it from start to end, and other users
-    // (not admins) do not see it.
-    sqlx::query("UPDATE sandboxes SET owner_user_id = $1 WHERE id = $2")
-        .bind(principal.user_id)
-        .bind(sandbox.id)
-        .execute(scope.connection())
-        .await
-        .map_err(|error| ApiError::from(StoreError::Database(error)))?;
+    // (not admins) do not see it. It is written by the insert above, so the row is never
+    // unowned — a member's own sandbox has to pass the row-level policy, and that policy
+    // lets them write only what is theirs (migration 0090).
 
     // Every sandbox gets its supervisor row in the same transaction, so there is
     // no moment in which a running sandbox has no one watching it. On OpenShell
