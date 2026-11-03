@@ -213,8 +213,8 @@
 .rp-matrix-table .rp-sticky {
   position: sticky;
   left: 0;
-  background: var(--surface, #14181f);
+  background: var(--bg-raised);
   z-index: 1;
   min-width: 12rem;
 }
-.rp-cell-on { background: rgba(60, 120, 200, 0.12); }
+.rp-cell-on { background: color-mix(in srgb, var(--info) 12%, transparent); }

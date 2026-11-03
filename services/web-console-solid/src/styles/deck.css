@@ -1,7 +1,7 @@
 .host-load { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; padding: var(--space-3); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: var(--space-3); }
 .meter { min-width: 200px; flex: 1 1 200px; }
 .meter-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-muted); margin-bottom: 3px; }
-.meter-track { position: relative; height: 8px; background: var(--bg-inset); border-radius: 4px; overflow: hidden; }
+.meter-track { position: relative; height: 8px; background: var(--bg-inset); border-radius: var(--radius); overflow: hidden; }
 .meter-fill { height: 100%; background: var(--ok); }
 .meter-fill.warn { background: var(--warn); }
 .meter-fill.bad { background: var(--bad); }
@@ -17,7 +17,7 @@
 /* A failed tab renders here instead of blanking the sandbox view. */
 .tab-boundary { border: 1px solid var(--border); border-left: 3px solid var(--bad); border-radius: var(--radius); padding: var(--space-3); background: var(--bg-raised); }
 .tab-boundary p { margin: 0 0 var(--space-2); }
-.term-wrap { background: #000; border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; height: 460px; }
+.term-wrap { background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; height: 460px; }
 .term-wrap .xterm { height: 100%; }
 .resource-form { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: end; }
 .resource-form label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--fg-muted); }

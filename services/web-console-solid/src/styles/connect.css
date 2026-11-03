@@ -6,7 +6,7 @@
 .connect-host small { width: 100%; }
 .connect-block pre { margin: 4px 0 6px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-x: auto; white-space: pre; }
 .connect-endpoint { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-top: 8px; }
-.connect .notice.warn { border-color: var(--warn, #b8860b); }
+.connect .notice.warn { border-color: var(--warn); }
 .connect-summary { margin: 0; color: var(--fg); }
 .connect small.block { display: block; margin-top: 2px; }
 .connect-notes { margin: 0; padding-left: 18px; }

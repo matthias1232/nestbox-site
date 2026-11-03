@@ -133,10 +133,10 @@
   max-width: 78%;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: var(--radius);
 }
-.chat-bubble.user { align-self: flex-end; background: var(--chat-user); border-bottom-right-radius: 4px; }
-.chat-bubble.model { align-self: flex-start; background: var(--chat-model); border-bottom-left-radius: 4px; }
+.chat-bubble.user { align-self: flex-end; background: var(--chat-user); border-bottom-right-radius: 0; }
+.chat-bubble.model { align-self: flex-start; background: var(--chat-model); border-bottom-left-radius: 0; }
 .chat-bubble.blocked {
   background: color-mix(in srgb, var(--dlp-blocked) 14%, transparent);
   border-color: var(--dlp-blocked);
@@ -157,7 +157,7 @@
 .chat-chip {
   padding: 0 6px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-size: 10px;
   color: var(--fg-muted);
 }
@@ -192,7 +192,7 @@
 .chat-typing i {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--fg-muted);
   animation: chat-blink 1.2s ease-in-out infinite;
 }
@@ -218,7 +218,7 @@
   width: 6px;
   height: 6px;
   margin-right: 4px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--ok);
   animation: chat-blink 1.2s ease-in-out infinite;
 }
@@ -226,12 +226,12 @@
 .chat-jump {
   align-self: center;
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   border-color: var(--border-strong);
   background: var(--bg-raised);
   color: var(--accent);
   font-size: 12px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 /* A narrow window stacks the list above the thread rather than squeezing both. */

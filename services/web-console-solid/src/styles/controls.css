@@ -34,7 +34,7 @@
   flex: none;
   width: 34px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--bg-inset);
   border: 1px solid var(--border-strong);
   transition: background 120ms ease, border-color 120ms ease;
@@ -46,7 +46,7 @@
   left: 2px;
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--fg-muted);
   transition: left 120ms ease, background 120ms ease;
 }
@@ -58,7 +58,7 @@
 
 .nb-switch input:checked + .nb-switch-track .nb-switch-thumb {
   left: 18px;
-  background: var(--accent-fg);
+  background: var(--fg-on-accent);
 }
 
 .nb-switch input:focus-visible + .nb-switch-track {
@@ -105,7 +105,7 @@
 
 .nb-seg.active {
   background: var(--accent);
-  color: var(--accent-fg);
+  color: var(--fg-on-accent);
   font-weight: 600;
 }
 
@@ -143,7 +143,7 @@
 .nb-dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
   z-index: 20;
 }
 
@@ -159,7 +159,7 @@
   border-radius: var(--radius);
   padding: var(--space-5);
   z-index: 21;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .nb-dialog h3 {
@@ -231,7 +231,7 @@
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--bg-inset);
   border: 1px solid var(--border-strong);
   color: var(--fg);

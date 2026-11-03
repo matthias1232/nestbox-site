@@ -52,7 +52,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-raised);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .terminal-tab-menu button {
@@ -128,7 +128,7 @@
 
 .desktop-screen {
   height: 70vh;
-  background: #111;
+  background: var(--bg-inset);
   border-radius: var(--radius-sm);
   overflow: hidden;
 }

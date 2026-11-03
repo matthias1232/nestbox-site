@@ -1,16 +1,16 @@
 /* The content-check colour language, and the table and chat surfaces that use it.
    One definition, so "orange means rewritten" is true on every screen. */
 :root {
-  --dlp-blocked: #dc2626;
-  --dlp-replaced: #ea580c;
-  --dlp-pseudo: #7c3aed;
-  --dlp-recorded: #2563eb;
-  --dlp-failed: #7f1d1d;
-  --dlp-exempt: #6b7280;
-  --dlp-clean: #16a34a;
-  --chat-user: color-mix(in srgb, #16a34a 16%, transparent);
+  --dlp-blocked: var(--bad);
+  --dlp-replaced: var(--warn);
+  --dlp-pseudo: color-mix(in srgb, var(--info) 55%, var(--bad));
+  --dlp-recorded: var(--info);
+  --dlp-failed: color-mix(in srgb, var(--bad) 50%, var(--bg));
+  --dlp-exempt: var(--fg-faint);
+  --dlp-clean: var(--ok);
+  --chat-user: color-mix(in srgb, var(--ok) 16%, transparent);
   --chat-model: color-mix(in srgb, currentColor 6%, transparent);
-  --chat-tool: color-mix(in srgb, #d97706 14%, transparent);
+  --chat-tool: color-mix(in srgb, var(--warn) 14%, transparent);
 }
 
 /* Badges -------------------------------------------------------------- */
@@ -20,9 +20,9 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.05rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-size: 0.75em;
-  color: #fff;
+  color: var(--fg-on-accent);
   white-space: nowrap;
 }
 .dlp-badge[data-state='blocked'] {
@@ -95,7 +95,7 @@
   gap: 0.3rem;
   padding: 0 0.45rem;
   border: 1px solid color-mix(in srgb, var(--dlp-recorded) 45%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--dlp-recorded) 14%, transparent);
   font-size: 0.72em;
   white-space: nowrap;
@@ -121,7 +121,7 @@
   max-height: 70vh;
   overflow: auto;
   border: 1px solid var(--border, currentColor);
-  border-radius: var(--radius, 8px);
+  border-radius: var(--radius);
 }
 .data-table table.dense {
   width: 100%;
@@ -171,7 +171,7 @@
   list-style: none;
   padding: 0.05rem 0.45rem;
   border: 1px solid var(--border, currentColor);
-  border-radius: var(--radius-sm, 5px);
+  border-radius: var(--radius);
   background: var(--bg-raised, var(--card, transparent));
   white-space: nowrap;
 }
@@ -194,10 +194,10 @@
   flex-direction: column;
   gap: 2px;
   padding: var(--space-2, 8px);
-  background: var(--bg-raised, var(--card, #141922));
+  background: var(--bg-raised, var(--bg-raised));
   border: 1px solid var(--border-strong, var(--border, currentColor));
-  border-radius: var(--radius-sm, 5px);
-  box-shadow: 0 12px 28px rgb(0 0 0 / 35%);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--border);
 }
 .filter-option {
   display: flex;
@@ -246,7 +246,7 @@
   align-self: flex-start;
   padding: 0.15rem 0.7rem;
   border: 1px solid color-mix(in srgb, var(--accent, var(--dlp-recorded)) 55%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent, var(--dlp-recorded)) 18%, transparent);
   color: inherit;
   cursor: pointer;
@@ -276,7 +276,7 @@
 }
 .route-pill {
   padding: 0.05rem 0.45rem;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border, currentColor);
   background: var(--bg-raised, var(--card, transparent));
   white-space: nowrap;

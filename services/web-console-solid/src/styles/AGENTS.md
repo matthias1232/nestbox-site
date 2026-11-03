@@ -31,3 +31,10 @@ uses it, not from `main.jsx`.
 - The graph and the table must survive a narrow viewport: horizontal scroll
   rather than a squeezed layout.
 | `dlp.css` | The content-check colour language, the shared table and the chat bubbles |
+
+## Look (Control Center)
+
+Every stylesheet except `tokens.css` reads colours only through tokens: square corners
+(`--radius`), 1 px olive lines, lime accent, tinted state backgrounds written as
+`color-mix(in srgb, var(--bad) 14%, transparent)`. No hex or rgb colour outside `tokens.css`.
+`app.css` also defines `.eyebrow`, `.figure` and `.num`.
