@@ -26,6 +26,6 @@ pub async fn sandboxes(
     auth: Auth,
     Json(body): Json<BulkRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
-    let value = bulk_service::sandboxes(&state.services, &auth.principal, body.ids, &body.action, body.params).await?;
+    let value = bulk_service::sandboxes(&state.services, state.config.clone(), &auth.principal, body.ids, &body.action, body.params).await?;
     Ok((StatusCode::ACCEPTED, Json(value)))
 }

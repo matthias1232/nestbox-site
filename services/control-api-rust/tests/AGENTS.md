@@ -40,6 +40,7 @@ Two different jobs:
 | `traffic.rs` | The traffic log: rows, aggregates, the map, and the scoped reads |
 | `node_ops.rs` | Node summary and drain against a database (B07; written, run by the coordinator) |
 | `permissions.rs` | Roles per scope: a viewer added to the data center is listed as direct, the last admin cannot be removed (B12) |
+| `bulk.rs` | A bulk stop runs as one job with one result per target (B03; needs PostgreSQL) |
 | `agent_auth.rs` | Agent sign-in modes against a database: the default from the old `login` choice, a switch stored as waiting, a restart that keeps the mode, and the sign-in rules appearing and disappearing with the mode |
 | `quick.rs` | Recording off stores no telemetry event and recording full stores it again (B11) |
 | `model_grants.rs` | Model grants against a database: an environment grant reaching a sandbox, a member refused the environment scope, the narrower sandbox grant winning, and the accounting router payload |
