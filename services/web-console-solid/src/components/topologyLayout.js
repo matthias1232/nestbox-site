@@ -4,9 +4,11 @@
 // The defaults of contract F16: column pitch, row pitch and card size, in SVG units.
 export const DEFAULTS = { colGap: 220, rowGap: 64, card: { w: 176, h: 52 } };
 
-// Space around the drawing, and the height of the layer titles above the first row.
+// Space around the drawing, and the band that holds the layer titles above the first row.
+// The cards start below the whole band plus a little air, so a title can never sit on a card.
 const PAD = 24;
-const HEADER = 28;
+const TITLE_BAND = 20;
+const TITLE_GAP = 8;
 
 // Put every node in the column of its layer and order the rows.
 //
@@ -34,7 +36,8 @@ export function layout(nodes, edges, layers, options = {}) {
     parents.get(edge.to).push(edge.from);
   }
   const byLabel = (a, b) => String(a.label ?? a.id).localeCompare(String(b.label ?? b.id));
-  const top = PAD + HEADER;
+  const top = PAD + TITLE_BAND + TITLE_GAP;
+  const titleY = PAD + TITLE_BAND - 6;
   let rows = 0;
   byColumn.forEach((list, index) => {
     const wanted = new Map();
@@ -61,9 +64,19 @@ export function layout(nodes, edges, layers, options = {}) {
     }
     rows = Math.max(rows, previous === null ? 0 : previous + card.h);
   });
-  const width = PAD * 2 + Math.max(0, layers.length - 1) * colGap + card.w;
+  // The frame must hold every card the layout produced, whatever the column count says.
+  let width = PAD * 2 + Math.max(0, layers.length - 1) * colGap + card.w;
+  for (const { x } of positions.values()) width = Math.max(width, x + card.w + PAD);
   const height = rows + PAD;
-  return { positions, width, height: Math.max(height, top + card.h + PAD), top, pad: PAD };
+  return {
+    positions,
+    width,
+    height: Math.max(height, top + card.h + PAD),
+    top,
+    pad: PAD,
+    titleY,
+    band: TITLE_BAND,
+  };
 }
 
 // A cubic bezier from the right middle of card `a` to the left middle of card `b`

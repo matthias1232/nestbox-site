@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layout, edgePath, thickness, fit, zoomAt, toneOf, fromCluster, fromStack } from './topologyLayout.js';
+import { DEFAULTS, layout, edgePath, thickness, fit, zoomAt, toneOf, fromCluster, fromStack } from './topologyLayout.js';
 
 const node = (id, layer, label = id) => ({ id, layer, label });
 
@@ -26,6 +26,37 @@ test('fit keeps the aspect ratio and contains the drawing', () => {
   const vb = fit(1000, 300, { w: 800, h: 400 });
   assert.ok(Math.abs(vb.w / vb.h - 2) < 1e-9);
   assert.ok(vb.w >= 1000 && vb.h >= 300);
+});
+
+test('a four-layer graph keeps every card inside the fitted width', () => {
+  const layers = ['data_center', 'site', 'node', 'sandbox'];
+  const nodes = [
+    node('dc1', 'data_center', 'Berlin'), node('dc2', 'data_center', 'default'),
+    node('s1', 'site', 'Main site'), node('s2', 'site', 'No site'),
+    node('n1', 'node', 'local'),
+    node('b1', 'sandbox', 'claude-01'), node('b2', 'sandbox', 'claude-own'), node('b3', 'sandbox', 'desktop-01'),
+  ];
+  const edges = [
+    { from: 'dc1', to: 's1' }, { from: 'dc2', to: 's2' },
+    { from: 's1', to: 'n1' }, { from: 's2', to: 'n1' },
+    { from: 'n1', to: 'b1' }, { from: 'n1', to: 'b2' }, { from: 'n1', to: 'b3' },
+  ];
+  const out = layout(nodes, edges, layers);
+  const right = Math.max(...[...out.positions.values()].map((p) => p.x + DEFAULTS.card.w));
+  assert.ok(out.width >= right, `width ${out.width} must hold the right edge ${right}`);
+  for (const [id, p] of out.positions) assert.ok(p.x + DEFAULTS.card.w <= out.width, `${id} sticks out`);
+  // With the home page's viewport the fitted viewBox still shows the whole last column.
+  const vb = fit(out.width, out.height, { w: 720, h: 420 });
+  assert.ok(vb.x + vb.w >= right);
+  assert.ok(vb.x <= 0);
+});
+
+test('the column titles have their own band above the first card', () => {
+  const out = layout([node('a', 'x'), node('b', 'y')], [{ from: 'a', to: 'b' }], ['x', 'y']);
+  assert.ok(out.titleY < out.top, 'the title baseline sits above the first card');
+  assert.ok(out.top >= out.pad + out.band, 'the cards start below the whole title band');
+  assert.ok(out.positions.get('a').y >= out.top);
+  assert.ok(out.height >= out.top + DEFAULTS.card.h + out.pad);
 });
 
 test('zoom keeps the point under the cursor', () => {

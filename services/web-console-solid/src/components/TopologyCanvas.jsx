@@ -43,7 +43,7 @@ export default function TopologyCanvas(props) {
   const [vb, setVb] = createSignal({ x: 0, y: 0, w: 900, h: height() });
   // Once the user zooms or pans, new data no longer re-fits the view.
   const [touched, setTouched] = createSignal(false);
-  let wrap;
+  let view;
   let drag = null;
 
   const placed = createMemo(() => layout(props.nodes || [], props.edges || [], props.layers || []));
@@ -65,13 +65,13 @@ export default function TopologyCanvas(props) {
 
   onMount(() => {
     const measure = () => {
-      if (!wrap) return;
-      setBox({ w: Math.max(wrap.clientWidth, 200), h: height() });
+      if (!view) return;
+      setBox({ w: Math.max(view.clientWidth, 200), h: height() });
       if (!touched()) fitView();
     };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(wrap);
+    observer.observe(view);
     onCleanup(() => observer.disconnect());
   });
 
@@ -133,94 +133,101 @@ export default function TopologyCanvas(props) {
   const trafficOptions = () => (props.trafficWindows || []).map((value) => ({ value, label: value === '' ? 'Off' : value }));
 
   return (
-    <div class="topo" ref={wrap} onKeyDown={onKey}>
+    <div class="topo" onKeyDown={onKey}>
       <div class="topo-stage">
         <Show
           when={(props.nodes || []).length > 0}
           fallback={<p class="muted topo-empty">Nothing to draw yet.</p>}
         >
-          <svg
-            class="topo-svg"
-            width="100%"
-            height={height()}
-            viewBox={`${vb().x} ${vb().y} ${vb().w} ${vb().h}`}
-            role="group"
-            aria-label={props.label || 'Topology'}
-            onWheel={onWheel}
-            onPointerDown={onDown}
-            onPointerMove={onMove}
-            onPointerUp={onUp}
-            onPointerLeave={onUp}
-          >
-            <rect class="topo-bg" x={vb().x - 4000} y={vb().y - 4000} width={vb().w + 8000} height={vb().h + 8000} fill="transparent" />
-            <For each={titles()}>
-              {(title) => <text class="topo-layer" x={title.x} y={placed().pad + 10}>{title.name}</text>}
-            </For>
-            <g class="edges">
-              <For each={edges()}>
-                {(item) => (
-                  <g class={`edge${item.edge.refused ? ' bad' : ''}${item.edge.requests ? ' traffic' : ''}${related(item.edge) ? '' : ' dim'}`}>
-                    <path d={edgePath(item.a, item.b, card)} stroke-width={thickness(item.edge.requests)} />
-                    <Show when={item.edge.refused}>
-                      <path
-                        class="edge-hit"
-                        d={edgePath(item.a, item.b, card)}
-                        onClick={() => props.onSelect?.(item.edge.to)}
-                      />
-                    </Show>
-                  </g>
-                )}
+          <div class="topo-view" ref={view}>
+            <svg
+              class="topo-svg"
+              width="100%"
+              height={height()}
+              viewBox={`${vb().x} ${vb().y} ${vb().w} ${vb().h}`}
+              role="group"
+              aria-label={props.label || 'Topology'}
+              onWheel={onWheel}
+              onPointerDown={onDown}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onPointerLeave={onUp}
+            >
+              <rect class="topo-bg" x={vb().x - 4000} y={vb().y - 4000} width={vb().w + 8000} height={vb().h + 8000} fill="transparent" />
+              <For each={titles()}>
+                {(title) => <text class="topo-layer" x={title.x} y={placed().titleY}>{title.name}</text>}
               </For>
-            </g>
-            <g class="nodes">
-              <For each={cards()}>
-                {(item) => (
-                  <g
-                    class={`topo-card ${item.tone} kind-${item.node.kind}${props.selectedId === item.node.id ? ' selected' : ''}`}
-                    transform={`translate(${item.x}, ${item.y})`}
-                    role="button"
-                    tabindex="0"
-                    aria-label={`${item.node.kind} ${item.node.label}, ${item.node.statusLabel || item.node.status || 'unknown'}`}
-                    aria-pressed={props.selectedId === item.node.id}
-                    onClick={() => props.onSelect?.(item.node.id)}
-                    onDblClick={() => props.onAction?.(item.node.id, 'open')}
-                    onKeyDown={(event) => cardKey(event, item.node.id)}
-                  >
-                    <rect width={card.w} height={card.h} />
-                    <g transform="translate(10, 10)">
-                      <Icon name={KIND_ICONS[item.node.kind] || 'Settings'} />
+              <g class="edges">
+                <For each={edges()}>
+                  {(item) => (
+                    <g class={`edge${item.edge.refused ? ' bad' : ''}${item.edge.requests ? ' traffic' : ''}${related(item.edge) ? '' : ' dim'}`}>
+                      <path d={edgePath(item.a, item.b, card)} stroke-width={thickness(item.edge.requests)} />
+                      <Show when={item.edge.refused}>
+                        <path
+                          class="edge-hit"
+                          d={edgePath(item.a, item.b, card)}
+                          onClick={() => props.onSelect?.(item.edge.to)}
+                        />
+                      </Show>
                     </g>
-                    <text class="card-label" x="32" y="21">{cut(item.node.label, 18)}</text>
-                    <text class="card-state" x="32" y="39">
-                      {item.node.statusLabel || item.node.status || item.node.kind}
-                      {item.node.meta?.running !== undefined ? ` · ${item.node.meta.running} running` : ''}
-                      {item.node.meta?.alerts ? ` · ${item.node.meta.alerts} alerts` : ''}
-                    </text>
-                    <circle class="card-dot" cx={card.w - 12} cy="12" r="4" />
-                  </g>
-                )}
-              </For>
-            </g>
-          </svg>
+                  )}
+                </For>
+              </g>
+              <g class="nodes">
+                <For each={cards()}>
+                  {(item) => (
+                    <g
+                      class={`topo-card ${item.tone} kind-${item.node.kind}${props.selectedId === item.node.id ? ' selected' : ''}`}
+                      transform={`translate(${item.x}, ${item.y})`}
+                      role="button"
+                      tabindex="0"
+                      aria-label={`${item.node.kind} ${item.node.label}, ${item.node.statusLabel || item.node.status || 'unknown'}`}
+                      aria-pressed={props.selectedId === item.node.id}
+                      onClick={() => props.onSelect?.(item.node.id)}
+                      onDblClick={() => props.onAction?.(item.node.id, 'open')}
+                      onKeyDown={(event) => cardKey(event, item.node.id)}
+                    >
+                      <rect width={card.w} height={card.h} />
+                      <g transform="translate(10, 10)">
+                        <Icon name={KIND_ICONS[item.node.kind] || 'Settings'} />
+                      </g>
+                      <text class="card-label" x="32" y="21">{cut(item.node.label, 18)}</text>
+                      <text class="card-state" x="32" y="39">
+                        {item.node.statusLabel || item.node.status || item.node.kind}
+                        {item.node.meta?.running !== undefined ? ` · ${item.node.meta.running} running` : ''}
+                        {item.node.meta?.alerts ? ` · ${item.node.meta.alerts} alerts` : ''}
+                      </text>
+                      <circle class="card-dot" cx={card.w - 12} cy="12" r="4" />
+                    </g>
+                  )}
+                </For>
+              </g>
+            </svg>
 
-          <div class="topo-toolbar">
-            <Show when={trafficOptions().length > 0}>
-              <span class="muted small">Traffic</span>
-              <Segmented options={trafficOptions()} value={props.trafficWindow ?? ''} onChange={(value) => props.onTrafficWindow?.(value)} />
-            </Show>
-            <button class="secondary tiny" aria-label="Zoom in" onClick={() => zoom(0.8)}>+</button>
-            <button class="secondary tiny" aria-label="Zoom out" onClick={() => zoom(1.25)}>−</button>
-            <button class="secondary tiny" aria-label="Fit the drawing to the view" onClick={() => { setTouched(false); fitView(); }}>Fit</button>
+            <div class="topo-toolbar">
+              <Show when={trafficOptions().length > 0}>
+                <span class="muted small">Traffic</span>
+                <Segmented options={trafficOptions()} value={props.trafficWindow ?? ''} onChange={(value) => props.onTrafficWindow?.(value)} />
+              </Show>
+              <button class="secondary tiny" aria-label="Zoom in" onClick={() => zoom(0.8)}>+</button>
+              <button class="secondary tiny" aria-label="Zoom out" onClick={() => zoom(1.25)}>−</button>
+              <button class="secondary tiny" aria-label="Fit the drawing to the view" onClick={() => { setTouched(false); fitView(); }}>Fit</button>
+            </div>
+
+            <div class="topo-legend small" aria-label="Legend">
+              <span><i class="dot ok" /> ok</span>
+              <span><i class="dot warn" /> attention</span>
+              <span><i class="dot bad" /> failing</span>
+              <span><i class="dot muted" /> unknown</span>
+              <span class="legend-refused">red line: refused</span>
+            </div>
           </div>
 
-          <div class="topo-legend small" aria-label="Legend">
-            <span><i class="dot ok" /> ok</span>
-            <span><i class="dot warn" /> attention</span>
-            <span><i class="dot bad" /> failing</span>
-            <span><i class="dot muted" /> unknown</span>
-            <span class="legend-refused">red line: refused</span>
-          </div>
-
+          {/* The minimap is a flex column of the stage, not an overlay: it keeps its own
+              reserved corner (outside the SVG, option 2 of the two in V22). Extending the
+              layout width by the minimap's width would reserve those units inside the
+              viewBox, but the minimap is a fixed 160 px and the viewBox is scaled, so the
+              reserved strip would shrink below 160 px and cards would slide under it again. */}
           <div class="topo-mini">
             <Minimap
               width={placed().width}

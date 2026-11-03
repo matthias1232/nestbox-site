@@ -1,8 +1,11 @@
 /* TopologyCanvas: layered cards, edges, toolbar, legend, minimap and the side panel. */
 
 .topo { position: relative; }
-.topo-stage { position: relative; display: flex; border: 1px solid var(--border); background: var(--bg-inset); overflow: hidden; min-height: 200px; }
-.topo-svg { flex: 1 1 auto; min-width: 0; display: block; touch-action: none; cursor: grab; }
+.topo-stage { position: relative; display: flex; align-items: stretch; border: 1px solid var(--border); background: var(--bg-inset); overflow: hidden; min-height: 200px; }
+/* The drawing column (SVG, toolbar, legend). The minimap and the side panel are siblings in
+   the stage's flex row, so neither of them can ever sit on a card. */
+.topo-view { position: relative; flex: 1 1 auto; min-width: 0; }
+.topo-svg { display: block; width: 100%; touch-action: none; cursor: grab; }
 .topo-empty { padding: var(--space-4); }
 
 .topo-layer { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: 0.12em; fill: var(--fg-muted); }
@@ -28,11 +31,10 @@
 .topo-card.bad rect { stroke: var(--bad); }
 
 .topo-toolbar { position: absolute; top: var(--space-2); right: var(--space-2); display: flex; gap: var(--space-2); align-items: center; }
-.topo-stage:has(.topo-panel) .topo-toolbar { right: calc(300px + var(--space-2)); }
 .topo-legend { position: absolute; left: var(--space-2); bottom: var(--space-2); display: flex; gap: var(--space-3); background: var(--bg-raised); border: 1px solid var(--border); padding: var(--space-1) var(--space-2); }
 .topo-legend .legend-refused { color: var(--bad); }
-.topo-mini { position: absolute; right: var(--space-2); bottom: var(--space-2); border: 1px solid var(--border); background: var(--bg-raised); }
-.topo-stage:has(.topo-panel) .topo-mini { right: calc(300px + var(--space-2)); }
+/* The minimap keeps its own reserved corner at the bottom right of the stage. */
+.topo-mini { flex: 0 0 auto; align-self: flex-end; margin: var(--space-2); border: 1px solid var(--border); background: var(--bg-raised); }
 .topo-minimap { display: block; cursor: pointer; }
 .topo-minimap .mini-card { fill: var(--fg-faint); }
 .topo-minimap .mini-card.ok { fill: var(--ok); }

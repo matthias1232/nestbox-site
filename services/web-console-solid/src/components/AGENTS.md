@@ -92,6 +92,10 @@ each card draws an `Icon` per kind from `icons.jsx` inside a `translate(10, 10)`
 `TopologyPanel.jsx` is its side panel (facts, receives/sends lists, Open/Policies/Logs, Allow 15/30/60 on a refused
 destination); `Minimap.jsx` is the 160 px overview; `topologyLayout.js` is the pure layout, edge path, fit, zoom and the
 `fromCluster` / `fromStack` mappers (`node --test topologyLayout.test.js`). Styles: `styles/topology.css`.
+Layout contract (V22): the stage is one flex row of the drawing column (`.topo-view`: SVG, toolbar, legend), the minimap
+and the side panel, so the minimap has a reserved corner and can never cover a card — it is outside the SVG on purpose,
+because a reserve inside the scaled viewBox would shrink below the minimap's fixed 160 px. `layout` reports `width` that
+covers every card's `x + card.w` (tested), and the column titles own a `band` above the first card (`top`, `titleY`).
 | `ConsoleFrame.jsx`, `consoleFrame.js`, `consoleFrame.test.js` | one console per sandbox: Shell/Desktop/SSH split button, toolbar (font, copy, paste, fullscreen, Ctrl+Alt+Del, view-only, pop-out); pure `modes`, `pickMode`, `nextFont`, `sshLines` |
 
 
