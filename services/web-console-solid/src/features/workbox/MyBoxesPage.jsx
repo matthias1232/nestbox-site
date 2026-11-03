@@ -9,6 +9,7 @@ import Empty from '../../components/Empty.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import { boxPath, navigate } from '../../routing.js';
 import { useSession } from '../../state/session.jsx';
+import { useUi } from '../../state/ui.jsx';
 import { splitByOwner, useMyBoxes } from './useWorkbox.js';
 import '../../styles/workbox.css';
 
@@ -17,6 +18,7 @@ import '../../styles/workbox.css';
  */
 export default function MyBoxesPage() {
   const session = useSession();
+  const ui = useUi();
   const boxes = useMyBoxes();
   onMount(() => boxes.load());
 
@@ -26,14 +28,27 @@ export default function MyBoxesPage() {
   const viewers = (id) => boxes.summaryOf(id)?.viewers || [];
   const allowAll = (id) => Boolean(boxes.summaryOf(id)?.allow_all);
 
-  // One card. It is a button, so the whole card is the target and the keyboard
-  // reaches it without a tab stop per line.
+  // One card: status, node, the loud badge, and one-click Open / Shell / Desktop.
+  // The buttons are real buttons beside the title link, not nested in a button.
   function card(item) {
     const connected = () => viewers(item.id).length;
+    const open = (mode) => {
+      if (mode) ui.console.setMode(item.id, mode);
+      navigate(boxPath(item.id));
+    };
     return (
-      <button class="wb-card wb-box" onClick={() => navigate(boxPath(item.id))}>
+      <article class="wb-card wb-box">
         <span class="wb-box-head">
-          <strong>{item.name}</strong>
+          <a
+            href={boxPath(item.id)}
+            class="wb-box-title"
+            onClick={(event) => {
+              event.preventDefault();
+              open(null);
+            }}
+          >
+            <strong>{item.name}</strong>
+          </a>
           <StatusBadge status={item.status} />
         </span>
         <span class="wb-box-meta muted small">
@@ -51,7 +66,12 @@ export default function MyBoxesPage() {
             </span>
           </Show>
         </span>
-      </button>
+        <span class="wb-box-actions">
+          <button class="primary tiny" onClick={() => open(null)}>Open</button>
+          <button class="secondary tiny" onClick={() => open('shell')}>Shell</button>
+          <button class="secondary tiny" onClick={() => open('desktop')}>Desktop</button>
+        </span>
+      </article>
     );
   }
 

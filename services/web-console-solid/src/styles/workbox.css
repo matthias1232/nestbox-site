@@ -123,3 +123,136 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Control strip -------------------------------------------------------- */
+
+.wb-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-start;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.wb-strip-note {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.wb-strip-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wb-strip-group.on {
+  outline: 1px solid var(--bad);
+  outline-offset: 4px;
+}
+
+.wb-strip-label {
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.wb-strip-for {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-strip-state {
+  font-size: 12px;
+}
+
+/* Live log ------------------------------------------------------------- */
+
+.wb-log-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.wb-log-lane {
+  border-left: 2px solid var(--bad);
+  margin: var(--space-2) 0;
+  padding-left: var(--space-2);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.wb-log-body {
+  height: 300px;
+  overflow-y: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.wb-log-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-log-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+  min-height: 24px;
+  font-size: 12px;
+}
+
+.wb-log-line.refused {
+  border-left: 2px solid var(--bad);
+}
+
+.wb-log-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Console split button and box cards ------------------------------------ */
+
+.wb-split {
+  position: relative;
+  display: inline-flex;
+}
+
+.wb-split-more {
+  margin-left: 1px;
+  padding-inline: var(--space-2);
+}
+
+.wb-split-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.wb-box-title {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.wb-box-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: auto;
+}

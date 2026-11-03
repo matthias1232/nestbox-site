@@ -53,3 +53,10 @@ terminal imports for its presence events so a page keeps one event stream.
 | `RequestStreamCard.jsx` | Which models this sandbox uses right now |
 | `WorkboxNotice.jsx` | What the end user is told about who may read the chats |
 | `LiveEventsPanel.jsx` | Proxy, OpenShell and MCP events of this sandbox |
+| `ControlStrip.jsx` | The one-click strip: allow everything, proxy mode, recording, Internet / DNS / MCP switches; every click is one `quick.set` call |
+| `controlStrip.js`, `controlStrip.test.js` | Pure logic of the strip, the live log lines and the rules card: `stripState`, `nextAllowAllAction`, `logLine`, `laneAlerts`, `summarizeTraffic`, `notYetGranted` |
+| `LiveLogCard.jsx` | 300 px live log of this sandbox with a red lane (`AlertPopup inline`), filter chips, Pause and pop-out |
+| `RulesFromLogCard.jsx` | "N destinations were seen, M would have been refused" and the bulk-draft button |
+| `NetworkCard.jsx` | now only the open evaluation windows and the recreate hint; the mode switch moved to the strip |
+| `ModelsCard.jsx` | "Add model" offers the models the user holds and this sandbox lacks, with "Another endpoint" as the old free form |
+| `MyBoxesPage.jsx` | box cards with status, node, allow-all badge and Open / Shell / Desktop |
