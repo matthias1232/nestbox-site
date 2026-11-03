@@ -179,7 +179,10 @@ pub async fn ingest(ctx: &ServiceContext, event: TelemetryEvent) -> Result<Uuid,
 
     let detail = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
 
-    // A sandbox whose recording is off stores nothing; the live stream still runs.
+    // A sandbox whose recording is off stores no content. A refusal is not
+    // content: a denied connection is the fact an operator has to answer, so it
+    // is kept without its bodies (ADR 0066, addendum). The live stream still
+    // runs either way.
     let muted = match sandbox_id {
         Some(sandbox_id) => mute_states(ctx, environment_id, &[sandbox_id])
             .await
@@ -187,8 +190,9 @@ pub async fn ingest(ctx: &ServiceContext, event: TelemetryEvent) -> Result<Uuid,
             .is_some_and(|state| state.all),
         None => false,
     };
+    let store_event = !muted || refusal_kept(kind, &detail);
 
-    let id = if muted {
+    let id = if !store_event {
         Uuid::new_v4()
     } else {
         let stored = store::insert(
@@ -214,6 +218,7 @@ pub async fn ingest(ctx: &ServiceContext, event: TelemetryEvent) -> Result<Uuid,
     };
 
     if !muted {
+        // An inference row is content: a mute still drops it.
         if let TelemetryEvent::Inference(inference) = &event {
             if let Err(error) = store::insert_inference(&ctx.pool, inference).await {
                 tracing::warn!(error = %error, "inference row insert failed");
@@ -282,7 +287,9 @@ pub async fn ingest_batch(
 
     // Recording mutes (B11), read once per batch. A muted sandbox's events are
     // not stored (`all`) or stored without bodies, chats and tool calls (`bodies`);
-    // the live publish below is not affected.
+    // the live publish below is not affected. `all` has one exception: a refused
+    // network or DNS event is still stored as metadata, so alerts and the audit
+    // trail survive a mute (ADR 0066, addendum).
     let sandbox_ids: Vec<Uuid> = prepared.iter().filter_map(|item| item.sandbox_id).collect();
     let mutes = mute_states(ctx, batch.environment_id, &sandbox_ids).await;
     let state_of = |item: &PreparedEvent| -> MuteState {
@@ -293,16 +300,28 @@ pub async fn ingest_batch(
 
     let events: Vec<store::BatchEvent<'_>> = prepared
         .iter()
-        .filter(|item| !state_of(item).all)
-        .map(|item| store::BatchEvent {
-            id: item.id,
-            environment_id: batch.environment_id,
-            sandbox_id: item.sandbox_id,
-            gateway_id: None,
-            kind: item.kind,
-            source: Some("egress-proxy"),
-            ts: item.ts,
-            detail: item.detail.clone(),
+        .filter(|item| {
+            let state = state_of(item);
+            !state.all || refusal_kept(item.kind, &item.detail)
+        })
+        .map(|item| {
+            let muted = state_of(item).all;
+            store::BatchEvent {
+                id: item.id,
+                environment_id: batch.environment_id,
+                sandbox_id: item.sandbox_id,
+                gateway_id: None,
+                kind: item.kind,
+                source: Some("egress-proxy"),
+                ts: item.ts,
+                // A refusal kept through a mute is metadata: it is stored
+                // without the body that the mute drops, and does not claim one.
+                detail: if muted {
+                    without_bodies(&item.detail)
+                } else {
+                    item.detail.clone()
+                },
+            }
         })
         .collect();
 
@@ -314,6 +333,8 @@ pub async fn ingest_batch(
         let state = state_of(item);
         match &item.body {
             None => scrubbed.push(None),
+            // A mute drops the bytes even for a refusal it otherwise keeps: the
+            // flow is governance, its body is content.
             Some(_) if state.all || state.bodies => scrubbed.push(None),
             Some(body) => {
                 let texts: Vec<String> = [body.request.as_ref(), body.response.as_ref()]
@@ -371,6 +392,8 @@ pub async fn ingest_batch(
     let calls: Vec<store::NewToolCall> = prepared
         .iter()
         .filter(|item| {
+            // A tool call is content too: its arguments and result are dropped
+            // with the bodies, including for a refusal the event row keeps.
             let state = state_of(item);
             !state.all && !state.bodies
         })
@@ -626,6 +649,35 @@ async fn mute_states(
         tracing::warn!(?error, "cannot close the recording mute read");
     }
     out
+}
+
+/// Whether an event survives a full recording mute ("recording off").
+///
+/// The mute is a request to keep no content, not a request to hide a decision. A
+/// refused connection is the one fact an operator has to answer — it feeds the
+/// alerts, the tree badge and the audit trail — so it is kept, as metadata only
+/// (ADR 0066, addendum). The rule is deliberately narrow: a network or DNS event
+/// whose stored decision is `deny`. An `allow` or `audit` flow is traffic, not a
+/// refusal, and stays dropped.
+fn refusal_kept(kind: EventKind, detail: &serde_json::Value) -> bool {
+    matches!(kind, EventKind::Network | EventKind::Dns)
+        && detail.get("decision").and_then(serde_json::Value::as_str)
+            == Some(Decision::Deny.as_str())
+}
+
+/// The stored detail of an event kept through a mute: metadata only.
+///
+/// Its body rows are dropped, so the row must not claim one. Every other field
+/// stays, because the destination, the rule, the reason and the moment are what
+/// make the refusal answerable.
+fn without_bodies(detail: &serde_json::Value) -> serde_json::Value {
+    let mut detail = detail.clone();
+    if let serde_json::Value::Object(map) = &mut detail {
+        if map.contains_key("has_body") {
+            map.insert("has_body".into(), serde_json::json!(false));
+        }
+    }
+    detail
 }
 
 /// One event, built and ready to store.
@@ -1346,6 +1398,60 @@ mod tests {
         assert_eq!(prepared.detail["status"], 200);
         assert_eq!(prepared.detail["bytes_out"], 34);
         assert_eq!(prepared.detail["has_body"], false);
+    }
+
+    #[test]
+    fn a_full_mute_keeps_a_refused_flow_and_only_that() {
+        let mut entry = traffic_entry();
+        entry.decision = Some("deny".into());
+        let refused = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert!(refusal_kept(refused.kind, &refused.detail));
+
+        entry.decision = Some("allow".into());
+        let allowed = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert!(!refusal_kept(allowed.kind, &allowed.detail));
+
+        entry.decision = Some("audit".into());
+        let audited = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert!(!refusal_kept(audited.kind, &audited.detail));
+
+        let dns = prepare_dns(
+            &ProxyDnsEntry {
+                ts: None,
+                sandbox_id: None,
+                hostname: "blocked.example.net".into(),
+                qtype: Some("A".into()),
+                answer: None,
+                ttl: None,
+                decision: Some("deny".into()),
+                resolver: None,
+                request_id: Some("dns-1".into()),
+            },
+            Uuid::nil(),
+            Utc::now(),
+        )
+        .expect("built");
+        assert!(refusal_kept(dns.kind, &dns.detail));
+
+        // Only a flow or a name is governance; an inference row is content.
+        assert!(!refusal_kept(
+            EventKind::Inference,
+            &serde_json::json!({ "decision": "deny" })
+        ));
+    }
+
+    #[test]
+    fn a_refusal_kept_through_a_mute_does_not_claim_a_body() {
+        let mut entry = traffic_entry();
+        entry.decision = Some("deny".into());
+        entry.request_body =
+            Some(base64::engine::general_purpose::STANDARD.encode(b"secret"));
+        let refused = prepare_traffic(&entry, Uuid::nil(), Utc::now()).expect("built");
+        assert_eq!(refused.detail["has_body"], true);
+        assert_eq!(without_bodies(&refused.detail)["has_body"], false);
+        // The destination and the rule stay: that is what makes it answerable.
+        assert_eq!(without_bodies(&refused.detail)["destination"], "mcp.example.com");
+        assert_eq!(without_bodies(&refused.detail)["decision"], "deny");
     }
 
     #[test]

@@ -42,7 +42,7 @@ Two different jobs:
 | `permissions.rs` | Roles per scope: a viewer added to the data center is listed as direct, the last admin cannot be removed (B12) |
 | `bulk.rs` | A bulk stop runs as one job with one result per target (B03; needs PostgreSQL) |
 | `agent_auth.rs` | Agent sign-in modes against a database: the default from the old `login` choice, a switch stored as waiting, a restart that keeps the mode, and the sign-in rules appearing and disappearing with the mode |
-| `quick.rs` | Recording off stores no telemetry event and recording full stores it again (B11) |
+| `quick.rs` | Recording off stores no telemetry event but still stores a refused network or DNS event without its body rows, and recording full stores it again (B11; ADR 0066 addendum) |
 | `model_grants.rs` | Model grants against a database: an environment grant reaching a sandbox, a member refused the environment scope, the narrower sandbox grant winning, and the accounting router payload |
 | `moves_preflight.rs` | The move preflight against a database: the sandbox's own node, an unknown node, and what the answer says it carries |
 | `mounts.rs` | B09: mount, change, remove and wrong-node refusal (needs TEST_DATABASE_URL; db `nestbox_cc_b09`) |
