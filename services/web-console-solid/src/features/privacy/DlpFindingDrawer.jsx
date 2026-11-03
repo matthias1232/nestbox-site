@@ -12,13 +12,13 @@ const DURATIONS = [
   { label: '15 min', minutes: 15 },
   { label: '1 h', minutes: 60 },
   { label: '24 h', minutes: 1440 },
-  { label: '7 Tage', minutes: 10080 },
-  { label: 'Immer', minutes: null },
+  { label: '7 days', minutes: 10080 },
+  { label: 'Always', minutes: null },
 ];
 const ACTIONS = [
-  { value: 'allow', label: 'erlauben' },
-  { value: 'replace', label: 'ersetzen statt blockieren' },
-  { value: 'pseudonymize', label: 'pseudonymisieren' },
+  { value: 'allow', label: 'allow' },
+  { value: 'replace', label: 'replace instead of block' },
+  { value: 'pseudonymize', label: 'pseudonymize' },
 ];
 
 function field(label, value) {
@@ -54,10 +54,10 @@ export default function DlpFindingDrawer(props) {
         minutes: minutes(),
         reason: reason(),
       });
-      setMessage('Ausnahme angelegt. Sie gilt ab der nächsten Anfrage.');
+      setMessage('Exception created. It applies from the next request.');
       props.onChanged?.();
     } catch (failure) {
-      setError(failure.message || 'Die Ausnahme konnte nicht angelegt werden.');
+      setError(failure.message || 'The exception could not be created.');
     } finally {
       setBusy(false);
     }
@@ -71,7 +71,7 @@ export default function DlpFindingDrawer(props) {
       {
         kind: 'dlp',
         label: `DLP: ${incident()?.action || ''}`,
-        detail: incident()?.requested_action ? `gewünscht: ${incident().requested_action}` : '',
+        detail: incident()?.requested_action ? `asked for: ${incident().requested_action}` : '',
         state: incident()?.action === 'blocked' ? 'blocked' : 'passed',
       },
       {
@@ -97,36 +97,36 @@ export default function DlpFindingDrawer(props) {
           <Show when={(incident()?.occurrences || 1) > 1}>
             <span class="muted small">×{incident().occurrences}</span>
           </Show>
-          <button class="tiny secondary" onClick={props.onClose}>Schließen</button>
+          <button class="tiny secondary" onClick={props.onClose}>Close</button>
         </div>
 
         <div class="small">
           {field('Sandbox', wrapper().sandbox_name)}
-          {field('Nutzer', wrapper().owner_name)}
+          {field('User', wrapper().owner_name)}
           {field('Agent', wrapper().agent)}
-          {field('Konto', wrapper().account_kind)}
-          {field('Richtung', incident()?.direction)}
-          {field('Quelle', incident()?.source)}
-          {field('Anfrage', `${incident()?.method || ''} ${incident()?.path || ''}`)}
-          {field('Anbieter', wrapper().provider)}
-          {field('Modell', wrapper().served_model || incident()?.model)}
-          {field('Ziel', incident()?.destination)}
-          {field('IP', wrapper().upstream_ip || (wrapper().upstream_ip_would ? `hätte: ${wrapper().upstream_ip_would}` : ''))}
-          {field('maskierter Wert', incident()?.masked_value)}
-          {field('Ersatz', incident()?.replacement)}
-          {field('Fingerabdruck', (incident()?.value_fingerprint || '').slice(0, 16))}
-          {field('Ausnahme', incident()?.exception_id)}
+          {field('Account', wrapper().account_kind)}
+          {field('Direction', incident()?.direction)}
+          {field('Source', incident()?.source)}
+          {field('Request', `${incident()?.method || ''} ${incident()?.path || ''}`)}
+          {field('Provider', wrapper().provider)}
+          {field('Model', wrapper().served_model || incident()?.model)}
+          {field('Destination', incident()?.destination)}
+          {field('IP', wrapper().upstream_ip || (wrapper().upstream_ip_would ? `would: ${wrapper().upstream_ip_would}` : ''))}
+          {field('masked value', incident()?.masked_value)}
+          {field('Substitute', incident()?.replacement)}
+          {field('Fingerprint', (incident()?.value_fingerprint || '').slice(0, 16))}
+          {field('Exception', incident()?.exception_id)}
         </div>
 
         <RouteChain route={route()} />
 
         <Show when={incident()?.value_fingerprint}>
           <div class="card">
-            <b>Diese Anfrage erlauben</b>
+            <b>Allow this request</b>
             <div class="controls">
               <select value={scope()} onChange={(e) => setScope(e.currentTarget.value)}>
-                <option value="value">nur diesen Wert</option>
-                <option value="detector">jeden Wert dieses Detektors</option>
+                <option value="value">this value only</option>
+                <option value="detector">any value from this detector</option>
               </select>
               <select value={action()} onChange={(e) => setAction(e.currentTarget.value)}>
                 <For each={ACTIONS}>{(entry) => <option value={entry.value}>{entry.label}</option>}</For>
@@ -135,10 +135,10 @@ export default function DlpFindingDrawer(props) {
                 <For each={DURATIONS}>{(entry) => <option value={String(entry.minutes)}>{entry.label}</option>}</For>
               </select>
               <label class="small">
-                <input type="checkbox" checked={sandboxOnly()} onChange={(e) => setSandboxOnly(e.currentTarget.checked)} /> nur diese Sandbox
+                <input type="checkbox" checked={sandboxOnly()} onChange={(e) => setSandboxOnly(e.currentTarget.checked)} /> this sandbox only
               </label>
-              <input class="input" placeholder="Grund (optional)" value={reason()} onInput={(e) => setReason(e.currentTarget.value)} />
-              <button class="primary tiny" disabled={busy()} onClick={allow}>Ausnahme anlegen</button>
+              <input class="input" placeholder="Reason (optional)" value={reason()} onInput={(e) => setReason(e.currentTarget.value)} />
+              <button class="primary tiny" disabled={busy()} onClick={allow}>Create exception</button>
             </div>
             <Show when={message()}><p class="notice small">{message()}</p></Show>
             <Show when={error()}><p class="error small">{error()}</p></Show>

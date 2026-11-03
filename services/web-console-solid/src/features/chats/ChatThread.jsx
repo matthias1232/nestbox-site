@@ -75,13 +75,13 @@ export default function ChatThread(props) {
         <ChatThreadHead turns={ordered()} />
       </Show>
       <div class="chat-scroll" ref={box} onScroll={onScroll}>
-        <For each={ordered()} fallback={<p class="muted small">Noch keine Anfrage.</p>}>
+        <For each={ordered()} fallback={<p class="muted small">No questions yet.</p>}>
           {(turn) => <ChatTurn turn={turn} />}
         </For>
       </div>
       <Show when={missed() > 0}>
         <button type="button" class="chat-jump" onClick={toBottom}>
-          Neue Nachrichten ↓
+          New messages ↓
         </button>
       </Show>
     </div>

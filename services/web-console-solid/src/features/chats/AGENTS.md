@@ -16,7 +16,7 @@ order without a browser.
 | File | Responsibility |
 |---|---|
 | `ChatBrowser.jsx` | The grouped list (session, model, day, sandbox, owner) beside the thread; filters, search, order, paging, `compact` layout for the workbox; imports `src/styles/chats.css` |
-| `ChatThread.jsx` | The messenger view: order, autoscroll, "Neue Nachrichten ↓"; **contract**: props `turns` and optional `title`, a running turn carries `pending: true` |
+| `ChatThread.jsx` | The messenger view: order, autoscroll, "New messages ↓"; **contract**: props `turns` and optional `title`, a running turn carries `pending: true` |
 | `ChatThreadHead.jsx` | Whose conversation this is (sandbox, user, agent, account, models, range) and the two ways out: copy the thread as Markdown, export `.md`/`.json` |
 | `ChatTurn.jsx` | One turn: user and model bubbles, tool calls as a collapsible card, tokens, the blocked banner with its route, per-bubble copy, the finding drawer |
 | `useChats.js` | State: groups, selection, filters, 400 ms debounced search, older page via `before`, the stream and its teardown on unmount. No JSX |
@@ -44,6 +44,10 @@ order without a browser.
 7. `ChatThread`'s contract is fixed: `turns`, optional `title`, `pending` on a
    running turn. F-4 renders the same component; a change here is a change
    there.
+8. Every label, tooltip and export line is English, because the console ships
+   English (P08). The Markdown export says "**User**" and "**Model**", and a
+   blocked turn reads "not delivered to <provider>/<model>". `src/noGerman.test.js`
+   fails if German characters or a short word list come back.
 
 ## Not this folder's job
 

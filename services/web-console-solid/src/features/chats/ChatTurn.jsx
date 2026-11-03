@@ -95,10 +95,10 @@ export default function ChatTurn(props) {
             <button
               type="button"
               class="ghost tiny chat-copy"
-              title="Frage kopieren (maskiert)"
+              title="Copy question (masked)"
               onClick={() => copy('user', turn().user_text)}
             >
-              {copied() === 'user' ? 'kopiert' : 'Kopieren'}
+              {copied() === 'user' ? 'copied' : 'Copy'}
             </button>
           </div>
         </div>
@@ -109,17 +109,17 @@ export default function ChatTurn(props) {
         classList={{ blocked: blocked(), pending: pending() }}
         onClick={blocked() ? openFirstFinding : undefined}
         role={blocked() ? 'button' : undefined}
-        title={blocked() ? 'Blockiert: das erste Vorkommnis ansehen' : undefined}
+        title={blocked() ? 'Blocked: show the first finding' : undefined}
       >
         <Show when={blocked()}>
           <p class="chat-blocked-banner">
-            Blockiert – nicht an {providerLabel(turn())}/{modelLabel(turn())} zugestellt
+            Blocked: not delivered to {providerLabel(turn())}/{modelLabel(turn())}
           </p>
         </Show>
 
         <Show when={answer()} fallback={
           <Show when={pending()}>
-            <span class="chat-typing" aria-label="Antwort entsteht">
+            <span class="chat-typing" aria-label="Answer forming">
               <i /><i /><i />
             </span>
           </Show>
@@ -143,7 +143,7 @@ export default function ChatTurn(props) {
               onClick={() => setToolsOpen((open) => !open)}
             >
               {toolsOpen() ? '▾' : '▸'} {tools().length}{' '}
-              {tools().length === 1 ? 'Tool-Aufruf' : 'Tool-Aufrufe'}
+              {tools().length === 1 ? 'tool call' : 'tool calls'}
             </button>
             <Show when={toolsOpen()}>
               <pre class="chat-tool-block">
@@ -169,13 +169,13 @@ export default function ChatTurn(props) {
           <button
             type="button"
             class="ghost tiny chat-copy"
-            title="Antwort kopieren (maskiert)"
+            title="Copy answer (masked)"
             onClick={(event) => {
               event.stopPropagation();
               copy('model', answer());
             }}
           >
-            {copied() === 'model' ? 'kopiert' : 'Kopieren'}
+            {copied() === 'model' ? 'copied' : 'Copy'}
           </button>
         </div>
       </div>

@@ -20,8 +20,8 @@ export default function DlpExceptionsTable(props) {
     items().map((item) => ({
       id: item.id,
       detector: item.detector,
-      scope: item.value_fingerprint ? 'ein Wert' : 'ganzer Detektor',
-      where: item.sandbox_id ? 'diese Sandbox' : 'Umgebung',
+      scope: item.value_fingerprint ? 'one value' : 'whole detector',
+      where: item.sandbox_id ? 'this sandbox' : 'environment',
       action: item.action,
       expires: item.expires_at,
       reason: item.reason,
@@ -33,7 +33,7 @@ export default function DlpExceptionsTable(props) {
       await privacy.deleteException(id);
       poll.refresh();
     } catch (failure) {
-      setError(failure.message || 'Die Ausnahme konnte nicht gelöscht werden.');
+      setError(failure.message || 'The exception could not be deleted.');
     }
   }
 
@@ -43,29 +43,29 @@ export default function DlpExceptionsTable(props) {
       <DataTable
         rows={rows()}
         columns={[
-          { key: 'detector', label: 'Detektor', sortable: true, filter: 'select' },
-          { key: 'scope', label: 'Bereich', sortable: true, filter: 'select' },
-          { key: 'where', label: 'Gilt für', sortable: true, groupable: true, filter: 'select' },
-          { key: 'action', label: 'Aktion', sortable: true, filter: 'select' },
+          { key: 'detector', label: 'Detector', sortable: true, filter: 'select' },
+          { key: 'scope', label: 'Scope', sortable: true, filter: 'select' },
+          { key: 'where', label: 'Applies to', sortable: true, groupable: true, filter: 'select' },
+          { key: 'action', label: 'Action', sortable: true, filter: 'select' },
           {
             key: 'expires',
-            label: 'Ablauf',
+            label: 'Expiry',
             sortable: true,
             render: (r) => (r.expires
               ? <Countdown until={r.expires} onExpire={poll.refresh} />
-              : <span class="muted">nie</span>),
+              : <span class="muted">never</span>),
           },
-          { key: 'reason', label: 'Grund', sortable: false },
+          { key: 'reason', label: 'Reason', sortable: false },
           {
             key: 'remove',
             label: '',
             sortable: false,
-            render: (r) => <button class="tiny secondary" onClick={() => remove(r.id)}>Löschen</button>,
+            render: (r) => <button class="tiny secondary" onClick={() => remove(r.id)}>Delete</button>,
           },
         ]}
         rowKey={(r) => r.id}
         defaultSort={{ key: 'expires', dir: 'asc' }}
-        emptyText="Keine Ausnahme. Jede Anfrage wird nach der Richtlinie geprüft."
+        emptyText="No exception. Every request is checked against the policy."
       />
     </div>
   );

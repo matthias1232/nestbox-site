@@ -22,30 +22,30 @@ export default function DlpText(props) {
         {(part) => (
           <Show when={part.kind !== 'text'} fallback={<>{part.text}</>}>
             <Show when={part.kind === 'replaced' || part.kind === 'redacted'}>
-              <del class="dlp-del" title={`${part.incident.detector}: ersetzt`}>
+              <del class="dlp-del" title={`${part.incident.detector}: replaced`}>
                 {part.incident.masked_value || part.text}
               </del>
               {' → '}
               <ins class="dlp-ins dlp-finding" title={part.text} onClick={report(part.incident)}>
-                Platzhalter
+                Placeholder
               </ins>
             </Show>
             <Show when={part.kind === 'pseudonymized'}>
               <span
                 class="dlp-pseudo dlp-finding"
-                title="Modell sah einen Platzhalter; der Agent bekommt den Originalwert zurück."
+                title="The model saw a placeholder; the agent gets the original value back."
                 onClick={report(part.incident)}
               >
                 {part.text}
               </span>
             </Show>
             <Show when={part.kind === 'blocked'}>
-              <span class="dlp-del dlp-finding" title="Blockiert" onClick={report(part.incident)}>
+              <span class="dlp-del dlp-finding" title="Blocked" onClick={report(part.incident)}>
                 {part.text}
               </span>
             </Show>
             <Show when={part.kind === 'unknown'}>
-              <span class="muted" title="Platzhalter ohne aufgezeichnetes Vorkommnis">
+              <span class="muted" title="Placeholder without a recorded finding">
                 {part.text}
               </span>
             </Show>
@@ -56,7 +56,7 @@ export default function DlpText(props) {
         <span class="dlp-recorded-chips">
           <For each={split().recorded}>
             {(incident) => (
-              <span class="dlp-recorded-chip" title="Nur protokolliert, nicht verändert">
+              <span class="dlp-recorded-chip" title="Recorded only, not changed">
                 <DlpBadge state="allowed" />
                 <span>{incident.detector}</span>
                 <Show when={incident.masked_value}>

@@ -231,7 +231,7 @@ export default function DataTable(props) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${props.storageKey || 'tabelle'}.csv`;
+    link.download = `${props.storageKey || 'table'}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -253,24 +253,24 @@ export default function DataTable(props) {
         <input
           class="input"
           type="search"
-          placeholder="Suchen…"
-          aria-label="Tabelle durchsuchen"
+          placeholder="Search…"
+          aria-label="Search the table"
           value={search()}
           onInput={(event) => changeSearch(event.currentTarget.value)}
         />
         <label class="data-table-group">
-          <span class="muted small">Gruppieren nach</span>
+          <span class="muted small">Group by</span>
           <select
             value={groupKey() || ''}
             onChange={(event) => changeGroup(event.currentTarget.value)}
           >
-            <option value="">keine</option>
+            <option value="">none</option>
             <For each={columns().filter((column) => column.groupable)}>
               {(column) => <option value={column.key}>{column.label}</option>}
             </For>
           </select>
         </label>
-        <button class="secondary tiny" onClick={download} title="Alle gefilterten Zeilen als CSV">
+        <button class="secondary tiny" onClick={download} title="All filtered rows as CSV">
           CSV
         </button>
         {props.toolbar}
@@ -278,7 +278,7 @@ export default function DataTable(props) {
 
       <Show when={pending() > 0}>
         <button class="new-rows" onClick={releaseHeld}>
-          {pending()} neue anzeigen
+          {pending()} new
         </button>
       </Show>
 
@@ -318,7 +318,7 @@ export default function DataTable(props) {
                       <Show when={column.filter === 'text'}>
                         <input
                           class="input tiny"
-                          aria-label={`${column.label} filtern`}
+                          aria-label={`${column.label} filter`}
                           value={
                             typeof filters()[column.key] === 'string' ? filters()[column.key] : ''
                           }
@@ -329,8 +329,8 @@ export default function DataTable(props) {
                         <details class="filter-select">
                           <summary class="small">
                             {Array.isArray(filters()[column.key]) && filters()[column.key].length
-                              ? `${filters()[column.key].length} gewählt`
-                              : 'alle'}
+                              ? `${filters()[column.key].length} selected`
+                              : 'all'}
                           </summary>
                           <div class="filter-menu">
                             <For each={options(column)}>
@@ -357,7 +357,7 @@ export default function DataTable(props) {
                                 class="secondary tiny"
                                 onClick={() => setFilter(column.key, [])}
                               >
-                                zurücksetzen
+                                reset
                               </button>
                             </Show>
                           </div>
@@ -375,7 +375,7 @@ export default function DataTable(props) {
               fallback={
                 <tr>
                   <td class="muted small" colSpan={columns().length || 1}>
-                    {props.emptyText || 'Keine Zeilen.'}
+                    {props.emptyText || 'No rows.'}
                   </td>
                 </tr>
               }
@@ -427,10 +427,10 @@ export default function DataTable(props) {
       <Show when={displayRows().length > shown()}>
         <div class="table-more">
           <button class="secondary tiny" onClick={() => setShown((count) => count + PAGE)}>
-            Weitere {PAGE} anzeigen
+            Show {PAGE} more
           </button>
           <span class="muted small">
-            {shown()} von {displayRows().length}
+            {shown()} of {displayRows().length}
           </span>
         </div>
       </Show>

@@ -39,6 +39,10 @@ API enforces the same rule.
    yet" look identical, which is how a broken screen looks healthy.
 5. The CSRF token lives in memory only. `localStorage` is not used for
    credentials, because anything in storage is readable by an injected script.
+6. Every string a reader sees is English. There is no i18n framework, because
+   the console ships one language; `noGerman.test.js` scans `src/**/*.{js,jsx}`
+   for German characters and a short German word list and fails on them
+   (comments and test files are out of scope).
 
 ## Adding a screen
 

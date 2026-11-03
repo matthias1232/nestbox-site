@@ -3,7 +3,7 @@
 import { For, Show } from 'solid-js';
 import '../styles/dlp.css';
 
-const STATE_PREFIX = { would: 'hätte: ' };
+const STATE_PREFIX = { would: 'would: ' };
 
 /**
  * Draw a route as pills joined by arrows.
@@ -33,7 +33,7 @@ export default function RouteChain(props) {
                 {STATE_PREFIX[hop.state] || ''}
                 {hop.label}
                 <Show when={hop.state === 'blocked'}>
-                  <span class="route-x" aria-label="blockiert">
+                  <span class="route-x" aria-label="blocked">
                     {' '}
                     ✕
                   </span>

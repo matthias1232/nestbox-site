@@ -33,6 +33,10 @@ shows the incidents it recorded.
    "Save", because the environment default changes what every sandbox inherits.
 7. The purge asks once and says what it deletes: incident rows older than the
    day count, for the selected sandbox.
+8. Every label, option and tooltip is English (P08). "Would have" is written
+   `would: `, a policy's different wish is `asked for: `, and an empty result
+   says so without claiming that nothing exists. `src/noGerman.test.js` guards
+   the rule for the whole console.
 
 ## Wiring
 
