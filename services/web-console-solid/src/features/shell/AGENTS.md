@@ -16,7 +16,7 @@ mounts the overlays once. `App.jsx` wraps every page except the pop-outs in `<Sh
 | `treeFilter.test.js` | Tests for the helpers above |
 | `pages.js` | `PAGES` (menu id to page) and `EXTRAS` (overlays). Owned by Wave 0: packages never edit it |
 | `PaletteHost.jsx` | Command palette host (F04) |
-| `BulkHost.jsx` | Bulk selection bar host (F21) |
+| `BulkHost.jsx` | Binds `ui.selection` to `BulkBar`, asks for the input an action needs, calls `api/bulk.js` or `installBulk`, opens the dock Tasks tab (F21). Style: `styles/bulk.css` |
 
 `data-tour` markers: `tree`, `context`, `search`, `actions`, `dock` (the first-run tour, F18).
 

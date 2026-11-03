@@ -41,6 +41,8 @@ not gateways and sandboxes.
 | `Segmented.jsx` | A radio group of styled buttons, one active |
 | `Countdown.jsx` | A live "time left" label; no end time reads as "unlimited" |
 | `countdown.js` | Time formatting behind `Countdown`, pure and node-tested |
+| `bulkActions.js` | Pure bulk-bar rules: `actionsFor(kind, role)`, `paramsValid`, `paramsFor`, `confirmText`, `needsDialog` (F21) |
+| `bulkActions.test.js` | Tests for `bulkActions.js` |
 | `ConfirmDialog.jsx` | A centred modal whose buttons the caller names |
 | `Banner.jsx` | A one-line notice coloured by tone |
 | `PresenceDots.jsx` | Who is in a sandbox, as up to five initials plus "+N" |

@@ -1,0 +1,24 @@
+/* The bulk bar: fixed above the dock while rows are selected (package F21). */
+.bulk-bar {
+  position: fixed;
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: calc(28px + var(--space-2));
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.bulk-count { color: var(--accent); font-size: 0.8rem; white-space: nowrap; }
+.bulk-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 1; }
+.bulk-field { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-3); color: var(--fg); }
+.bulk-field select, .bulk-field input { background: var(--bg-inset); color: var(--fg); border: 1px solid var(--border); padding: var(--space-2); }
+.bulk-field select:focus-visible, .bulk-field input:focus-visible { outline: 2px solid var(--accent); }
+@media (max-width: 1100px) { .bulk-bar { left: 0; } }
+@media (max-width: 720px) { .bulk-bar { flex-wrap: wrap; bottom: 0; margin: 0; } }
