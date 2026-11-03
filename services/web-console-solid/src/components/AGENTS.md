@@ -66,3 +66,20 @@ contract C15): `icons.jsx` (F02; only `IconHome` yet), `IconButton`, `StatTile`,
 named `SelectTable` because the existing `DataTable.jsx` is used by many pages and keeps its own props),
 `CommandPalette` (F04), `AlertPopup` (F13), `TopologyCanvas` (F16), `ConsoleFrame` (F20), `BulkBar` (F21).
 `markdown.js` is the dependency-free renderer (F18).
+
+Control Center primitives (package F02; styles in `styles/primitives.css`):
+
+| File | Responsibility |
+|---|---|
+| `icons.jsx` | Every inline SVG icon (`IconNode`, ...) plus `Icon({ name })` |
+| `IconButton.jsx` | A 28x28 icon-only button with tooltip and accessible name |
+| `StatTile.jsx` | Eyebrow label, big mono figure, unit and trend; a button when clickable |
+| `Gauge.jsx` / `gauge.js` | 270 degree SVG arc and its arc maths |
+| `Sparkline.jsx` / `sparkline.js` | SVG polyline trend and the points calculation |
+| `KeyHint.jsx` | `<kbd>` rendering of a shortcut such as `mod+k` |
+| `Toast.jsx` | The toast stack, reading `ui.toast.queue()` |
+| `Tree.jsx` / `tree.js` | Keyboard-driven inventory tree with windowing over 400 rows; flatten, filter, cursor helpers |
+| `SelectTable.jsx` / `table.js` | Selectable, sortable table (the older `DataTable.jsx` stays); sort and selection helpers |
+| `Wizard.jsx` | Step list, body and Back / Next / Finish footer |
+| `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
+| `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
