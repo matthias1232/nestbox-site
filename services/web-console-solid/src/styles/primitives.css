@@ -63,7 +63,8 @@
 .tree-twisty { display: inline-flex; width: 14px; justify-content: center; color: var(--fg-muted); }
 .tree-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .tree-empty { padding: var(--space-3); }
-.status-dot { width: 8px; height: 8px; flex: none; background: var(--fg-faint); border-radius: 50%; }
+/* Status dots are the only round thing in the console (V03); everything else stays square. */
+.status-dot { width: 7px; height: 7px; flex: none; background: var(--fg-faint); border-radius: 50%; }
 .status-dot[data-status='ok'], .status-dot[data-status='online'], .status-dot[data-status='running'] { background: var(--ok); }
 .status-dot[data-status='warn'], .status-dot[data-status='degraded'], .status-dot[data-status='starting'] { background: var(--warn); }
 .status-dot[data-status='bad'], .status-dot[data-status='offline'], .status-dot[data-status='failed'], .status-dot[data-status='error'] { background: var(--bad); }
