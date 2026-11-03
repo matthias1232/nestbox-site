@@ -139,6 +139,8 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 |---|---|
 | `inventory_tree.rs` | `GET /inventory/tree` (B01). Named apart from `inventory.rs`, which serves a sandbox's installed software |
 | `search.rs` | `GET /search`: parses `kind` list (unknown → 422), calls `search_service` |
+| `inventory_tree.rs` | `GET /inventory/tree?view=` (B01): parses the view (422 otherwise) and answers a `TreeResponse`. Named apart from `inventory.rs`, which serves a sandbox's installed software |
+| `search.rs` | `GET /search` (B02) |
 | `bulk.rs` | `POST /sandboxes/bulk` (B03) |
 | `models.rs` (`install_bulk`) | `POST /models/{key}/install-bulk` (B04) |
 | `model_clusters.rs` | `/model-clusters`, members, and the proxy's `GET /internal/accounting/clusters/{id}` (B05) |

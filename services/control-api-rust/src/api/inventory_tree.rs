@@ -7,7 +7,7 @@ use axum::extract::{Query, State};
 use serde::Deserialize;
 
 use crate::api::principal::Auth;
-use crate::domain::inventory::{TreeNode, TreeView};
+use crate::domain::inventory::{TreeResponse, TreeView};
 use crate::error::ApiError;
 use crate::services::inventory_tree_service;
 use crate::state::AppState;
@@ -25,7 +25,7 @@ pub async fn tree(
     State(state): State<AppState>,
     auth: Auth,
     Query(query): Query<TreeQuery>,
-) -> Result<Json<TreeNode>, ApiError> {
+) -> Result<Json<TreeResponse>, ApiError> {
     let view = match query.view.as_deref() {
         None | Some("") => TreeView::Infrastructure,
         Some(value) => TreeView::parse(value)
