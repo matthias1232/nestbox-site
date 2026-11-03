@@ -46,7 +46,10 @@ export default function HomePage() {
   });
 
   const member = () => session.identity()?.role === 'member';
-  const root = () => inventory.root();
+  // The home page is about the data center the user is in, not the whole organisation: the
+  // topbar picker scopes every other page, so the numbers, the map and the empty state follow
+  // it too (U06-04).
+  const root = () => inventory.center();
   const stats = createMemo(() => totals(root()));
   const graph = createMemo(() => graphFromTree(root()));
   const problems = createMemo(() => health(root(), ready()));

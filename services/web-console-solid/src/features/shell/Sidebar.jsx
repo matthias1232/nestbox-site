@@ -1,6 +1,6 @@
 // The sidebar: the inventory tree (three views, filter box) above the collapsible menu groups.
 // Collapsed (56 px) it shows menu icons only; the right edge is a drag handle for the width.
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
 import { emptyDataCenterNotice } from '../../state/environments.js';
 import { useUi } from '../../state/ui.jsx';
@@ -102,22 +102,34 @@ export default function Sidebar(props) {
     filterTimer = setTimeout(() => setAppliedFilter(value), 150);
   }
 
-  const shown = createMemo(() => filterTree(inv.root(), appliedFilter()));
-  // The way into the structure: the organisation and its data centers are open as soon as the
-  // tree is there, not just the organisation (V18). An active filter opens everything anyway,
-  // and a branch the user opened or closed stays exactly as they left it.
+  const shown = createMemo(() => filterTree(inv.center(), appliedFilter()));
+  // The way into the structure: the active data center and its sites are open as soon as the
+  // tree is there, not just the organisation (V18), so the node rows — and the sandboxes under
+  // them — are one click away. An active filter opens everything anyway, and a branch the user
+  // opened or closed stays exactly as they left it.
   createEffect(() => {
-    const tree = inv.root();
+    const tree = inv.center();
     if (!tree || touched() || appliedFilter().trim()) return;
-    setExpanded(defaultExpanded(tree));
+    const open = defaultExpanded(tree);
+    // The scoped tree starts at the active data center (U06-04), so its sites open with it:
+    // the node rows, and the sandboxes under them, are the structure the user came for.
+    if (tree.kind === 'data_center') {
+      (tree.children || []).forEach((child) => { if (child.kind === 'site') open.add(child.id); });
+    }
+    setExpanded(open);
   });
-  // A data center with no nodes looks like an empty console. Say so, and offer the one that
-  // has nodes, instead of switching silently; a remembered choice means the user decided.
-  const emptyCenter = createMemo(() => (
-    session.rememberedEnvironment()
-      ? null
-      : emptyDataCenterNotice(inv.root(), session.activeEnvironment())
-  ));
+  // A switch of the topbar picker is a switch of tree: the branches of the data center the user
+  // came from mean nothing here, so the new one starts at the default (U06-04). `defer` keeps
+  // the opening state above for the first tree; only an actual switch resets it.
+  createEffect(on(() => session.activeEnvironment(), () => {
+    setTouched(false);
+    setExpanded(new Set());
+  }, { defer: true }));
+  // A data center with no nodes looks like an empty console. Say so, and offer the one that has
+  // nodes. The notice reads the whole tree, because the data center with nodes is the one this
+  // subtree does not contain; it is shown while the user is in the empty data center, whether
+  // they picked it themselves or the console opened it (U06-04).
+  const emptyCenter = createMemo(() => emptyDataCenterNotice(inv.root(), session.activeEnvironment()));
   // With a filter every branch is open so the matches are visible; otherwise the user's choice
   // plus the way to the current place and the root.
   const openSet = createMemo(() => {
