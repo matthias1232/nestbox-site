@@ -72,7 +72,7 @@ that push (ADR 0053).
 | `provider_service.rs` | Provider profiles with their probe status, the pending profile an install creates (by container name locally, by overlay address on a joined node), the in-use check on delete, and the reachable-only inference environment a sandbox receives |
 | `agent_service.rs` | Agents inside a sandbox: which packs may join, homes and their persistence, the supervisor command |
 | `policy_service.rs` | Validation, diff, scope rules, global override, and the egress decider (`check`: windows, rules, one evidence row; `authenticate_node`; `deployment`) |
-| `telemetry_service.rs` | Ingest (one event, and the proxy's access-log batch with bodies and MCP calls, including the `would_deny` verdict), live publish, history queries |
+| `telemetry_service.rs` | Ingest (one event, and the proxy's access-log batch with bodies and MCP calls, including the `would_deny` verdict), live publish, history queries; honours `sandboxes.telemetry_mute_until` / `telemetry_mute_bodies_until` (B11) |
 | `traffic_service.rs` | Traffic rows with window counts, per sandbox and for the whole environment (the Live traffic page), the map, one body, MCP calls, effective rules with the deployment comparison, live edges for the cluster graph (`feat/live-traffic`) |
 | `geography_service.rs` | RDAP lookup per destination host, cached; runs after a traffic read and never blocks it |
 | `model_service.rs` | Hardware probing through a node's runner (CPU, RAM, GPU, unified pool), fit against a node's free budget, facets, catalog filters, installs and their reservations (fetched and served on the install's own node, profile corrected to the published address), editing an install (reserved RAM, on/off; off frees the memory) |
@@ -373,6 +373,6 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `alert_service.rs` | `list`, `publish_if_refused` (B08; the latter is a no-op until then) |
 | `mount_service.rs` | `effective set` (B09) |
 | `policy_preview_service.rs` | `preview compiled` (B10) |
-| `quick_control_service.rs` | `set` (B11) |
+| `quick_control_service.rs` | `set`: allow all, egress mode, DNS/internet/MCP windows, recording mute (B11) |
 | `permission_service.rs` | `list set remove` (B12) |
 | `tour_service.rs` | `mark_seen` (F18) |

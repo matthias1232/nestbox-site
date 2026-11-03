@@ -28,7 +28,7 @@ the codebase where SQL appears.
 | File | Aggregate |
 |---|---|
 | `mod.rs` | Re-exports and shared row helpers |
-| `sandboxes.rs` | Sandbox list, read, insert, status change, delete |
+| `sandboxes.rs` | Sandbox list, read, insert, status change, delete; `set_telemetry_mute` and `telemetry_mute` (recording mutes, B11) |
 | `auth.rs` | Users, sessions, API tokens, scopes |
 | `policies.rs` | Policy documents, versions, network rules, drafts, the compiled rule-set hash, traffic windows (open, list, revoke, the environment's `max_window_minutes`) |
 | `egress.rs` | Compilation hash record, decisions, open windows for the decider, node token locator, deployment comparison |

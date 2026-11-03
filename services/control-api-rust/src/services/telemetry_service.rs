@@ -179,31 +179,45 @@ pub async fn ingest(ctx: &ServiceContext, event: TelemetryEvent) -> Result<Uuid,
 
     let detail = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
 
-    let stored = store::insert(
-        &ctx.pool,
-        store::NewEvent {
-            environment_id,
-            sandbox_id,
-            gateway_id: None,
-            kind,
-            source: Some("gateway"),
-            ts,
-            detail,
-        },
-    )
-    .await;
+    // A sandbox whose recording is off stores nothing; the live stream still runs.
+    let muted = match sandbox_id {
+        Some(sandbox_id) => mute_states(ctx, environment_id, &[sandbox_id])
+            .await
+            .get(&sandbox_id)
+            .is_some_and(|state| state.all),
+        None => false,
+    };
 
-    let id = match stored {
-        Ok(id) => id,
-        Err(error) => {
-            tracing::error!(error = %error, "telemetry insert failed; publishing anyway");
-            Uuid::new_v4()
+    let id = if muted {
+        Uuid::new_v4()
+    } else {
+        let stored = store::insert(
+            &ctx.pool,
+            store::NewEvent {
+                environment_id,
+                sandbox_id,
+                gateway_id: None,
+                kind,
+                source: Some("gateway"),
+                ts,
+                detail,
+            },
+        )
+        .await;
+        match stored {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::error!(error = %error, "telemetry insert failed; publishing anyway");
+                Uuid::new_v4()
+            }
         }
     };
 
-    if let TelemetryEvent::Inference(inference) = &event {
-        if let Err(error) = store::insert_inference(&ctx.pool, inference).await {
-            tracing::warn!(error = %error, "inference row insert failed");
+    if !muted {
+        if let TelemetryEvent::Inference(inference) = &event {
+            if let Err(error) = store::insert_inference(&ctx.pool, inference).await {
+                tracing::warn!(error = %error, "inference row insert failed");
+            }
         }
     }
 
@@ -266,8 +280,20 @@ pub async fn ingest_batch(
         ));
     }
 
+    // Recording mutes (B11), read once per batch. A muted sandbox's events are
+    // not stored (`all`) or stored without bodies, chats and tool calls (`bodies`);
+    // the live publish below is not affected.
+    let sandbox_ids: Vec<Uuid> = prepared.iter().filter_map(|item| item.sandbox_id).collect();
+    let mutes = mute_states(ctx, batch.environment_id, &sandbox_ids).await;
+    let state_of = |item: &PreparedEvent| -> MuteState {
+        item.sandbox_id
+            .and_then(|id| mutes.get(&id).copied())
+            .unwrap_or_default()
+    };
+
     let events: Vec<store::BatchEvent<'_>> = prepared
         .iter()
+        .filter(|item| !state_of(item).all)
         .map(|item| store::BatchEvent {
             id: item.id,
             environment_id: batch.environment_id,
@@ -285,8 +311,10 @@ pub async fn ingest_batch(
     // to keep, so the batch is scrubbed first — always, whatever the mode.
     let mut scrubbed: Vec<Option<(String, String)>> = Vec::with_capacity(prepared.len());
     for item in &prepared {
+        let state = state_of(item);
         match &item.body {
             None => scrubbed.push(None),
+            Some(_) if state.all || state.bodies => scrubbed.push(None),
             Some(body) => {
                 let texts: Vec<String> = [body.request.as_ref(), body.response.as_ref()]
                     .into_iter()
@@ -342,6 +370,10 @@ pub async fn ingest_batch(
 
     let calls: Vec<store::NewToolCall> = prepared
         .iter()
+        .filter(|item| {
+            let state = state_of(item);
+            !state.all && !state.bodies
+        })
         .filter_map(|item| item.call.clone())
         .collect();
 
@@ -539,6 +571,59 @@ async fn ensure_known_sandboxes(
         return Err(ApiError::forbidden("telemetry.write"));
     }
     Ok(())
+}
+
+/// What a sandbox's recording mutes say right now.
+#[derive(Debug, Clone, Copy, Default)]
+struct MuteState {
+    /// Nothing is stored (`telemetry_mute_until` is in the future).
+    all: bool,
+    /// Flows are stored, bodies, chats and tool calls are not.
+    bodies: bool,
+}
+
+/// Read the recording mutes of some sandboxes, once, for one call (B11).
+///
+/// A read that fails is logged and treated as "not muted": the same database
+/// error would stop the insert as well, so nothing is stored by mistake.
+async fn mute_states(
+    ctx: &ServiceContext,
+    environment_id: Uuid,
+    sandbox_ids: &[Uuid],
+) -> std::collections::HashMap<Uuid, MuteState> {
+    let mut out = std::collections::HashMap::new();
+    let mut unique: Vec<Uuid> = sandbox_ids.to_vec();
+    unique.sort();
+    unique.dedup();
+    if unique.is_empty() {
+        return out;
+    }
+    let now = Utc::now();
+    let mut scope = match TenantScope::begin(&ctx.pool, environment_id).await {
+        Ok(scope) => scope,
+        Err(error) => {
+            tracing::warn!(?error, "cannot read recording mutes");
+            return out;
+        }
+    };
+    for id in unique {
+        match crate::store::postgres::sandboxes::telemetry_mute(&mut scope, id).await {
+            Ok((all, bodies)) => {
+                out.insert(
+                    id,
+                    MuteState {
+                        all: all.is_some_and(|until| until > now),
+                        bodies: bodies.is_some_and(|until| until > now),
+                    },
+                );
+            }
+            Err(error) => tracing::warn!(?error, "cannot read recording mutes"),
+        }
+    }
+    if let Err(error) = scope.commit().await {
+        tracing::warn!(?error, "cannot close the recording mute read");
+    }
+    out
 }
 
 /// One event, built and ready to store.
