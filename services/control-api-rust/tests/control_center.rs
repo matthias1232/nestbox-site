@@ -710,3 +710,27 @@ async fn permissions_list_direct_and_org_reach() {
     assert_eq!(direct["via"], "direct");
     assert_eq!(direct["role"], "viewer");
 }
+
+#[tokio::test]
+async fn tree_keeps_a_node_without_a_site() {
+    let Some(pool) = pool().await else {
+        eprintln!("skipping: TEST_DATABASE_URL is not set");
+        return;
+    };
+    let ctx = context(&pool, std::env::temp_dir());
+    let environment = default_environment(&pool).await;
+    let suffix = tag();
+    let node_id = node(&pool, environment, &format!("cc-nosite-{suffix}")).await;
+    sqlx::query("UPDATE nodes SET site_id = NULL WHERE id = $1")
+        .bind(node_id)
+        .execute(&pool)
+        .await
+        .expect("detach the node from its site");
+    let tree = inventory_tree_service::tree(&ctx, &admin(environment), TreeView::Infrastructure)
+        .await
+        .expect("the tree");
+    assert!(
+        find(&tree.root, "node", &node_id.to_string()).is_some(),
+        "a node without a site still shows in the tree"
+    );
+}

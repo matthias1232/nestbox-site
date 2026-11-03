@@ -75,9 +75,15 @@ pub async fn placement_rows(scope: &mut TenantScope<'_>) -> Result<Vec<Placement
                        AND tw.mode = 'bypass'
                 )) AS allow_all,
                 COALESCE(b.n, 0)::bigint AS alerts
-           FROM sites si
+           FROM (SELECT id, environment_id, name, kind FROM sites
+                 UNION ALL
+                 -- A node without a site (the local node) sits under a placeholder site with
+                 -- the nil id, so it is not dropped from the tree.
+                 SELECT '00000000-0000-0000-0000-000000000000'::uuid, $1::uuid, 'No site', NULL) si
            LEFT JOIN nodes n
-                  ON n.site_id = si.id AND n.environment_id = si.environment_id
+                  ON n.environment_id = si.environment_id
+                 AND (n.site_id = si.id
+                      OR (n.site_id IS NULL AND si.id = '00000000-0000-0000-0000-000000000000'::uuid))
            LEFT JOIN sandboxes sb
                   ON sb.node_id = n.id AND sb.environment_id = si.environment_id
                  AND sb.status <> 'deleted'
@@ -86,6 +92,7 @@ pub async fn placement_rows(scope: &mut TenantScope<'_>) -> Result<Vec<Placement
            LEFT JOIN users u ON u.id = sb.owner_user_id
            LEFT JOIN blocked b ON b.sandbox_id = sb.id
           WHERE si.environment_id = $1
+            AND (si.id <> '00000000-0000-0000-0000-000000000000'::uuid OR n.id IS NOT NULL)
           ORDER BY si.name, n.name, sb.name",
     )
     .bind(scope.environment_id())
