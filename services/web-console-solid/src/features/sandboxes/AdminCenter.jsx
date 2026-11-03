@@ -17,7 +17,6 @@ import { Show, For, createSignal, createEffect, createMemo, onCleanup, untrack }
 import Tabs from '../../components/Tabs.jsx';
 import TabBoundary from '../../components/TabBoundary.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import PendingPanel from '../../components/PendingPanel.jsx';
 import ConsoleFrame from '../../components/ConsoleFrame.jsx';
 import PresenceDots from '../../components/PresenceDots.jsx';
 import Segmented from '../../components/Segmented.jsx';
@@ -54,6 +53,7 @@ import LogsTab from './LogsTab.jsx';
 import MountEditor from './MountEditor.jsx';
 import PrivacyTab from './PrivacyTab.jsx';
 import AgentsTab from './AgentsTab.jsx';
+import PermissionsTab from '../users/PermissionsTab.jsx';
 
 const SHORT_DIGEST = 19;
 const CONTROL_POLL_MS = 10000;
@@ -115,14 +115,7 @@ const BODIES = {
   sessions: (p) => <SessionsTab {...p.base} />,
   supervisor: (p) => <SupervisorTab {...p.base} />,
   map: (p) => <MapTab {...p.base} />,
-  permissions: () => (
-    <PendingPanel
-      title="Permissions"
-      text="Who may see and act on this sandbox will be edited here."
-      endpoint="GET /permissions?scope_type=sandbox"
-      owner="Package F22"
-    />
-  ),
+  permissions: (p) => <PermissionsTab scopeType="sandbox" scopeId={p.base.sandbox.id} />,
 };
 
 export default function AdminCenter(props) {
