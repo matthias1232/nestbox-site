@@ -56,10 +56,10 @@ export default function NodeSummaryTab(props) {
             <dt>Kind</dt><dd>{String(node().kind || '–').replaceAll('_', ' ')}</dd>
             <dt>Site</dt><dd>{s()?.site?.name || '–'} <Show when={s()?.site?.kind}><span class="badge muted"><i />{s().site.kind}</span></Show></dd>
             <dt>Data center</dt><dd>{s()?.data_center?.name || '–'}</dd>
-            <dt>Runner URL</dt><dd class="mono small">{node().runner_url || node().endpoint || '–'}</dd>
-            <dt>Overlay IP</dt><dd class="mono small">{node().overlay_ip || node().address || '–'}</dd>
-            <dt>GPU</dt><dd>{node().gpu_name || (node().container_gpu ? 'available' : 'none')}</dd>
-            <dt>Joined</dt><dd class="mono small">{node().joined_at || node().created_at || '–'}</dd>
+            <dt>Runner URL</dt><dd class="mono small">{node().runner_url || '–'}</dd>
+            <dt>GPU</dt><dd>{node().container_gpu ? 'available' : 'none'}</dd>
+            <dt>Last seen</dt><dd class="mono small">{ago(node().last_seen)}</dd>
+            <dt>Joined</dt><dd class="mono small">{node().created_at || '–'}</dd>
           </dl>
         </section>
       </div>
