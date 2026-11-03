@@ -347,7 +347,10 @@ async fn tree_shows_a_sandbox_under_its_node() {
     let site = site_of(&pool, environment).await;
     let suffix = tag();
     let node_id = node(&pool, environment, &format!("cc-tree-{suffix}")).await;
-    let sandbox_id = sandbox(&pool, environment, node_id, &format!("cc-tree-box-{suffix}"), None).await;
+    // An owned sandbox: one without an owner is shared and visible to every member by design.
+    let owner_id = user_with_scope(&pool, environment, "member").await;
+    let sandbox_id =
+        sandbox(&pool, environment, node_id, &format!("cc-tree-box-{suffix}"), Some(owner_id)).await;
 
     let tree = inventory_tree_service::tree(&ctx, &admin(environment), TreeView::Infrastructure)
         .await
