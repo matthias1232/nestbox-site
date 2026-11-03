@@ -11,7 +11,7 @@ import Drawer from '../../components/Drawer.jsx';
 import { useSandboxes } from './useSandboxes.js';
 import { useUi } from '../../state/ui.jsx';
 import SandboxDetail from './SandboxDetail.jsx';
-import CreateSandboxForm from './CreateSandboxForm.jsx';
+import CreateSandboxWizard from './CreateSandboxWizard.jsx';
 import ConnectPanel from './ConnectPanel.jsx';
 import LoginBadge from '../../components/LoginBadge.jsx';
 import Countdown from '../../components/Countdown.jsx';
@@ -36,6 +36,10 @@ export default function SandboxListPage(props) {
   // The sandbox whose connection details are open; `null` closes the drawer.
   const [connecting, setConnecting] = createSignal(null);
   const [created, setCreated] = createSignal(null);
+  // `?new=1` opens the wizard straight away (the command palette and the home page link to it).
+  onMount(() => {
+    if (new URLSearchParams(window.location.search).get('new') === '1') setCreating(true);
+  });
 
   // How each running sandbox's agent is signed in. Read apart from the list: it asks each
   // sandbox, so it is slower and refreshed less often, and a failure leaves the list intact.
@@ -96,8 +100,9 @@ export default function SandboxListPage(props) {
     }
   }
 
+  // The wizard shows its own "open workbox / admin view" screen, so the drawer stays open;
+  // the list only refreshes behind it.
   async function createdSandbox(sandbox) {
-    setCreating(false);
     setCreated(
       `Sandbox “${sandbox.name}” created on ${sandbox.node_name || 'the local node'}.`,
     );
@@ -404,11 +409,11 @@ export default function SandboxListPage(props) {
       <Drawer
         open={creating()}
         title="New sandbox"
-        subtitle="Its limits are checked against the node it lands on."
+        subtitle="Four steps: what, where, access, review. Nothing is created before the last one."
         onClose={() => setCreating(false)}
       >
         <Show when={creating()}>
-          <CreateSandboxForm
+          <CreateSandboxWizard
             onCancel={() => setCreating(false)}
             onCreated={createdSandbox}
           />

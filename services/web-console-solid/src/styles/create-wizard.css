@@ -1,0 +1,28 @@
+/* New sandbox wizard (F24). Colours only from tokens.css; square corners; 1 px lines. */
+.create-wizard { display: flex; flex-direction: column; gap: var(--space-3); }
+.create-wizard h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 var(--space-3); }
+.create-wizard .eyebrow { margin: var(--space-4) 0 var(--space-2); }
+.cw-field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); max-width: 420px; }
+.cw-field > span { color: var(--fg-muted); font-size: 0.75rem; }
+.cw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-3); }
+.cw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
+.cw-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); text-align: left;
+  background: var(--bg-raised); color: var(--fg); border: 1px solid var(--border); padding: var(--space-3);
+}
+.cw-card:hover { background: var(--bg-hover); }
+.cw-card.on { border-color: var(--border-strong); background: var(--accent-dim); }
+.cw-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cw-problems { margin: 0 0 var(--space-3); padding-left: var(--space-4); color: var(--warn); font-size: 0.8rem; }
+.cw-bar { display: inline-block; width: 90px; height: 6px; background: var(--bg-inset); border: 1px solid var(--border); }
+.cw-bar i { display: block; height: 100%; background: var(--accent); }
+.cw-checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.cw-check { display: inline-flex; align-items: center; gap: var(--space-2); }
+.cw-roots { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.cw-roots li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.cw-calls { margin: 0 0 var(--space-3); padding-left: var(--space-5); }
+.cw-calls li { padding: 2px 0; }
+.cw-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.cw-cancel { align-self: flex-start; }
+@media (max-width: 720px) { .create-wizard .wizard { grid-template-columns: 1fr; } }
+.drawer:has(.create-wizard) { width: min(1100px, 96vw); }
