@@ -56,6 +56,7 @@ on it.
 | `ResourcesPanel.jsx` | Memory, CPU and process limits, changed on the running sandbox |
 | `SshAccessSection.jsx` | Operator keys and temporary user name/password logins, per sandbox |
 | `stacks.js` | Grouping the flat page into stacks; a member whose lead is on another page stays a row of its own and names its lead. Test: `node --test stacks.test.js` |
+| `CreateSandboxWizard.jsx`, `createWizard.js` | The New sandbox wizard (What → Where → Access → Review) over `components/Wizard.jsx`; opens in a wide drawer from the list or with `?new=1`. Writes nothing until Finish, then creates (sandbox or recipe instance) and runs the follow-ups (model grants, policy, mounts) and offers Open workbox / Open admin view. `createWizard.js` is pure: `stepsFor`, `validate`, `bodyFor`, `createCall`, `followUps`, `nodeHint`, `leastLoaded` (`node --test createWizard.test.js`). Style: `styles/create-wizard.css` |
 | `CreateSandboxForm.jsx` | Name, pack, node, memory, CPU, PIDs; the node's free numbers beside them (`feat/ui-sandbox-resources`) |
 | `useCreateSandbox.js` | Nodes, packs, the draft, and the pre-check; no JSX (`feat/ui-sandbox-resources`) |
 | `SandboxDetail.jsx` | Drawer with overview, agents, logs, shell, rules, inference |
@@ -111,4 +112,4 @@ capped at 64 KiB, with the exit code. That is enough to ask Hermes a question
 or inspect a file, and it keeps every run in the audit trail as an argument
 vector. An interactive terminal is a later transport, not a change to this one.
 
-`MountEditor.jsx` (F15) and `CreateSandboxWizard.jsx` (F24) are placeholders created in Wave 0.
+`MountEditor.jsx` (F15) is a placeholder created in Wave 0.
