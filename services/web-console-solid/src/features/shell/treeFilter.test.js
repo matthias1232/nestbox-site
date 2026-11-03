@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterTree, treePathFor, pathFor, ancestorIds, expandableIds } from './treeFilter.js';
+import { filterTree, treePathFor, pathFor, ancestorIds, expandableIds, defaultExpanded } from './treeFilter.js';
 
 const U = (n) => `00000000-0000-0000-0000-00000000000${n}`;
 const root = {
@@ -57,4 +57,12 @@ test('ancestorIds and expandableIds support opening the way to a place', () => {
   assert.deepEqual(ancestorIds(root, 'node', U(3)), [U(0), U(1), U(2)]);
   assert.ok(expandableIds(root).has(U(3)));
   assert.ok(!expandableIds(root).has(U(6)));
+});
+
+test('defaultExpanded opens the organisation and every data center, nothing below', () => {
+  const ids = defaultExpanded(root);
+  assert.deepEqual([...ids].sort(), [U(0), U(1), U(6)]);
+  assert.ok(!ids.has(U(2)));
+  assert.ok(!ids.has(U(3)));
+  assert.deepEqual([...defaultExpanded(null)], []);
 });

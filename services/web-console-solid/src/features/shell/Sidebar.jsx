@@ -1,6 +1,6 @@
 // The sidebar: the inventory tree (three views, filter box) above the collapsible menu groups.
 // Collapsed (56 px) it shows menu icons only; the right edge is a drag handle for the width.
-import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
 import { emptyDataCenterNotice } from '../../state/environments.js';
 import { useUi } from '../../state/ui.jsx';
@@ -10,7 +10,7 @@ import Segmented from '../../components/Segmented.jsx';
 import Tree from '../../components/Tree.jsx';
 import { Icon } from '../../components/icons.jsx';
 import { useInventory } from './useInventory.js';
-import { ancestorIds, expandableIds, filterTree, pathFor } from './treeFilter.js';
+import { ancestorIds, defaultExpanded, expandableIds, filterTree, pathFor } from './treeFilter.js';
 
 const VIEWS = [
   { value: 'infrastructure', label: 'Infra' },
@@ -87,6 +87,9 @@ export default function Sidebar(props) {
   const [filterText, setFilterText] = createSignal('');
   const [appliedFilter, setAppliedFilter] = createSignal('');
   const [expanded, setExpanded] = createSignal(new Set());
+  // Once the user opens or closes a branch, the tree's own state stands and the default below
+  // never runs again in this session (V18).
+  const [touched, setTouched] = createSignal(false);
   const [closedGroups, setClosedGroups] = createSignal(
     new Set(GROUPS.filter((group) => !OPEN_GROUPS.has(group.id)).map((group) => group.id)),
   );
@@ -100,6 +103,14 @@ export default function Sidebar(props) {
   }
 
   const shown = createMemo(() => filterTree(inv.root(), appliedFilter()));
+  // The way into the structure: the organisation and its data centers are open as soon as the
+  // tree is there, not just the organisation (V18). An active filter opens everything anyway,
+  // and a branch the user opened or closed stays exactly as they left it.
+  createEffect(() => {
+    const tree = inv.root();
+    if (!tree || touched() || appliedFilter().trim()) return;
+    setExpanded(defaultExpanded(tree));
+  });
   // A data center with no nodes looks like an empty console. Say so, and offer the one that
   // has nodes, instead of switching silently; a remembered choice means the user decided.
   const emptyCenter = createMemo(() => (
@@ -122,6 +133,7 @@ export default function Sidebar(props) {
   });
 
   function toggle(id) {
+    setTouched(true);
     const next = new Set(expanded());
     if (next.has(id)) next.delete(id);
     else next.add(id);

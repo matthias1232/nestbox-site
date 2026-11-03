@@ -52,6 +52,22 @@ export function expandableIds(root) {
   return ids;
 }
 
+// The nodes a fresh sidebar shows open (V18): the organisation plus every data center, so the
+// structure below it is visible without a click. Children of a data center stay closed; the
+// user's own expansion wins from the first toggle on.
+export function defaultExpanded(root) {
+  const ids = new Set();
+  if (!root) return ids;
+  ids.add(root.id);
+  (function walk(node) {
+    (node.children || []).forEach((child) => {
+      if (child.kind === 'data_center') ids.add(child.id);
+      walk(child);
+    });
+  })(root);
+  return ids;
+}
+
 // The nodes from the root down to (kind, id), or [] when it is not in the tree.
 function chain(root, kind, id) {
   const want = KIND_ALIASES[kind] || kind;
