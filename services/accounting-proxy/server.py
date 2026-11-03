@@ -788,6 +788,275 @@ def digest_of(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
+# -- model clusters -------------------------------------------------------
+
+# The proxy's view of one model cluster (contract C7). The cluster id is
+# appended, already checked against `_CLUSTER_SEGMENT`.
+CLUSTERS_PATH = "/api/v1/internal/accounting/clusters/"
+CLUSTER_TTL = 10.0
+# How long a member that refused a connection is skipped.
+UNHEALTHY_FOR = 30.0
+CLUSTER_MEMBER_HEADER = "x-nestbox-cluster-member"
+
+_CLUSTER_SEGMENT = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+
+# `cluster_id -> (monotonic_fetch_time, view)`.
+_CLUSTERS: dict[str, tuple[float, dict[str, Any]]] = {}
+# `(cluster_id, install_id) -> monotonic time until which the member is skipped`.
+_UNHEALTHY: dict[tuple[str, str], float] = {}
+# In-flight requests per install, and the round-robin counter per cluster.
+_INFLIGHT: dict[str, int] = {}
+_COUNTERS: dict[str, int] = {}
+_CLUSTER_LOCK = threading.Lock()
+
+
+def cluster_view(cluster_id: str) -> dict[str, Any] | None:
+    """The cluster definition from the control API, cached for 10 s.
+
+    A failed refresh returns the stale cached view if there is one, so a short
+    control API outage does not stop a working agent; with nothing cached the
+    answer is `None` and the caller answers `503 cluster.unavailable`.
+    """
+    now = time.monotonic()
+    cached = _CLUSTERS.get(cluster_id)
+    if cached is not None and now - cached[0] < CLUSTER_TTL:
+        return cached[1]
+    try:
+        answer = control_get(CONFIG, CLUSTERS_PATH + quote(cluster_id, safe=""))
+    except ControlError:
+        if cached is not None:
+            print(f"cluster {cluster_id} unavailable, using cached", flush=True)
+            return cached[1]
+        return None
+    members = answer.get("members")
+    view = {
+        "id": cluster_id,
+        "strategy": answer.get("strategy"),
+        "model_key": answer.get("model_key"),
+        "members": members if isinstance(members, list) else [],
+    }
+    with _CLUSTER_LOCK:
+        _CLUSTERS[cluster_id] = (now, view)
+    return view
+
+
+def choose_member(
+    view: dict[str, Any], inflight: dict[str, int], counters: dict[str, int]
+) -> dict[str, Any] | None:
+    """Pick one healthy member by the cluster's strategy, or `None`.
+
+    `round_robin` walks the members expanded by weight with a counter per
+    cluster; `least_loaded` takes the fewest in-flight requests (ties go to the
+    first); `failover` takes the first healthy member in definition order.
+    """
+    healthy = [
+        m
+        for m in view.get("members") or []
+        if isinstance(m, dict) and m.get("healthy") is True and m.get("endpoint")
+    ]
+    if not healthy:
+        return None
+    strategy = view.get("strategy")
+    if strategy == "least_loaded":
+        return min(healthy, key=lambda m: inflight.get(str(m.get("install_id")), 0))
+    if strategy == "round_robin":
+        expanded: list[dict[str, Any]] = []
+        for member in healthy:
+            weight = member.get("weight")
+            count = weight if isinstance(weight, int) and weight > 0 else 1
+            expanded.extend([member] * count)
+        key = str(view.get("id"))
+        index = counters.get(key, 0)
+        counters[key] = index + 1
+        return expanded[index % len(expanded)]
+    return healthy[0]
+
+
+def _usable_view(view: dict[str, Any], skip: set[str]) -> dict[str, Any]:
+    """The view with recently failed members and `skip` marked unhealthy."""
+    now = time.monotonic()
+    cluster_id = str(view.get("id"))
+    members = []
+    for member in view.get("members") or []:
+        if not isinstance(member, dict):
+            continue
+        install = str(member.get("install_id"))
+        down = _UNHEALTHY.get((cluster_id, install), 0.0) > now or install in skip
+        members.append({**member, "healthy": member.get("healthy") is True and not down})
+    return {**view, "members": members}
+
+
+class _MarkedResponse:
+    """An upstream response that also carries the answering member's header."""
+
+    def __init__(self, response: Any, install_id: str) -> None:
+        self._response = response
+        self._install_id = install_id
+        self.status = response.status
+
+    def getheader(self, name: str, default: Any = None) -> Any:
+        """Read one header of the wrapped response."""
+        return self._response.getheader(name, default)
+
+    def getheaders(self) -> list[tuple[str, str]]:
+        """All headers of the wrapped response plus the member header."""
+        headers = [
+            (k, v)
+            for k, v in self._response.getheaders()
+            if k.lower() != CLUSTER_MEMBER_HEADER
+        ]
+        headers.append((CLUSTER_MEMBER_HEADER, self._install_id))
+        return headers
+
+    def read(self, *args: Any) -> bytes:
+        """Read from the wrapped response."""
+        return self._response.read(*args)
+
+
+def handle_cluster(handler: "Handler", started: float) -> None:
+    """Serve `/c/<cluster_id>/<rest>`: one healthy member answers.
+
+    The request is inspected like any other, then sent to the member the
+    strategy picks. A connection error or timeout before any byte arrives marks
+    that member down for 30 s and the next one is tried once. The answer carries
+    `x-nestbox-cluster-member`, and the accounting row names the install.
+    """
+    parts = urlsplit(handler.path)
+    segments = parts.path.split("/")
+    # ["", "c", "<id>", ...]
+    if len(segments) < 3 or not _CLUSTER_SEGMENT.match(segments[2]):
+        handler._send_json(
+            404, {"error": {"code": "cluster.not_found", "message": "no such cluster path"}}
+        )
+        return
+    cluster_id = segments[2]
+    rest = "/" + "/".join(segments[3:])
+    if parts.query:
+        rest += "?" + parts.query
+    config = CONFIG
+    sandbox_header = handler.headers.get("x-nestbox-sandbox") or ""
+    if _SANDBOX_SEGMENT.match(sandbox_header):
+        config = dataclasses.replace(config, sandbox=sandbox_header)
+
+    try:
+        body = handler._read_body()
+    except ValueError as exc:
+        handler._send_json(
+            413, {"error": {"code": "request.too_large", "message": str(exc)}}
+        )
+        return
+    try:
+        parsed_body: Any = json.loads(body) if body else None
+    except (ValueError, UnicodeDecodeError):
+        parsed_body = None
+    handler.path = rest
+    dialect = dialect_of(rest)
+    clean = urlsplit(rest).path
+
+    view = cluster_view(cluster_id)
+    if view is None:
+        handler._send_json(
+            503,
+            {"error": {"code": "cluster.unavailable", "message": "the cluster definition is unavailable"}},
+        )
+        return
+
+    def row(status: int, usage: Any, model: Any, outcome_body: bytes, action: str,
+            detector: str | None, install_id: str | None) -> None:
+        payload = {
+            "sandbox": config.sandbox,
+            "agent_instance": config.agent_instance,
+            "provider": dialect,
+            "model": model,
+            "direction": "outbound",
+            "endpoint": clean,
+            "status": status,
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "usage": usage,
+            "content_digest": digest_of(outcome_body),
+            "privacy_action": action,
+            "privacy_detector": detector,
+            "detail": {"cluster_id": cluster_id, "install_id": install_id},
+        }
+        try:
+            control_post(config, ACCOUNT_PATH, payload)
+        except ControlError as exc:
+            print(f"accounting row dropped: {exc}", flush=True)
+
+    try:
+        outcome = inspect_request(config, body, f"cluster-{cluster_id}")
+    except PrivacyBlocked as exc:
+        handler._send_json(
+            403,
+            {"error": {"code": "privacy.blocked",
+                       "message": "the content was refused by the privacy policy",
+                       "detector": exc.detector}},
+        )
+        row(403, None, None, body, "blocked", exc.detector, None)
+        return
+    except ControlError:
+        handler._send_json(
+            503,
+            {"error": {"code": "privacy.unavailable",
+                       "message": "content inspection is unavailable and fail-closed is on"}},
+        )
+        row(503, None, None, body, "not_inspected", None, None)
+        return
+
+    streaming = wants_stream(parsed_body, rest)
+    tried: set[str] = set()
+    for _attempt in range(2):
+        with _CLUSTER_LOCK:
+            member = choose_member(_usable_view(view, tried), _INFLIGHT, _COUNTERS)
+            if member is not None:
+                install_id = str(member.get("install_id"))
+                _INFLIGHT[install_id] = _INFLIGHT.get(install_id, 0) + 1
+        if member is None:
+            break
+        tried.add(install_id)
+        connection = None
+        try:
+            try:
+                base = urlsplit(str(member["endpoint"]))
+                if base.scheme not in {"http", "https"} or not base.hostname:
+                    raise ValueError("bad member endpoint")
+                cls = HTTPSConnection if base.scheme == "https" else HTTPConnection
+                connection = cls(base.hostname, base.port, timeout=config.upstream_timeout)
+                target = (base.path.rstrip("/") or "") + rest
+                connection.request(
+                    handler.command,
+                    target,
+                    body=outcome.body if outcome.body else None,
+                    headers=handler._upstream_headers(outcome.body),
+                )
+                response = connection.getresponse()
+            except (OSError, ValueError):
+                if connection is not None:
+                    connection.close()
+                with _CLUSTER_LOCK:
+                    _UNHEALTHY[(cluster_id, install_id)] = time.monotonic() + UNHEALTHY_FOR
+                continue
+            try:
+                status, usage, model = handler._relay(
+                    _MarkedResponse(response, install_id), streaming
+                )
+            finally:
+                connection.close()
+            row(status, usage, model or model_of(None, parsed_body), outcome.body,
+                outcome.action, outcome.detector, install_id)
+            return
+        finally:
+            with _CLUSTER_LOCK:
+                _INFLIGHT[install_id] = max(0, _INFLIGHT.get(install_id, 1) - 1)
+
+    handler._send_json(
+        503,
+        {"error": {"code": "cluster.no_healthy_member",
+                   "message": "no healthy member answered"}},
+    )
+    row(503, None, None, outcome.body, outcome.action, outcome.detector, None)
+
+
 # -- the HTTP surface ------------------------------------------------------
 
 
@@ -890,6 +1159,11 @@ class Handler(BaseHTTPRequestHandler):
             config = dataclasses.replace(config, sandbox=sandbox_name)
             self.path = rest
             clean = urlsplit(self.path).path
+
+        # `/c/<cluster_id>/…`: a model cluster; a healthy member answers.
+        if identity is None and clean.startswith("/c/"):
+            handle_cluster(self, started)
+            return
 
         try:
             body = self._read_body()
