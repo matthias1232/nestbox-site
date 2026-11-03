@@ -89,20 +89,32 @@ table; billing. See the amendments of ADR 0044-0050.
 
 ### Built
 
-- C1 Console paths: data center, site, node, model, cluster and docs pages, plus pop-out logs and traffic.
-- C2 Shell: tree sidebar, top bar, dock, palette, alert stack, help drawer, shortcuts sheet and tour.
-- C3 Inventory tree with three views (infrastructure, workloads, models).
-- C4 Search across nodes, sandboxes, models and policies.
-- C5 Bulk sandbox actions in one request.
-- C6 Bulk model deploy across many nodes as one job.
-- C7 Model clusters: installs of one model behind one provider profile, round-robin.
-- C8 Node operations: summary, drain, quick deploy.
-- C9 Alerts, with acknowledgement and live delivery.
-- C10 Effective mounts for a sandbox.
-- C11 Policy preview before applying.
-- C12 Quick controls: one-click actions on rows.
-- C13 Permissions: grants and revocation, enforced in the service layer.
-- Help documents shipped with the console, rendered illustrations, and this guide.
+What is written here was checked against the appliance (192.168.55.50) on 2026-11-03, which
+runs `feat/control-center` at `78b0068`: read-only calls for the route groups that need no
+sandbox, the integration suite named after each group for the rest. The scripted acceptance run
+that also writes — one throw-away sandbox, the bulk jobs, the quick controls — is step S4 of the
+fix plan; when it has run, its output replaces these lines.
+
+- Routes without a sandbox (`healthz`, `openapi.json`, the inventory tree in all three views,
+  search, model clusters, alerts, nodes, the control overview): every GET answers 200, and
+  `tests/control_center.rs` asserts the services behind them.
+- Bulk sandbox actions and bulk model install: one request, one job, one result per target
+  (`tests/bulk.rs`, `tests/model_bulk.rs`); the posted run is part of S4.
+- Model clusters: installs of one model behind one provider profile, round-robin, refusing a
+  delete while sandboxes use it (`tests/model_clusters.rs`).
+- Node operations: summary, drain and quick deploy, including a node joined over WireGuard
+  (`tests/node_ops.rs`, `tests/quick.rs`, `tests/connect.rs`).
+- One sandbox's routes: effective mounts, quick controls, policy preview and permissions
+  (`tests/mounts.rs`, `tests/quick.rs`, `tests/policy_preview.rs`, `tests/permissions.rs`); the
+  posted run is part of S4.
+- Refused destinations as alerts, with acknowledgement and live delivery on `/events/stream`
+  (`tests/control_center.rs`, `tests/traffic.rs`).
+- The scoped calls keep the tenant: every query filters by `environment_id` and the suites
+  `tests/tenancy.rs` and `tests/multitenant.rs` fail when one stops doing it.
+- The console serves every path (`/`, `/sandboxes`, `/nodes/<id>`, the workbox and the
+  pop-outs) from the built bundle, and the help index and the rendered illustrations are served
+  next to it; `src/navigation.test.js` and the other node tests cover the menu, the palette and
+  the pure screen logic.
 
 ### Not built
 
