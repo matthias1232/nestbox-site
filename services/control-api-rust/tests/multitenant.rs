@@ -198,6 +198,70 @@ async fn a_member_sees_and_works_in_only_the_sandbox_they_were_granted() {
     assert!(tenancy_service::grant(&ctx, &admin, one.id, viewer.id).await.is_err());
 }
 
+/// A member sees what they own and what was handed to them — never the boxes of the data center
+/// that happen to have no owner.
+///
+/// A removed user leaves their sandboxes behind with `owner_user_id` NULL (ADR 0038), and that
+/// "shared" row used to be visible to every non-admin, so a member granted one sandbox saw all of
+/// them in "My sandboxes" (U06-05). The rule lives in the database, so it is proved as the
+/// application role: the owner pool bypasses row-level security and would prove nothing.
+#[tokio::test]
+async fn a_member_sees_only_the_sandboxes_they_own_or_were_granted() {
+    let Some(owner) = connect().await else {
+        eprintln!("skipping: TEST_DATABASE_URL is not set");
+        return;
+    };
+    let pool = app_pool().await;
+    let ctx = context(&pool);
+    let env = uuid(ENVIRONMENT);
+    let admin_id = admin_user(&owner, "00000000-0000-0000-0000-000000000001", "root@example.test").await;
+    sqlx::query("INSERT INTO user_scopes (user_id, environment_id, role) VALUES ($1, $2, 'admin')")
+        .bind(admin_id).bind(env).execute(&owner).await.expect("scope");
+    let admin = principal(admin_id, env, Role::Admin);
+    let operator = principal(admin_id, env, Role::Operator);
+    let made = user_service::create(&ctx, &admin, "eve@example.test", "Eve", "eves-password-12", "member").await.expect("member");
+    let eve = principal(made.id, env, Role::Member);
+
+    // Her own sandbox, created as the member: the row carries its owner from the insert on,
+    // because the policy lets a member write only what is theirs (migration 0090).
+    let own = sandbox_service::create(&ctx, &eve, request("eves-box")).await.expect("a member makes their own box");
+    let own_owner: Option<Uuid> = sqlx::query_scalar("SELECT owner_user_id FROM sandboxes WHERE id = $1")
+        .bind(own.id)
+        .fetch_one(&owner)
+        .await
+        .expect("owner");
+    assert_eq!(own_owner, Some(eve.user_id), "a member's new sandbox is theirs, not shared");
+    let handed = sandbox_service::create(&ctx, &admin, request("handed-over")).await.expect("admin box");
+    tenancy_service::grant(&ctx, &admin, handed.id, eve.user_id).await.expect("grant");
+    let shared = sandbox_service::create(&ctx, &admin, request("left-behind")).await.expect("admin box");
+    sqlx::query("UPDATE sandboxes SET owner_user_id = NULL WHERE id = $1")
+        .bind(shared.id)
+        .execute(&owner)
+        .await
+        .expect("a removed user's sandbox");
+
+    assert_eq!(
+        names(&ctx, &eve).await,
+        vec!["eves-box", "handed-over"],
+        "a member sees what they own and what was handed to them, and not the shared box"
+    );
+    let page = sandbox_service::list(&ctx, &eve, &ListParams::default()).await.expect("list");
+    assert_eq!(page.total_estimate, 2, "the count beside the rows follows the same rule");
+    assert!(sandbox_service::get(&ctx, &eve, shared.id).await.is_err(), "a shared box is not readable by a member");
+    assert!(sandbox_service::get(&ctx, &eve, handed.id).await.is_ok(), "the granted box still opens");
+
+    // The people who run the data center see the shared box as before.
+    assert_eq!(names(&ctx, &operator).await, vec!["eves-box", "handed-over", "left-behind"]);
+    assert_eq!(names(&ctx, &admin).await, vec!["eves-box", "handed-over", "left-behind"]);
+    assert!(sandbox_service::get(&ctx, &admin, shared.id).await.is_ok());
+
+    // A viewer sees no shared box either.
+    let viewer = user_service::create(&ctx, &admin, "vic@example.test", "Vic", "vics-password-12", "viewer").await.expect("viewer");
+    let vic = principal(viewer.id, env, Role::Viewer);
+    assert!(names(&ctx, &vic).await.is_empty(), "a viewer sees nothing that was not handed over");
+}
+
+
 #[tokio::test]
 async fn a_provider_reaches_its_customers_and_a_customer_reaches_only_itself() {
     let Some(owner) = connect().await else {

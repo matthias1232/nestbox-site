@@ -573,6 +573,7 @@ mod tests {
                 image_digest: None,
                 spec: &serde_json::json!({}),
                 parent_id: None,
+                owner_user_id: None,
             },
         )
         .await
