@@ -9,9 +9,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::sandbox_service::{self, LifecycleAction};
-use super::{egress_live_service, move_service, policy_service, ServiceContext};
+use super::{egress_live_service, move_service, policy_service, require, ServiceContext};
 use crate::config::Config;
-use crate::domain::auth::Principal;
+use crate::domain::auth::{Permission, Principal};
 use crate::domain::job::{JobKind, TargetState};
 use crate::domain::policy::EgressMode;
 use crate::domain::telemetry::LiveEvent;
@@ -113,6 +113,30 @@ fn validate(
     Ok((plan, unique))
 }
 
+/// The permission the planned action needs, checked once before a job exists.
+///
+/// The legs each check their own permission per target (`sandbox_service::act` and
+/// `sandbox_service::delete` ask `SandboxWrite`, `move_service::start` too,
+/// `policy_service::require_sandbox_scope` accepts `SandboxPolicy` for one sandbox, and
+/// `policy_service::assign_policy_to_sandbox` asks `PolicyWrite`). This mirrors those
+/// checks instead of inventing a different rule: a caller who would be refused on every
+/// target is refused here, once, before a job of up to 500 targets is written and shows
+/// up in the Tasks list as failed.
+fn permission_for(plan: &Plan) -> Permission {
+    match plan {
+        Plan::Lifecycle(_) | Plan::Recreate | Plan::Move { .. } | Plan::Delete => {
+            Permission::SandboxWrite
+        }
+        Plan::AllowAll { .. } | Plan::EgressMode(_) => Permission::SandboxPolicy,
+        Plan::AssignPolicy { .. } => Permission::PolicyWrite,
+    }
+}
+
+/// Refuse the request unless the caller may perform the planned action at all.
+fn allow(principal: &Principal, plan: &Plan) -> Result<(), ApiError> {
+    require(principal, permission_for(plan))
+}
+
 /// Run the planned action on one sandbox and say what happened.
 async fn run_one(
     ctx: &ServiceContext,
@@ -165,7 +189,10 @@ async fn run_one(
 
 /// Start one job that applies `action` to every sandbox in `ids`; returns `{job_id, total}`.
 ///
-/// The job runs in the background with the caller's principal. Each target gets one job log line
+/// The permission the action needs is checked before the job row exists, so a caller who
+/// may not perform it is refused once instead of filling the Tasks list with a failed job.
+/// The job itself runs in the background with the caller's principal, so row-level security
+/// and every per-target check still apply. Each target gets one job log line
 /// `{ "sandbox_id", "ok", "message" }` and one `JobProgress` event.
 pub async fn sandboxes(
     ctx: &ServiceContext,
@@ -176,6 +203,7 @@ pub async fn sandboxes(
     params: serde_json::Value,
 ) -> Result<serde_json::Value, ApiError> {
     let (plan, ids) = validate(ids, action, &params)?;
+    allow(principal, &plan)?;
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
@@ -266,6 +294,67 @@ async fn run_job(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::auth::{CredentialSource, Role};
+    use crate::error::ErrorCode;
+
+    fn principal(role: Role) -> Principal {
+        Principal {
+            user_id: Uuid::nil(),
+            environment_id: Uuid::nil(),
+            role,
+            display_name: "t".into(),
+            via: CredentialSource::Session,
+        }
+    }
+
+    #[test]
+    fn a_viewer_is_refused_before_a_bulk_job_is_created() {
+        let plan = Plan::Lifecycle(LifecycleAction::Stop);
+        let error = allow(&principal(Role::Viewer), &plan).expect_err("a viewer may not act");
+        assert_eq!(error.status.as_u16(), 403);
+        assert_eq!(error.code, ErrorCode::FORBIDDEN);
+        assert!(error.message.contains("sandbox.write"), "{}", error.message);
+    }
+
+    #[test]
+    fn each_action_names_the_permission_its_own_service_checks() {
+        // `sandbox_service::act`, `delete`, `recreate` and `move_service::start`.
+        for plan in [
+            Plan::Lifecycle(LifecycleAction::Restart),
+            Plan::Recreate,
+            Plan::Move { node: "node-a".into() },
+            Plan::Delete,
+        ] {
+            assert_eq!(permission_for(&plan), Permission::SandboxWrite, "{plan:?}");
+            assert!(allow(&principal(Role::Member), &plan).is_ok(), "{plan:?}");
+        }
+        // `policy_service::require_sandbox_scope` for one sandbox.
+        for plan in [Plan::AllowAll { minutes: 15 }, Plan::EgressMode(EgressMode::OffAllowAll)] {
+            assert_eq!(permission_for(&plan), Permission::SandboxPolicy, "{plan:?}");
+            assert!(allow(&principal(Role::Member), &plan).is_ok(), "{plan:?}");
+        }
+        // A shared policy is an operator's decision, not a member's.
+        let assign = Plan::AssignPolicy { policy_id: Uuid::nil() };
+        assert_eq!(permission_for(&assign), Permission::PolicyWrite);
+        assert!(allow(&principal(Role::Member), &assign).is_err());
+        assert!(allow(&principal(Role::Operator), &assign).is_ok());
+    }
+
+    #[test]
+    fn the_check_happens_before_a_job_exists() {
+        // `sandboxes` refuses after `validate` and before the first scope or job row, so a
+        // refusal leaves no job behind. The source order is the contract; this keeps a later
+        // edit from moving the check below `job_store::create`.
+        let source = include_str!("bulk_service.rs");
+        let body = source
+            .split("pub async fn sandboxes(")
+            .nth(1)
+            .and_then(|rest| rest.split("if let Ok(mut scope)").next())
+            .unwrap_or_default();
+        let guard = body.find("allow(principal, &plan)?").expect("the guard is in the body");
+        let create = body.find("job_store::create").expect("the job is created in the body");
+        assert!(guard < create, "the permission check must come before the job row");
+    }
 
     #[test]
     fn delete_needs_its_confirmation() {

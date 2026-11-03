@@ -65,7 +65,12 @@ impl ErrorCode {
     /// The install is between the reservation and the answer; wait or let it fail.
     pub const MODEL_INSTALL_IN_PROGRESS: Self = Self("model.install_in_progress");
 
+    /// A named site is not part of the caller's data center.
+    pub const SITE_NOT_FOUND: Self = Self("site.not_found");
     pub const NODE_NOT_FOUND: Self = Self("node.not_found");
+    /// A node of that name is already registered on this installation. Its own code, so a
+    /// client does not read it as a sandbox name clash.
+    pub const NODE_NAME_TAKEN: Self = Self("node.name_taken");
     pub const CUDAX_COMPONENT_NOT_FOUND: Self = Self("cudax.component_not_found");
     pub const CUDAX_INSTALL_NOT_FOUND: Self = Self("cudax.install_not_found");
     pub const COMPONENT_NOT_FOUND: Self = Self("component.not_found");

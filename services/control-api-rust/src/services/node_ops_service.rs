@@ -491,6 +491,28 @@ async fn move_one(
     }
 }
 
+/// The refusal for a node name that already exists on this installation.
+///
+/// A node's own code, not the sandbox one: a client that branches on the answer must not
+/// read "a sandbox of that name exists" when the clash is a node. The status stays 409
+/// because the name, not the request, must change.
+fn node_name_taken(node_name: &str) -> ApiError {
+    ApiError::conflict(
+        ErrorCode::NODE_NAME_TAKEN,
+        format!("A node named '{node_name}' exists on this installation. Pick another name."),
+    )
+}
+
+/// The refusal for a site that is not in the caller's data center.
+fn site_not_in_environment() -> ApiError {
+    ApiError::not_found(ErrorCode::SITE_NOT_FOUND, "No such site in this data center.")
+}
+
+/// The refusal for a model key the catalogue does not hold.
+fn model_not_in_catalogue() -> ApiError {
+    ApiError::not_found(ErrorCode::MODEL_NOT_FOUND, "No such model in the catalogue.")
+}
+
 /// Start a quick-deploy job; returns `{job_id, join_command}` (contract C8).
 ///
 /// Steps are `provision`, `join`, `probe` and, when a model is wanted, `install_model`; each is a
@@ -498,7 +520,7 @@ async fn move_one(
 /// services (join token, SSH connect, rent) check the environment-manage permission themselves and
 /// have no internal variant without that check, so `quick` requires the same permission up front:
 /// a node-manage operator is refused immediately with a clear message instead of failing in step one
-/// after a job was created (ADR 0064).
+/// after a job was created.
 pub async fn quick(
     ctx: &ServiceContext,
     config: &Config,
@@ -527,12 +549,12 @@ pub async fn quick(
         }
     }
     if node_gateway::name_taken(&ctx.pool, &node_name).await.map_err(ApiError::from)? {
-        return Err(ApiError::conflict(ErrorCode::SANDBOX_NAME_TAKEN, "A node with this name exists on this installation."));
+        return Err(node_name_taken(&node_name));
     }
 
     let mut scope = TenantScope::begin_for(&ctx.pool, principal).await.map_err(ApiError::from)?;
     if !node_gateway::site_in_environment(&mut scope, request.site_id).await.map_err(ApiError::from)? {
-        return Err(ApiError::not_found(ErrorCode::NODE_NOT_FOUND, "site"));
+        return Err(site_not_in_environment());
     }
     if let Some(key) = &model_key {
         let known: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM models WHERE key = $1)")
@@ -541,7 +563,7 @@ pub async fn quick(
             .await
             .map_err(db)?;
         if !known {
-            return Err(ApiError::not_found(ErrorCode::NODE_NOT_FOUND, "model"));
+            return Err(model_not_in_catalogue());
         }
     }
     let environment_id = scope.environment_id();
@@ -785,6 +807,33 @@ async fn install_step(ctx: &ServiceContext, principal: &Principal, key: &str, no
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_node_name_clash_has_its_own_code_and_says_which_name() {
+        let error = node_name_taken("gpu-01");
+        assert_eq!(error.status.as_u16(), 409);
+        assert_eq!(error.code, ErrorCode::NODE_NAME_TAKEN);
+        assert_eq!(
+            error.message,
+            "A node named 'gpu-01' exists on this installation. Pick another name."
+        );
+    }
+
+    #[test]
+    fn an_unknown_site_is_a_site_not_a_node() {
+        let error = site_not_in_environment();
+        assert_eq!(error.status.as_u16(), 404);
+        assert_eq!(error.code, ErrorCode::SITE_NOT_FOUND);
+        assert_eq!(error.message, "No such site in this data center.");
+    }
+
+    #[test]
+    fn an_unknown_model_is_a_catalogue_miss() {
+        let error = model_not_in_catalogue();
+        assert_eq!(error.status.as_u16(), 404);
+        assert_eq!(error.code, ErrorCode::MODEL_NOT_FOUND);
+        assert_eq!(error.message, "No such model in the catalogue.");
+    }
 
     #[test]
     fn load_view_maps_the_runner_answer() {
