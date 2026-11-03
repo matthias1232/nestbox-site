@@ -83,3 +83,4 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `Wizard.jsx` | Step list, body and Back / Next / Finish footer |
 | `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
+F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
