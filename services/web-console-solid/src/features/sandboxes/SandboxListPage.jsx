@@ -9,6 +9,7 @@ import StatusBadge from '../../components/StatusBadge.jsx';
 import Empty from '../../components/Empty.jsx';
 import Drawer from '../../components/Drawer.jsx';
 import { useSandboxes } from './useSandboxes.js';
+import { useUi } from '../../state/ui.jsx';
 import SandboxDetail from './SandboxDetail.jsx';
 import CreateSandboxForm from './CreateSandboxForm.jsx';
 import ConnectPanel from './ConnectPanel.jsx';
@@ -26,6 +27,10 @@ import '../../styles/sandbox-hierarchy.css';
 
 export default function SandboxListPage(props) {
   const state = useSandboxes();
+  // The bulk selection is shared with the tree and the bulk bar (BulkHost).
+  const ui = useUi();
+  const isSelected = (id) => ui.selection.kind() === 'sandbox' && ui.selection.ids().has(id);
+  const allSelected = () => state.items().length > 0 && state.items().every((item) => isSelected(item.id));
   const [openId, setOpenId] = createSignal(null);
   const [creating, setCreating] = createSignal(false);
   // The sandbox whose connection details are open; `null` closes the drawer.
@@ -124,8 +129,8 @@ export default function SandboxListPage(props) {
                       </Show>
                       <input
                         type="checkbox"
-                        checked={state.selected().has(sandbox.id)}
-                        onChange={() => state.toggle(sandbox.id)}
+                        checked={isSelected(sandbox.id)}
+                        onChange={() => ui.selection.toggle('sandbox', sandbox.id)}
                         aria-label={`Select ${sandbox.name}`}
                       />
                     </td>
@@ -315,16 +320,6 @@ export default function SandboxListPage(props) {
         </For>
       </div>
 
-      <Show when={state.selected().size > 0}>
-        <div class="bulkbar">
-          <span>{state.selected().size} selected</span>
-          <button onClick={() => state.bulk('start')}>Start</button>
-          <button onClick={() => state.bulk('stop')}>Stop</button>
-          <button onClick={() => state.bulk('restart')}>Restart</button>
-          <button class="ghost" onClick={() => state.toggleAll()}>Clear</button>
-        </div>
-      </Show>
-
       <Show
         when={state.items().length > 0}
         fallback={
@@ -341,8 +336,8 @@ export default function SandboxListPage(props) {
                 <th class="narrow">
                   <input
                     type="checkbox"
-                    checked={state.selected().size === state.items().length && state.items().length > 0}
-                    onChange={() => state.toggleAll()}
+                    checked={allSelected()}
+                    onChange={() => (allSelected() ? ui.selection.clear() : ui.selection.set('sandbox', state.items().map((item) => item.id)))}
                     aria-label="Select all"
                   />
                 </th>

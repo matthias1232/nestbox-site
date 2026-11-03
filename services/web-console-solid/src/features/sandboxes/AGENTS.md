@@ -112,3 +112,5 @@ or inspect a file, and it keeps every run in the audit trail as an argument
 vector. An interactive terminal is a later transport, not a change to this one.
 
 `MountEditor.jsx` (F15) and `CreateSandboxWizard.jsx` (F24) are placeholders created in Wave 0.
+
+F21: `SandboxListPage.jsx` checkboxes now write to `ui.selection` (kind `sandbox`); the old inline bulk buttons are gone, `BulkBar` (via `BulkHost`) replaces them.
