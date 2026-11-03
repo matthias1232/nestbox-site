@@ -22,6 +22,13 @@ component never contains a URL.
 5. An `EventSource` is opened only in `events.js` (the shared state and telemetry
    streams), plus `chats.js` and `live.js` for their own screens until those move
    too. A second stream in a page is a connection the browser cannot spare.
+6. A URL the browser opens itself — a WebSocket, an `EventSource`, a pop-out, a
+   download link — goes through `environmentUrl()` in `client.js`, because those
+   requests carry no header and the server needs `?environment=`. `withEnvironment`
+   must be **imported** there, not only re-exported: `export { x } from './y.js'`
+   creates no local binding, and calling it threw `withEnvironment is not defined`
+   live (found in U03, where the terminal, the desktop and every stream failed to
+   open). `client.test.js` calls `environmentUrl` so the mistake cannot come back.
 
 ## Files
 

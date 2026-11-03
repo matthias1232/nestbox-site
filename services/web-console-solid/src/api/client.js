@@ -85,7 +85,14 @@ export function adoptOpenerEnvironment() {
 
 // `url` with the active data center appended, for the requests the browser opens
 // itself (WebSocket, EventSource, a download link): they send no headers.
-export { withEnvironment } from './environmentUrl.js';
+//
+// The name is imported *and* re-exported on purpose: `export { x } from './y.js'`
+// re-exports without creating a local binding, so calling `withEnvironment` below
+// threw "withEnvironment is not defined" — found live in U03, where that ReferenceError
+// left the terminal, the desktop and every live stream unable to open at all.
+import { withEnvironment } from './environmentUrl.js';
+
+export { withEnvironment };
 
 export function environmentUrl(url) {
   return withEnvironment(url, environmentId);

@@ -19,5 +19,23 @@
 .tab-boundary p { margin: 0 0 var(--space-2); }
 .term-wrap { background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; height: 460px; }
 .term-wrap .xterm { height: 100%; }
+
+/* The terminal's connection state (U03): a line with a dot, not a badge that says
+   "open". Lime when connected, amber while a reconnect is pending, red when it is
+   over — the same three colours the rest of the console uses for a state. */
+.terminal-bar { flex-wrap: wrap; }
+.terminal-status { display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; }
+.terminal-status i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+.terminal-status.ok { color: var(--ok); }
+.terminal-status.ok i { background: var(--ok); }
+.terminal-status.warn { color: var(--warn); }
+.terminal-status.warn i { background: var(--warn); animation: terminal-wait 1.2s ease-in-out infinite; }
+.terminal-status.error { color: var(--bad); }
+.terminal-status.error i { background: var(--bad); }
+@keyframes terminal-wait { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* The right-click menu of the terminal: Paste, and Copy of the selection. */
+.terminal-menu { position: fixed; z-index: 80; display: flex; flex-direction: column; gap: 2px; min-width: 140px; padding: var(--space-2); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 12px 32px #000000aa; }
+.terminal-menu button { text-align: left; }
 .resource-form { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: end; }
 .resource-form label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--fg-muted); }
