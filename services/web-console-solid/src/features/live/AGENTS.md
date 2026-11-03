@@ -68,3 +68,5 @@ stay, then they are sorted, so a new event does not reshuffle the map.
   unknown kinds stay grey and remain readable instead of disappearing.
 | `RequestStream.jsx` | Which models are working right now |
 | `AllChats.jsx` | Every active session, side by side, live |
+
+Restyle (F25): `LivePage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

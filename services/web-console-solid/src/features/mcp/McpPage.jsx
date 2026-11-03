@@ -12,6 +12,8 @@ import SandboxPicker from '../policies/SandboxPicker.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import { MCP_HELP } from './mcpHelp.js';
 import '../../styles/sandbox-hierarchy.css';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const blank = {
   key: '', name: '', description: '', transport: 'http', endpoint: '', command: '', args: '',
@@ -103,16 +105,13 @@ export default function McpPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>MCP servers</h1>
-          <p class="muted">
-            Tool servers an agent can call. Define one here, attach it to the sandboxes that should use it.
-            Calls to an <b>http</b> server are checked and logged; a <b>stdio</b> server runs inside the
-            sandbox and cannot be observed.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        title="MCP servers"
+        subtitle={<>Tool servers an agent can call. Define one here, attach it to the sandboxes that should use it. Calls to an <b>http</b> server are checked and logged; a <b>stdio</b> server runs inside the sandbox and cannot be observed.</>}
+        actions={<>
+          <HelpTip anchor="policies" />
+        </>}
+      />
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>
 

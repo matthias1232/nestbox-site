@@ -8,3 +8,5 @@ The image registry and how images reach nodes (ADR 0048). `ImagesPage.jsx` shows
 
 The matrix is what the nodes last reported, not a live query: the control plane's loop pulls
 what is missing every 30 seconds and records the result.
+
+Restyle (F25): `ImagesPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

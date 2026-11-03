@@ -3,6 +3,9 @@
 import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 import * as api from '../../api/images.js';
 import * as tenancy from '../../api/tenancy.js';
+import Empty from '../../components/Empty.jsx';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const TONE = { present: 'ok', pulling: 'warn', failed: 'bad', missing: 'bad' };
 
@@ -69,21 +72,19 @@ export default function ImagesPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Image registry &amp; sync</h1>
-          <p class="muted">
-            Every node holds the same image bytes: the control plane keeps one registry and each
-            node pulls what it was assigned. Nothing is copied between machines.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        title="Image registry &amp; sync"
+        subtitle={<>Every node holds the same image bytes: the control plane keeps one registry and each node pulls what it was assigned. Nothing is copied between machines.</>}
+        actions={<>
+          <HelpTip anchor="nodes" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>
 
       <Show when={matrix().nodes.length === 0}>
-        <p class="muted">No node has joined this data center yet. Add one on the Nodes page.</p>
+        <Empty title="No node has joined this data center yet" hint="Add one on the Nodes page; images are assigned to nodes once they exist." />
       </Show>
 
       <Show when={matrix().nodes.length > 0 && matrix().images.length > 0}>

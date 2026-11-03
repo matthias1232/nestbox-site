@@ -11,3 +11,5 @@ Customers, data centers and sites (ADR 0044). One page, `TenantsPage.jsx`:
 the same tree, so it never offers a data center the caller cannot open.
 
 Nothing here decides who may do what: the buttons are shown by role, and the API repeats the check.
+
+Restyle (F25): `TenantsPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

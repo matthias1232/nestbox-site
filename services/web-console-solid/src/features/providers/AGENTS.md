@@ -50,3 +50,5 @@ The console routes by signal (`App.jsx`), not by URL, so a model and a node have
 no address to link to. The install origin is therefore a reference with the ids
 in its tooltip, not an anchor that would lead nowhere. Turning it into a link
 needs a route or a callback from `App.jsx`; neither belongs in this feature.
+
+Restyle (F25): `ProvidersPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

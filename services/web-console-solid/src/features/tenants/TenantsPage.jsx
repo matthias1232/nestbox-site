@@ -2,6 +2,8 @@
 
 import { For, Show, createSignal, onMount } from 'solid-js';
 import * as api from '../../api/tenancy.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 
 const KINDS = [
   ['home', 'Home - a machine you run yourself'],
@@ -51,15 +53,13 @@ export default function TenantsPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Data centers &amp; sites</h1>
-          <p class="muted">
-            A data center is where one team runs its sandboxes. A site is a place that has nodes:
-            your own machine, a rented server, a small box at the edge.
-          </p>
-        </div>
-      </header>
+      <PageHeader
+        title="Data centers &amp; sites"
+        subtitle={<>A data center is where one team runs its sandboxes. A site is a place that has nodes: your own machine, a rented server, a small box at the edge.</>}
+        actions={<>
+          <HelpTip anchor="tenant-tree" />
+        </>}
+      />
 
       <Show when={error()}><p class="error">{error()}</p></Show>
       <Show when={notice()}><p class="notice">{notice()}</p></Show>

@@ -11,3 +11,5 @@ Rented machines (ADR 0050). `HostingPage.jsx` shows
   data is still on its node).
 
 Prices are the provider's, shown per hour; a type without a published price is marked as such.
+
+Restyle (F25): `HostingPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

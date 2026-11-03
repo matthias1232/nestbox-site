@@ -51,3 +51,5 @@ them into one word: "allowed" alone reads as "nothing was found".
 | `PrivacyExtraSettings.jsx` | The two environment switches for exceptions and chat reading |
 | `DlpFindingDrawer.jsx` | One finding in full, with the way to allow it on purpose |
 | `DlpExceptionsTable.jsx` | The findings allowed on purpose, and when they stop |
+
+Restyle (F25): `PrivacyPage.jsx` uses the shared `PageHeader` (title, subtitle, actions) and a `HelpTip`; data flow is unchanged.

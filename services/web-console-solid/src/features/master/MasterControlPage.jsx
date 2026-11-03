@@ -10,6 +10,8 @@ import { For, Show, createMemo, onMount } from 'solid-js';
 import Empty from '../../components/Empty.jsx';
 import BarList from './BarList.jsx';
 import { TIMEFRAMES, useMasterControl } from './useMasterControl.js';
+import PageHeader from '../shell/PageHeader.jsx';
+import HelpTip from '../../components/HelpTip.jsx';
 import {
   costLabel,
   count,
@@ -79,21 +81,16 @@ export default function MasterControlPage(props) {
 
   return (
     <section class="page">
-      <header class="page-head">
-        <div>
-          <h1>Master control</h1>
-          <p class="muted">
-            What this organisation's sandboxes used and spent in one window, by model and by
-            sandbox. Numbers come from the accounting layer; a request with no price is shown
-            as n/a, never as free.
-          </p>
-        </div>
-        <div class="controls">
+      <PageHeader
+        title="Master control"
+        subtitle={<>What this organisation's sandboxes used and spent in one window, by model and by sandbox. Numbers come from the accounting layer; a request with no price is shown as n/a, never as free.</>}
+        actions={<>
           <button class="secondary" onClick={() => ctl.load()} disabled={ctl.loading()}>
             {ctl.loading() ? 'Refreshing…' : 'Refresh'}
           </button>
-        </div>
-      </header>
+          <HelpTip anchor="getting-started" />
+        </>}
+      />
 
       <Show when={ctl.error()}>
         <p class="error">{ctl.error()}</p>
