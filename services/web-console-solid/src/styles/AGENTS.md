@@ -41,3 +41,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 `app.css` also defines `.eyebrow`, `.figure` and `.num`.
 - `dock.css` — dock tabs, alert cards and the alert stack (F13); imported by `features/dock/AlertStack.jsx`.
 - `models.css` — model cards, node picker, wizard options and deploy progress (F08); imported by `features/models/ModelsPage.jsx` and `ModelPage.jsx`.
+- `clusters.css` — model cluster pages and the new-cluster dialog (F09); imported by `features/clusters/`.
