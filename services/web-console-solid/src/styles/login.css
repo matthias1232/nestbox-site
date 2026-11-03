@@ -22,6 +22,8 @@
 .lp-fallback { position: absolute; inset: 0; background:
   linear-gradient(var(--accent-dim) 1px, transparent 1px) 0 0 / 100% 48px,
   linear-gradient(90deg, var(--accent-dim) 1px, transparent 1px) 0 0 / 48px 100%, var(--bg-inset); }
+/* The two corner labels are static brand text ("OPEN SOURCE", "SELF-HOSTED"), not status
+   chips: the screen knows nothing about the installation before sign-in (P13). */
 .lp-tag { position: absolute; padding: 3px 8px; font: 700 0.68rem var(--mono); letter-spacing: 0.12em; color: var(--accent);
   border: 1px solid var(--accent-line); background: var(--bg); }
 .lp-tag-a { top: var(--space-4); left: var(--space-4); }

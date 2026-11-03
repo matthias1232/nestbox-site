@@ -24,7 +24,11 @@ export default function LoginPage() {
   const [reveal, setReveal] = createSignal(false);
   const [imageFailed, setImageFailed] = createSignal(false);
   const [videoFailed, setVideoFailed] = createSignal(false);
-  const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // The looping video is decoration, not information: it is fetched and played only when the
+  // visitor has not asked for reduced motion. The poster image is always there, so the visual
+  // column never stays empty.
+  const prefersReducedMotion =
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const [problem, setProblem] = createSignal(params.get('login_error'));
 
   onMount(async () => {
@@ -120,14 +124,14 @@ export default function LoginPage() {
         <Show when={!imageFailed()} fallback={<div class="lp-fallback" />}>
           <img src="/illustrations/login.webp" alt="" onError={() => setImageFailed(true)} />
         </Show>
-        <Show when={!calm && !videoFailed()}>
-          <video autoplay muted loop playsinline poster="/illustrations/login.webp"
+        <Show when={!prefersReducedMotion && !videoFailed()}>
+          <video autoplay muted loop playsinline preload="none" poster="/illustrations/login.webp"
                  onError={() => setVideoFailed(true)}>
             <source src="/illustrations/login-loop.mp4" type="video/mp4" onError={() => setVideoFailed(true)} />
           </video>
         </Show>
-        <span class="lp-tag lp-tag-a">GATEWAY ACTIVE</span>
-        <span class="lp-tag lp-tag-b">N ISOLATED WORKLOADS</span>
+        <span class="lp-tag lp-tag-a">OPEN SOURCE</span>
+        <span class="lp-tag lp-tag-b">SELF-HOSTED</span>
       </aside>
     </div>
   );
