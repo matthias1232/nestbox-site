@@ -1,9 +1,10 @@
-// Live traffic: placeholder created in Wave 0; package F17 builds it.
-export default function TrafficPopout(props) {
-  return (
-    <section class="page">
-      <h1>Live traffic</h1>
-      <p class="muted">Coming in package F17.</p>
-    </section>
-  );
+// Live traffic in a window of its own (/pop/traffic): the same view as the page, without the shell.
+import { onMount } from 'solid-js';
+import { TrafficView } from './TrafficPage.jsx';
+
+export default function TrafficPopout() {
+  onMount(() => {
+    document.title = 'Live traffic';
+  });
+  return <TrafficView popout />;
 }

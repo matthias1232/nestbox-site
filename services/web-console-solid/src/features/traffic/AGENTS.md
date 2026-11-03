@@ -76,10 +76,17 @@ Three answers, and only three:
 | File | Responsibility |
 |---|---|
 | `useTrafficStream.js` | History read, stream, normalisation, buffer, pause, filters |
-| `TrafficPage.jsx` | The two views, controls, facets, table, draft dialog |
+| `TrafficPage.jsx` | `TrafficView` (shared with the pop-out) and the page: header, three filters, red lane, table, side panel, draft card |
+| `trafficFilters.js` | Pure kind / decision / target filters, chip counts and target options (tested in `trafficFilters.test.js`) |
+| `TrafficPopout.jsx` | The `/pop/traffic` window: the same view without the shell |
 | `useWindows.js` | The master switches: read the windows in force, open one, revoke one |
 | `MasterSwitches.jsx` | The switch panel (markup only) |
 | `useDecisions.js` | Denied targets, hide/show, allow-for-a-time, draft |
 | `DecisionsPanel.jsx` | The decisions table (markup only) |
 
-`TrafficPopout.jsx` is the placeholder of the `/pop/traffic` window (no shell), built by F17.
+## Control Center layout (F17)
+
+One table with three always-visible filters: Kind (all/proxy/DNS/MCP/inference), Decision
+(all/allowed/refused/would deny) and Sandbox or node. Refused destinations also sit in a red
+lane above the table with inline answers (allow now, 15 min, 1 h, draft rule, ignore). The
+master switches and the decisions list moved into a collapsible side panel. Styles: `styles/traffic.css`.

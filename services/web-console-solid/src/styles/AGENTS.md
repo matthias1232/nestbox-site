@@ -44,3 +44,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 - `clusters.css` — model cluster pages and the new-cluster dialog (F09); imported by `features/clusters/`.
 - `admin-center.css` — Admin Center action bar, console split menu, Summary tiles and grids (F10); imported by `features/sandboxes/AdminCenter.jsx`.
 - `mounts.css` — mount editor chips, path lists (F15); imported by `features/sandboxes/MountEditor.jsx`.
+- `traffic.css` — Live traffic page: filter bar, red lane, side panel, sticky table header (F17); imported by `features/traffic/TrafficPage.jsx`.
