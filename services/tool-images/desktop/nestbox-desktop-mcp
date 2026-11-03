@@ -1,0 +1,1129 @@
+#!/usr/bin/env python3
+"""Desktop control for a Nestbox sandbox: one MCP server for the whole screen.
+
+An agent in a desktop sandbox has to be able to do what a person at that screen
+does: look at it, click and type anywhere, move windows between monitors, and
+arrange the monitors themselves. The browser MCP server (`chrome-devtools-mcp`)
+covers one application; this one covers the desktop, so an agent can log into a
+native app, watch a dialog it caused, or put a window on the second screen while
+a person watches in the console.
+
+Three rules, and each is why a piece of the code looks the way it does:
+
+* **Every monitor has a name and a place.** Monitors come from
+  `nestbox-display get` (ids `m1`…`m8`, 1-based indexes, or `all`). A coordinate
+  is relative to the monitor the call names, and the answer echoes the absolute
+  point, so an agent that reads a screenshot of monitor 2 can click in it
+  without knowing where that monitor sits in the framebuffer.
+* **No shell, ever.** Every external command is an argument vector. A window
+  class, a title or a typed string comes from a model; a shell string would let
+  it run a second command.
+* **The layout is the operator's, not this server's.** Changing it goes through
+  `nestbox-display`, which validates it and writes the state file the console
+  and the control API read. A change made here is visible there immediately.
+
+Transport is stdio with line-delimited JSON-RPC 2.0: the server runs inside the
+sandbox next to the screen it controls, so there is nothing to expose on the
+network. Standard library only — this image has no package install step.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from typing import IO, Any
+
+PROTOCOL_VERSION = "2025-03-26"
+SUPPORTED_PROTOCOLS = {"2025-03-26", "2024-11-05", "2025-06-18"}
+SERVER_NAME = "nestbox-desktop"
+SERVER_VERSION = "1.0.0"
+
+# The desktop pack starts Xvnc on :1; a caller inside the sandbox normally gets
+# DISPLAY from the supervisor, a `docker exec` caller does not.
+DISPLAY = os.getenv("DISPLAY") or ":1"
+
+# Who a layout change is attributed to. The control API passes the operator's
+# name; an agent's own call says `agent`, which is what the console shows.
+ACTOR = os.getenv("NESTBOX_DISPLAY_ACTOR") or "agent"
+
+# Matches `nestbox-display`'s own 15-second limit: a command that has not
+# answered by then is a broken desktop, not a slow one.
+TIMEOUT = 15
+
+# One screenshot path, overwritten for every call: the image leaves this server
+# as base64, so keeping the file would only fill the container's /tmp.
+SHOT_PATH = "/tmp/nb-shot.png"
+
+BUTTONS = {"left": 1, "middle": 2, "right": 3}
+SCROLL_BUTTONS = {"up": 4, "down": 5, "left": 6, "right": 7}
+
+# Launcher names an agent may use, and the program each one starts. Nothing
+# else is startable: a model that can name any binary can start a reverse shell.
+LAUNCHERS = {
+    "chrome": [
+        "google-chrome",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--password-store=basic",
+        "--new-window",
+        "about:blank",
+    ],
+    "terminal": ["xfce4-terminal"],
+    "files": ["thunar"],
+    "text-editor": ["mousepad"],
+}
+
+WINDOW_ID = re.compile(r"^0x[0-9a-fA-F]+$")
+
+# Modifier spellings a model uses, mapped to the name xdotool knows. Only
+# modifiers are rewritten: `F4` and `Tab` are keysyms and keep their case.
+MODIFIER_ALIASES = {
+    "ctrl": "ctrl",
+    "control": "ctrl",
+    "ctl": "ctrl",
+    "shift": "shift",
+    "alt": "alt",
+    "option": "alt",
+    "opt": "alt",
+    "super": "super",
+    "win": "super",
+    "windows": "super",
+    "meta": "super",
+    "cmd": "super",
+    "command": "super",
+}
+
+
+class Failure(Exception):
+    """Something the caller can fix: a bad argument, an unknown monitor, no X."""
+
+
+# --------------------------------------------------------------------------
+# Pure helpers: no process, no display, unit-tested in
+# test_nestbox_desktop_mcp.py
+# --------------------------------------------------------------------------
+
+
+def bounding_box(monitors: list[dict]) -> tuple[int, int, int, int]:
+    """The smallest rectangle around every monitor: `(x, y, width, height)`.
+
+    This is the framebuffer, and therefore the coordinate space of the `all`
+    pseudo monitor: a screenshot of `all` is the whole screen, and a click in it
+    is an absolute point.
+    """
+    if not monitors:
+        raise Failure("the desktop reports no monitor")
+    left = min(int(monitor["x"]) for monitor in monitors)
+    top = min(int(monitor["y"]) for monitor in monitors)
+    right = max(int(monitor["x"]) + int(monitor["width"]) for monitor in monitors)
+    bottom = max(int(monitor["y"]) + int(monitor["height"]) for monitor in monitors)
+    return left, top, right - left, bottom - top
+
+
+def all_monitor(monitors: list[dict]) -> dict:
+    """The pseudo monitor `all`: the whole framebuffer, at its own origin."""
+    left, top, width, height = bounding_box(monitors)
+    return {"id": "all", "name": "All monitors", "x": left, "y": top, "width": width, "height": height}
+
+
+def monitor_by_ref(layout: dict, reference: Any) -> dict:
+    """The monitor a reference points at: an id, a 1-based index, a name or `all`.
+
+    An agent that read a screenshot says `m2`, one that counted tabs says `2`,
+    an operator says `Monitor 2`, and a call about the whole screen says `all`;
+    all four have to end at the same rectangle. An unknown or missing reference
+    is a `Failure` naming the monitors that do exist, so the next call can be
+    right instead of guessed.
+    """
+    monitors = layout.get("monitors") or []
+    if not isinstance(monitors, list) or not monitors:
+        raise Failure("the desktop reports no monitor")
+
+    text = "all" if reference is None else str(reference).strip()
+    if text == "" or text.lower() in ("all", "*", "any"):
+        return all_monitor(monitors)
+
+    for monitor in monitors:
+        if str(monitor.get("id")) == text:
+            return monitor
+    for monitor in monitors:
+        if str(monitor.get("name", "")).lower() == text.lower():
+            return monitor
+    if text.isdigit():
+        index = int(text) - 1
+        if 0 <= index < len(monitors):
+            return monitors[index]
+
+    known = ", ".join(f"{monitor.get('id')} ({monitor.get('name')})" for monitor in monitors)
+    raise Failure(f"no monitor {text}; the desktop has {known} and `all`")
+
+
+def to_absolute(x: Any, y: Any, monitor: dict) -> tuple[int, int]:
+    """A point relative to one monitor as an absolute framebuffer point.
+
+    A position outside the monitor is clamped to its last pixel rather than
+    rejected: an agent that aimed at a window's corner one pixel past the edge
+    meant to click that corner, and a click on a neighbouring monitor would act
+    on something it never looked at.
+    """
+    relative_x = _whole(x, "x")
+    relative_y = _whole(y, "y")
+    width = int(monitor["width"])
+    height = int(monitor["height"])
+    inside_x = max(0, min(relative_x, width - 1))
+    inside_y = max(0, min(relative_y, height - 1))
+    return int(monitor["x"]) + inside_x, int(monitor["y"]) + inside_y
+
+
+def _whole(value: Any, name: str) -> int:
+    """A whole number from a tool argument, refusing booleans and text."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise Failure(f"{name} must be a whole number of pixels")
+    return value
+
+
+def monitor_of(x: int, y: int, monitors: list[dict]) -> dict | None:
+    """The monitor that covers an absolute point, or None for a black corner.
+
+    A window can sit in the empty corner of an L-shaped layout; reporting the
+    monitor it overlaps most would be a guess, so the caller gets `None` and the
+    window keeps its geometry.
+    """
+    for monitor in monitors:
+        left = int(monitor["x"])
+        top = int(monitor["y"])
+        if left <= x < left + int(monitor["width"]) and top <= y < top + int(monitor["height"]):
+            return monitor
+    return None
+
+
+def parse_wmctrl(text: str) -> list[dict]:
+    """The windows from `wmctrl -lGx` output.
+
+    The line is `id desktop x y width height class host title`; the host and the
+    title share the last field, so they are split there. Lines that are not a
+    window (a manager's banner, a truncated line) are dropped rather than turned
+    into a window with zero size.
+    """
+    windows = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split(None, 7)
+        if len(fields) < 7:
+            continue
+        try:
+            x, y, width, height = (int(value) for value in fields[2:6])
+        except ValueError:
+            continue
+        tail = fields[7] if len(fields) > 7 else ""
+        _host, _, title = tail.partition(" ")
+        windows.append(
+            {
+                "id": fields[0],
+                "desktop": fields[1],
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "class": fields[6],
+                "title": title.strip() or tail.strip(),
+            }
+        )
+    return windows
+
+
+def key_combo(keys: Any) -> list[str]:
+    """A key spec as the chords `xdotool key` takes, one per comma.
+
+    `ctrl+l` stays a chord; `ctrl+l, Return` is two, sent in that order. A model
+    that writes `Control+L` or `Win+e` means the modifier xdotool calls `ctrl`
+    and `super`, so the modifier names are folded and the key name is not: `F4`
+    and `a` are different keysyms from `f4` and `A`.
+    """
+    if not isinstance(keys, str) or not keys.strip():
+        raise Failure("keys must be a key combination like ctrl+l or alt+F4")
+    chords = []
+    for part in keys.split(","):
+        part = part.strip()
+        if not part:
+            raise Failure("keys has an empty combination")
+        steps = [step.strip() for step in part.split("+")]
+        if any(not step for step in steps):
+            raise Failure(f"{part} is not a key combination")
+        normalized = [MODIFIER_ALIASES.get(step.lower(), step) for step in steps]
+        chords.append("+".join(normalized))
+    return chords
+
+
+def thumbnail_percent(scale: Any) -> int:
+    """A scale factor as scrot's percentage, held to the documented 25–100 %.
+
+    Below 25 % a screenshot of a 4K monitor is too small to read a title bar in;
+    above 100 % scrot would upscale, which invents pixels an agent would click
+    on as if they were real.
+    """
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)):
+        raise Failure("scale must be a number from 0.25 to 1")
+    percent = int(round(float(scale) * 100))
+    return max(25, min(100, percent))
+
+
+def png_size(data: bytes) -> tuple[int, int] | None:
+    """The pixel size of a PNG, from its IHDR header, or None.
+
+    The size is read back rather than computed from the requested scale: scrot
+    rounds, and an agent that maps a click from a screenshot needs the pixels it
+    actually got.
+    """
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+# --------------------------------------------------------------------------
+# Talking to the desktop
+# --------------------------------------------------------------------------
+
+
+def run(command: list[str]) -> str:
+    """Run one command on the sandbox display and return its standard output.
+
+    No shell is involved and DISPLAY is forced, so a caller that arrived through
+    `docker exec` (with no DISPLAY) still talks to the same screen the console
+    shows.
+    """
+    environment = dict(os.environ)
+    environment["DISPLAY"] = DISPLAY
+    environment["NESTBOX_DISPLAY_ACTOR"] = ACTOR
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT,
+            env=environment,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise Failure(f"{command[0]} is not installed in this sandbox") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise Failure(f"{command[0]} did not answer within {TIMEOUT} s") from exc
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout).strip() or f"exit {result.returncode}"
+        raise Failure(f"{command[0]}: {message}")
+    return result.stdout
+
+
+def spawn(command: list[str]) -> None:
+    """Start a program detached from this server, so it outlives the call.
+
+    `start_new_session` is setsid: the program gets its own session, keeps
+    running when the JSON-RPC call returns, and does not receive this server's
+    interrupts.
+    """
+    environment = dict(os.environ)
+    environment["DISPLAY"] = DISPLAY
+    try:
+        subprocess.Popen(  # noqa: S603 - an allowlisted argument vector, no shell
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+            start_new_session=True,
+        )
+    except FileNotFoundError as exc:
+        raise Failure(f"{command[0]} is not installed in this sandbox") from exc
+
+
+def current_layout() -> dict:
+    """The layout `nestbox-display` reports: mode, monitors, framebuffer.
+
+    `nestbox-display` answers one JSON line and signals its own errors inside
+    that line, so both an unreadable answer and an `error` line become one
+    message here.
+    """
+    output = run(["nestbox-display", "get"])
+    try:
+        layout = json.loads(output)
+    except ValueError as exc:
+        raise Failure(f"nestbox-display answered with something that is not JSON: {output[:200]}") from exc
+    if not isinstance(layout, dict):
+        raise Failure("nestbox-display answered with something that is not a layout")
+    if layout.get("error"):
+        raise Failure(str(layout["error"]))
+    if not isinstance(layout.get("monitors"), list) or not layout["monitors"]:
+        raise Failure("the desktop reports no monitor")
+    return layout
+
+
+def display_command(arguments: list[str]) -> dict:
+    """One `nestbox-display` command, with its JSON answer as the result."""
+    output = run(["nestbox-display", *arguments])
+    try:
+        answer = json.loads(output)
+    except ValueError as exc:
+        raise Failure(f"nestbox-display answered with something that is not JSON: {output[:200]}") from exc
+    if isinstance(answer, dict) and answer.get("error"):
+        raise Failure(str(answer["error"]))
+    return answer if isinstance(answer, dict) else {"result": answer}
+
+
+def pointer(arguments: dict[str, Any]) -> tuple[dict, dict, int, int]:
+    """The layout, the monitor and the absolute point one pointer call names."""
+    layout = current_layout()
+    monitor = monitor_by_ref(layout, arguments.get("monitor", "m1"))
+    absolute_x, absolute_y = to_absolute(arguments.get("x"), arguments.get("y"), monitor)
+    return layout, monitor, absolute_x, absolute_y
+
+
+def text_result(payload: Any) -> list[dict]:
+    """A tool result as one readable JSON text block."""
+    return [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2)}]
+
+
+# --------------------------------------------------------------------------
+# Tools
+# --------------------------------------------------------------------------
+
+
+def tool_layout(_arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_layout` — the monitors, their places, the mode and the framebuffer."""
+    return text_result(current_layout())
+
+
+def tool_set_layout(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_set_layout` — apply a whole layout (mode + monitors)."""
+    layout = arguments.get("layout")
+    if isinstance(layout, str):
+        try:
+            layout = json.loads(layout)
+        except ValueError as exc:
+            raise Failure(f"layout is not JSON: {exc.msg}") from exc
+    if not isinstance(layout, dict) or not isinstance(layout.get("monitors"), list):
+        raise Failure("layout must be an object with a mode and a list of monitors")
+    return text_result(display_command(["set", json.dumps(layout)]))
+
+
+def tool_add_monitor(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_add_monitor` — one more monitor at the right or bottom edge."""
+    width = _whole(arguments.get("width"), "width")
+    height = _whole(arguments.get("height"), "height")
+    position = str(arguments.get("position") or "right").strip().lower()
+    if position not in ("right", "below"):
+        raise Failure('position must be "right" or "below"')
+    return text_result(display_command(["add", f"{width}x{height}", position]))
+
+
+def tool_remove_monitor(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_remove_monitor` — drop one monitor; the last one stays."""
+    layout = current_layout()
+    monitor = monitor_by_ref(layout, arguments.get("monitor"))
+    if monitor["id"] == "all":
+        raise Failure("which monitor? give its id, its name or its 1-based number")
+    return text_result(display_command(["remove", str(monitor["id"])]))
+
+
+def tool_resize_monitor(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_resize_monitor` — change one monitor's size."""
+    width = _whole(arguments.get("width"), "width")
+    height = _whole(arguments.get("height"), "height")
+    layout = current_layout()
+    monitor = monitor_by_ref(layout, arguments.get("monitor"))
+    if monitor["id"] == "all":
+        raise Failure("which monitor? give its id, its name or its 1-based number")
+    return text_result(display_command(["resize", str(monitor["id"]), f"{width}x{height}"]))
+
+
+def tool_move_monitor(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_move_monitor` — put one monitor at a position; it must still touch."""
+    x = _whole(arguments.get("x"), "x")
+    y = _whole(arguments.get("y"), "y")
+    layout = current_layout()
+    monitor = monitor_by_ref(layout, arguments.get("monitor"))
+    if monitor["id"] == "all":
+        raise Failure("which monitor? give its id, its name or its 1-based number")
+    return text_result(display_command(["move", str(monitor["id"]), str(x), str(y)]))
+
+
+def tool_set_mode(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_set_mode` — separate screens, or one screen over all of them."""
+    mode = str(arguments.get("mode") or "").strip().lower()
+    if mode not in ("separate", "stretched"):
+        raise Failure('mode must be "separate" or "stretched"')
+    return text_result(display_command(["mode", mode]))
+
+
+def tool_screenshot(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_screenshot` — one monitor (or all of them) as a PNG.
+
+    `scrot -a` crops to the monitor's rectangle inside the framebuffer, and
+    `-t` scales it, so the agent receives a readable image instead of a 4K
+    screen it cannot afford in context. The text block names the pixels it got
+    and where the monitor sits, which is what a later click has to use.
+    """
+    layout = current_layout()
+    monitor = monitor_by_ref(layout, arguments.get("monitor", "all"))
+    percent = thumbnail_percent(arguments.get("scale", 0.5))
+    crop = (
+        f"{int(monitor['x'])},{int(monitor['y'])},"
+        f"{int(monitor['width'])},{int(monitor['height'])}"
+    )
+    run(["scrot", "--overwrite", "-a", crop, "-t", str(percent), SHOT_PATH])
+    try:
+        with open(SHOT_PATH, "rb") as handle:
+            image = handle.read()
+    except OSError as exc:
+        raise Failure(f"scrot wrote no screenshot: {exc}") from exc
+    if not image:
+        raise Failure("scrot wrote an empty screenshot")
+    width, height = png_size(image) or (monitor["width"], monitor["height"])
+    summary = {
+        "monitor": monitor["id"],
+        "monitor_name": monitor.get("name"),
+        "monitor_geometry": {
+            "x": int(monitor["x"]),
+            "y": int(monitor["y"]),
+            "width": int(monitor["width"]),
+            "height": int(monitor["height"]),
+        },
+        "image_pixels": {"width": width, "height": height},
+        "mode": layout.get("mode"),
+        "monitors": len(layout["monitors"]),
+        "note": (
+            "Coordinates in this image are monitor-relative; divide an image pixel by "
+            f"{width / max(1, int(monitor['width'])):.4f} to get a monitor coordinate, "
+            "then call desktop_click with the same monitor."
+        ),
+    }
+    return [
+        {"type": "text", "text": json.dumps(summary, ensure_ascii=False, indent=2)},
+        {"type": "image", "data": base64.b64encode(image).decode("ascii"), "mimeType": "image/png"},
+    ]
+
+
+def tool_click(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_click` — click a point that is relative to one monitor."""
+    button_name = str(arguments.get("button") or "left").strip().lower()
+    if button_name not in BUTTONS:
+        raise Failure("button must be left, middle or right")
+    double = bool(arguments.get("double"))
+    _layout, monitor, absolute_x, absolute_y = pointer(arguments)
+    command = ["xdotool", "mousemove", "--sync", str(absolute_x), str(absolute_y), "click"]
+    if double:
+        command += ["--repeat", "2", "--delay", "80"]
+    command.append(str(BUTTONS[button_name]))
+    run(command)
+    return text_result(
+        {
+            "monitor": monitor["id"],
+            "relative": {"x": _whole(arguments.get("x"), "x"), "y": _whole(arguments.get("y"), "y")},
+            "absolute": {"x": absolute_x, "y": absolute_y},
+            "button": button_name,
+            "double": double,
+        }
+    )
+
+
+def tool_drag(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_drag` — press at one point, move, release; across monitors too.
+
+    The motion is walked in steps: a window manager needs pointer motion to
+    start a drag, and one jump from A to B is a drop onto whatever is under B.
+    """
+    layout = current_layout()
+    start = _point(arguments.get("from"), layout, "from")
+    end = _point(arguments.get("to"), layout, "to")
+    button = str(arguments.get("button") or "left").strip().lower()
+    if button not in BUTTONS:
+        raise Failure("button must be left, middle or right")
+    number = BUTTONS[button]
+
+    run(["xdotool", "mousemove", "--sync", str(start[0]), str(start[1]), "mousedown", str(number)])
+    steps = 12
+    for step in range(1, steps + 1):
+        x = start[0] + (end[0] - start[0]) * step // steps
+        y = start[1] + (end[1] - start[1]) * step // steps
+        run(["xdotool", "mousemove", "--sync", str(x), str(y)])
+        time.sleep(0.01)
+    run(["xdotool", "mouseup", str(number)])
+    return text_result(
+        {
+            "from": {"monitor": start[2]["id"], "relative": start[3], "absolute": {"x": start[0], "y": start[1]}},
+            "to": {"monitor": end[2]["id"], "relative": end[3], "absolute": {"x": end[0], "y": end[1]}},
+            "button": button,
+        }
+    )
+
+
+def _point(value: Any, layout: dict, name: str) -> tuple[int, int, dict, dict]:
+    """One `{x, y, monitor}` argument as absolute point, monitor and relative point."""
+    if not isinstance(value, dict):
+        raise Failure(f"{name} must be an object with x, y and optionally monitor")
+    monitor = monitor_by_ref(layout, value.get("monitor", "m1"))
+    relative = {"x": _whole(value.get("x"), f"{name}.x"), "y": _whole(value.get("y"), f"{name}.y")}
+    absolute_x, absolute_y = to_absolute(relative["x"], relative["y"], monitor)
+    return absolute_x, absolute_y, monitor, relative
+
+
+def tool_move_mouse(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_move_mouse` — park the pointer on a monitor-relative point."""
+    _layout, monitor, absolute_x, absolute_y = pointer(arguments)
+    run(["xdotool", "mousemove", "--sync", str(absolute_x), str(absolute_y)])
+    return text_result(
+        {
+            "monitor": monitor["id"],
+            "relative": {"x": _whole(arguments.get("x"), "x"), "y": _whole(arguments.get("y"), "y")},
+            "absolute": {"x": absolute_x, "y": absolute_y},
+        }
+    )
+
+
+def tool_scroll(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_scroll` — move to a point and turn one of the four wheel axes."""
+    direction = str(arguments.get("direction") or "down").strip().lower()
+    if direction not in SCROLL_BUTTONS:
+        raise Failure("direction must be up, down, left or right")
+    amount = _whole(arguments.get("amount", 3), "amount")
+    if not 1 <= amount <= 50:
+        raise Failure("amount must be 1 to 50")
+    _layout, monitor, absolute_x, absolute_y = pointer(arguments)
+    run(
+        [
+            "xdotool",
+            "mousemove",
+            "--sync",
+            str(absolute_x),
+            str(absolute_y),
+            "click",
+            "--repeat",
+            str(amount),
+            "--delay",
+            "40",
+            str(SCROLL_BUTTONS[direction]),
+        ]
+    )
+    return text_result(
+        {
+            "monitor": monitor["id"],
+            "relative": {"x": _whole(arguments.get("x"), "x"), "y": _whole(arguments.get("y"), "y")},
+            "absolute": {"x": absolute_x, "y": absolute_y},
+            "direction": direction,
+            "amount": amount,
+        }
+    )
+
+
+def tool_type(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_type` — type text into whatever has the keyboard focus."""
+    text = arguments.get("text")
+    if not isinstance(text, str) or not text:
+        raise Failure("text must be a non-empty string")
+    delay = _whole(arguments.get("delay_ms", 12), "delay_ms")
+    if not 0 <= delay <= 200:
+        raise Failure("delay_ms must be 0 to 200")
+    # `--` ends xdotool's own option parsing, so text that starts with a dash is
+    # typed instead of read as a flag.
+    run(["xdotool", "type", "--delay", str(delay), "--", text])
+    return text_result({"typed": text, "characters": len(text), "delay_ms": delay})
+
+
+def tool_key(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_key` — send key combinations such as `ctrl+l` or `alt+F4`."""
+    chords = key_combo(arguments.get("keys"))
+    run(["xdotool", "key", *chords])
+    return text_result({"keys": chords})
+
+
+def tool_windows(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_windows` — every window with its geometry and its monitor."""
+    layout = current_layout()
+    windows = parse_wmctrl(run(["wmctrl", "-lGx"]))
+    for window in windows:
+        monitor = monitor_of(window["x"], window["y"], layout["monitors"])
+        window["monitor"] = monitor["id"] if monitor else None
+    return text_result({"monitors": [monitor["id"] for monitor in layout["monitors"]], "windows": windows})
+
+
+def tool_focus(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_focus` — raise a window by id, class or part of its title."""
+    window = _window_name(arguments, "focus")
+    if WINDOW_ID.match(window):
+        run(["wmctrl", "-i", "-a", window])
+    else:
+        run(["wmctrl", "-a", window])
+    return text_result({"focused": window})
+
+
+def tool_place(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_place` — move a window onto one monitor, optionally maximized."""
+    window = _window_name(arguments, "place")
+    layout = current_layout()
+    monitor = monitor_by_ref(layout, arguments.get("monitor", "m1"))
+    if monitor["id"] == "all":
+        raise Failure("which monitor? give its id, its name or its 1-based number")
+    command = ["place", window, str(monitor["id"])]
+    if bool(arguments.get("maximize")):
+        command.append("maximize")
+    return text_result(display_command(command))
+
+
+def tool_span(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_span` — one window over every monitor, un-maximized first."""
+    window = _window_name(arguments, "span")
+    return text_result(display_command(["span", window]))
+
+
+def _window_name(arguments: dict[str, Any], verb: str) -> str:
+    """The required `window` argument, refused when it is empty."""
+    window = arguments.get("window")
+    if not isinstance(window, str) or not window.strip():
+        raise Failure(f"{verb} needs a window: its id, its class or part of its title")
+    return window.strip()
+
+
+def tool_launch(arguments: dict[str, Any]) -> list[dict]:
+    """`desktop_launch` — start one allowlisted desktop program, detached."""
+    app = str(arguments.get("app") or "").strip().lower()
+    if app not in LAUNCHERS:
+        raise Failure(f"app must be one of {', '.join(sorted(LAUNCHERS))}")
+    command = list(LAUNCHERS[app])
+    if app == "chrome":
+        # The same profile as the Chrome that is already running: with that
+        # profile Chrome forwards the request to the running instance instead
+        # of starting a second one, which is a new window on the existing
+        # session, cookies and logins included.
+        home = os.getenv("HOME") or "."
+        command += [f"--user-data-dir={home}/.config/nestbox-chrome"]
+    spawn(command)
+    return text_result({"launched": app, "command": command})
+
+
+TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "desktop_layout",
+        "description": (
+            "The monitors of this desktop: their ids, names, sizes, positions, the mode "
+            "(separate screens or one stretched screen) and the framebuffer size. Call this "
+            "before a screenshot or a click so you know which monitors exist."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "desktop_set_layout",
+        "description": (
+            "Apply a whole monitor layout in one call: a mode and 1 to 8 monitors, each with "
+            "id, width, height, x and y. Monitors may not overlap and must touch at an edge. "
+            "Use it to restore a known arrangement; for one change use the add, remove, "
+            "resize, move or mode tools."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout": {
+                    "type": "object",
+                    "description": (
+                        "{\"mode\": \"separate\"|\"stretched\", \"monitors\": [{\"id\", \"name\", "
+                        "\"width\", \"height\", \"x\", \"y\", \"primary\"}]}"
+                    ),
+                }
+            },
+            "required": ["layout"],
+        },
+    },
+    {
+        "name": "desktop_add_monitor",
+        "description": (
+            "Add one monitor, touching the right edge (default) or the bottom edge of the "
+            "current arrangement. Each side is 320 to 7680 pixels; at most 8 monitors."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "width": {"type": "integer", "minimum": 320, "maximum": 7680},
+                "height": {"type": "integer", "minimum": 320, "maximum": 7680},
+                "position": {"type": "string", "enum": ["right", "below"], "default": "right"},
+            },
+            "required": ["width", "height"],
+        },
+    },
+    {
+        "name": "desktop_remove_monitor",
+        "description": "Remove one monitor from the layout. The last monitor cannot be removed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "monitor": {"type": "string", "description": "An id like m2, a 1-based number, or a name."}
+            },
+            "required": ["monitor"],
+        },
+    },
+    {
+        "name": "desktop_resize_monitor",
+        "description": "Change one monitor's size. Each side is 320 to 7680 pixels.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "monitor": {"type": "string"},
+                "width": {"type": "integer", "minimum": 320, "maximum": 7680},
+                "height": {"type": "integer", "minimum": 320, "maximum": 7680},
+            },
+            "required": ["monitor", "width", "height"],
+        },
+    },
+    {
+        "name": "desktop_move_monitor",
+        "description": (
+            "Move one monitor to a position in the framebuffer. It must still touch another "
+            "monitor at an edge and may not overlap one."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "monitor": {"type": "string"},
+                "x": {"type": "integer", "minimum": 0},
+                "y": {"type": "integer", "minimum": 0},
+            },
+            "required": ["monitor", "x", "y"],
+        },
+    },
+    {
+        "name": "desktop_set_mode",
+        "description": (
+            "`separate` gives every monitor its own screen, so maximize and fullscreen stay "
+            "on one monitor. `stretched` lays one screen over all of them, so maximize and "
+            "fullscreen fill the whole area."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"mode": {"type": "string", "enum": ["separate", "stretched"]}},
+            "required": ["mode"],
+        },
+    },
+    {
+        "name": "desktop_screenshot",
+        "description": (
+            "A PNG of one monitor, or of all of them (default). Coordinates in the image are "
+            "relative to that monitor: to click something you see, use desktop_click with the "
+            "same monitor and the pixel divided by the reported scale. `scale` 0.25 to 1 "
+            "(default 0.5) keeps the image small enough to read comfortably."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "monitor": {"type": "string", "default": "all"},
+                "scale": {"type": "number", "minimum": 0.25, "maximum": 1, "default": 0.5},
+            },
+        },
+    },
+    {
+        "name": "desktop_click",
+        "description": (
+            "Click a point that is relative to one monitor (default m1). The answer echoes the "
+            "absolute framebuffer point. A point outside the monitor is clamped to its edge, "
+            "never moved onto a neighbour."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "Pixels from the monitor's left edge."},
+                "y": {"type": "integer", "description": "Pixels from the monitor's top edge."},
+                "monitor": {"type": "string", "default": "m1"},
+                "button": {"type": "string", "enum": ["left", "middle", "right"], "default": "left"},
+                "double": {"type": "boolean", "default": False},
+            },
+            "required": ["x", "y"],
+        },
+    },
+    {
+        "name": "desktop_drag",
+        "description": (
+            "Press at one point, move to another and release, in steps, so a window manager "
+            "sees a drag. Works across monitors; both points name their own monitor."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "from": {"type": "object", "description": "{x, y, monitor}"},
+                "to": {"type": "object", "description": "{x, y, monitor}"},
+                "button": {"type": "string", "enum": ["left", "middle", "right"], "default": "left"},
+            },
+            "required": ["from", "to"],
+        },
+    },
+    {
+        "name": "desktop_move_mouse",
+        "description": "Move the pointer to a monitor-relative point without clicking.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "monitor": {"type": "string", "default": "m1"},
+            },
+            "required": ["x", "y"],
+        },
+    },
+    {
+        "name": "desktop_scroll",
+        "description": "Move to a monitor-relative point and turn the wheel there.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "monitor": {"type": "string", "default": "m1"},
+                "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "default": "down"},
+                "amount": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3},
+            },
+            "required": ["x", "y"],
+        },
+    },
+    {
+        "name": "desktop_type",
+        "description": (
+            "Type text into the window that has the keyboard focus: shell commands, a message, "
+            "a form. Use desktop_key for special keys and shortcuts."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "delay_ms": {"type": "integer", "minimum": 0, "maximum": 200, "default": 12},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "desktop_key",
+        "description": (
+            "Send key combinations, comma-separated for a sequence: `ctrl+l`, `alt+F4`, "
+            "`super`, `ctrl+a, Delete`, `ctrl+shift+t`."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"keys": {"type": "string"}},
+            "required": ["keys"],
+        },
+    },
+    {
+        "name": "desktop_windows",
+        "description": (
+            "Every window with its id, position, size, class, title and the monitor it is on. "
+            "Use an id, a class or part of a title in desktop_focus, desktop_place and desktop_span."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "desktop_focus",
+        "description": "Raise a window by its id (0x…), its class or part of its title.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"window": {"type": "string"}},
+            "required": ["window"],
+        },
+    },
+    {
+        "name": "desktop_place",
+        "description": (
+            "Move a window onto one monitor, optionally maximized there. The window keeps its "
+            "size otherwise, which can leave part of it outside a smaller monitor."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "window": {"type": "string"},
+                "monitor": {"type": "string", "default": "m1"},
+                "maximize": {"type": "boolean", "default": False},
+            },
+            "required": ["window"],
+        },
+    },
+    {
+        "name": "desktop_span",
+        "description": (
+            "Stretch one window over every monitor, e.g. Chrome over a wall of screens. It is "
+            "un-maximized first, because a maximized window ignores a resize request."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"window": {"type": "string"}},
+            "required": ["window"],
+        },
+    },
+    {
+        "name": "desktop_launch",
+        "description": (
+            "Start one of the desktop's own programs: `chrome` (a new window of the running "
+            "profile, the same cookies and logins), `terminal`, `files` or `text-editor`. "
+            "Nothing outside this list can be started."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"app": {"type": "string", "enum": sorted(LAUNCHERS)}},
+            "required": ["app"],
+        },
+    },
+]
+
+HANDLERS = {
+    "desktop_layout": tool_layout,
+    "desktop_set_layout": tool_set_layout,
+    "desktop_add_monitor": tool_add_monitor,
+    "desktop_remove_monitor": tool_remove_monitor,
+    "desktop_resize_monitor": tool_resize_monitor,
+    "desktop_move_monitor": tool_move_monitor,
+    "desktop_set_mode": tool_set_mode,
+    "desktop_screenshot": tool_screenshot,
+    "desktop_click": tool_click,
+    "desktop_drag": tool_drag,
+    "desktop_move_mouse": tool_move_mouse,
+    "desktop_scroll": tool_scroll,
+    "desktop_type": tool_type,
+    "desktop_key": tool_key,
+    "desktop_windows": tool_windows,
+    "desktop_focus": tool_focus,
+    "desktop_place": tool_place,
+    "desktop_span": tool_span,
+    "desktop_launch": tool_launch,
+}
+
+INSTRUCTIONS = (
+    "Use this server to see and operate the whole desktop of the sandbox, not only the browser. "
+    "Call desktop_layout first: monitors are `m1`…`m8`, a 1-based number, a name, or `all`. "
+    "Screenshots and pointer coordinates are relative to the monitor the call names, and every "
+    "answer echoes the absolute point. A person may be watching the same screen in the console, "
+    "so put windows where they expect them and leave the layout as you found it unless the task "
+    "says otherwise."
+)
+
+
+# --------------------------------------------------------------------------
+# JSON-RPC over stdio
+# --------------------------------------------------------------------------
+
+
+def ok(identifier: Any, result: Any) -> dict:
+    """A JSON-RPC success answer."""
+    return {"jsonrpc": "2.0", "id": identifier, "result": result}
+
+
+def error(identifier: Any, code: int, message: str) -> dict:
+    """A JSON-RPC protocol error, for a request that is wrong, not a tool that failed."""
+    return {"jsonrpc": "2.0", "id": identifier, "error": {"code": code, "message": message}}
+
+
+def tool_error(identifier: Any, message: str) -> dict:
+    """A tool that could not do its job: a result with `isError`, so the model may retry."""
+    return ok(identifier, {"content": [{"type": "text", "text": message}], "isError": True})
+
+
+def handle(request: Any) -> dict | None:
+    """One JSON-RPC request to (answer or None). Never raises.
+
+    `None` means "send nothing": a notification has no id to answer, and the
+    MCP handshake sends one (`notifications/initialized`) that must not get a
+    reply.
+    """
+    if not isinstance(request, dict):
+        return error(None, -32600, "expected one JSON-RPC request object")
+    method = request.get("method")
+    identifier = request.get("id")
+    params = request.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    if not isinstance(method, str):
+        return error(identifier, -32600, "method must be a string")
+
+    if method.startswith("notifications/"):
+        return None
+
+    if method == "initialize":
+        requested = params.get("protocolVersion")
+        version = requested if requested in SUPPORTED_PROTOCOLS else PROTOCOL_VERSION
+        return ok(
+            identifier,
+            {
+                "protocolVersion": version,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+                "instructions": INSTRUCTIONS,
+            },
+        )
+
+    if method == "ping":
+        return ok(identifier, {})
+
+    if method == "tools/list":
+        return ok(identifier, {"tools": TOOLS})
+
+    if method == "tools/call":
+        name = str(params.get("name") or "")
+        handler = HANDLERS.get(name)
+        if handler is None:
+            return error(identifier, -32602, f"unknown tool: {name}")
+        arguments = params.get("arguments")
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            return error(identifier, -32602, "arguments must be an object")
+        try:
+            content = handler(arguments)
+        except Failure as exc:
+            return tool_error(identifier, str(exc))
+        except (OSError, ValueError, KeyError) as exc:
+            return tool_error(identifier, f"failed: {exc}")
+        return ok(identifier, {"content": content, "isError": False})
+
+    if identifier is None:
+        return None
+    return error(identifier, -32601, f"method not found: {method}")
+
+
+def serve(stdin: IO[str], stdout: IO[str]) -> None:
+    """Read one JSON-RPC message per line and answer it on one line.
+
+    Line-delimited because that is what a stdio MCP client speaks. Nothing but
+    an answer is ever written to stdout: a log line there would be a protocol
+    error, so diagnostics go to stderr.
+    """
+    for raw in stdin:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except ValueError:
+            _send(stdout, error(None, -32700, "parse error"))
+            continue
+        answer = handle(request)
+        if answer is not None:
+            _send(stdout, answer)
+
+
+def _send(stdout: IO[str], answer: dict) -> None:
+    """Write one answer line and flush it, so a waiting client sees it at once."""
+    stdout.write(json.dumps(answer, ensure_ascii=False) + "\n")
+    stdout.flush()
+
+
+def main() -> int:
+    """Run the stdio server until the client closes the pipe."""
+    print(f"{SERVER_NAME} {SERVER_VERSION} on DISPLAY={DISPLAY}", file=sys.stderr, flush=True)
+    try:
+        serve(sys.stdin, sys.stdout)
+    except (BrokenPipeError, KeyboardInterrupt):
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
