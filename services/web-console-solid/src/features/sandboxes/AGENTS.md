@@ -53,6 +53,8 @@ on it.
 | `StackTopology.jsx`, `stackLayout.js` | The Topology tab: the stack from you to the internet drawn by `TopologyCanvas` (layers from the server), live every 5 s, with a detail panel of facts, connections and log below. `stackLayout.js` is pure (`node --test stackLayout.test.js`) |
 | `MapTab.jsx` | Hands the sandbox to `StackTopology.jsx`; the tab is registered as Topology |
 | `DashboardTab.jsx`, `ProcessesTab.jsx`, `InventoryTab.jsx`, `TrafficTab.jsx`, `McpTab.jsx`, `TerminalTab.jsx` | The deck's live tabs: usage and status, `docker top`, snapshot, every request with its decision (and "allow this"), MCP servers and calls, xterm.js over the terminal WebSocket. All poll every 4-5 s through `components/Poll.js` |
+| `MountEditor.jsx`, `MountRow.jsx`, `PathList.jsx`, `mountEditor.js` | F15: what a sandbox can touch. Mounted roots with an RO/RW chip, the filesystem policy's read-only/read-write paths, roots that could be mounted; Apply now (recreate) / Apply later / Discard via `api/mounts.js`. `policyMode` (props `spec`, `onChange`) renders only the path lists for the policy wizard. `mountEditor.js` is pure (`node --test mountEditor.test.js`); styles in `styles/mounts.css` |
+| `MountsTab.jsx` | Only renders `MountEditor` for the sandbox |
 | `ResourcesPanel.jsx` | Memory, CPU and process limits, changed on the running sandbox |
 | `SshAccessSection.jsx` | Operator keys and temporary user name/password logins, per sandbox |
 | `stacks.js` | Grouping the flat page into stacks; a member whose lead is on another page stays a row of its own and names its lead. Test: `node --test stacks.test.js` |
@@ -111,4 +113,4 @@ capped at 64 KiB, with the exit code. That is enough to ask Hermes a question
 or inspect a file, and it keeps every run in the audit trail as an argument
 vector. An interactive terminal is a later transport, not a change to this one.
 
-`MountEditor.jsx` (F15) and `CreateSandboxWizard.jsx` (F24) are placeholders created in Wave 0.
+`CreateSandboxWizard.jsx` (F24) is a placeholder created in Wave 0.
