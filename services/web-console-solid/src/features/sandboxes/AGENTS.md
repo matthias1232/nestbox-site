@@ -61,8 +61,11 @@ on it.
 | `SandboxDetail.jsx` | Drawer with overview, agents, logs, shell, rules, inference |
 | `AgentsTab.jsx` | Agents of one sandbox: list, add, remove with "keep its data" (`feat/ui-sandbox-resources`) |
 | `useSandboxAgents.js` | Agents, pack catalog, add and remove; treats `agent.exists` and `agent.not_found` as sentences, not crashes (`feat/ui-sandbox-resources`) |
-| `AdminCenter.jsx` | The full-screen Admin Center shell: header, actions, tab strip; owns no tab body |
-| `DashboardTab.jsx` | Metrics, top processes, last blocks, MCP servers (`feat/admin-console-shell`) |
+| `AdminCenter.jsx` | The Admin Center frame: `Breadcrumb`, sticky `PageHeader` (status, presence, `ActionBar`), tab strip from `adminTabs.js`, body switch. Owns no tab body. The tab is in the URL (`?tab=`, written with `navigate(paths.sandbox(id, tab))`); Live (Connections / Commands / Chats) and Console (Shell / Desktop) are grouped tabs with a switch. The Mounts body is the constant `MountsBody` (swap to `MountEditor` when F15 lands). It imports `workbox/MoveDialog.jsx` through `ActionBar.jsx`; the workbox already imports from here, so the exception goes both ways for `MoveDialog` |
+| `ActionBar.jsx` | Sticky action bar: Start / Stop / Restart / Recreate / Move / Console split button / Allow all 15 min (becomes "Stop allowing" with a `Countdown`) / Policies / Workbox. Stop (when agents are busy) and Recreate ask first; a toast reports each result |
+| `SummaryTab.jsx` | Summary tab: tiles, CPU and memory `Gauge`s and `Sparkline`s (metrics every 5 s), last refused with "Allow 15 min", models, first 5 mounts, open sessions |
+| `adminTabs.js`, `adminTabs.test.js` | Ordered tab list with `minRole`, old-id aliases (`dashboard`, `terminal`, ...), `tabsFor(role)`, `resolveTab`. Test: `node --test adminTabs.test.js` |
+| `DashboardTab.jsx` | Metrics, top processes, last blocks, MCP servers; now registered as the Resources tab; CPU and memory use `Gauge` and `Sparkline` (`feat/admin-console-shell`) |
 | `TrafficTab.jsx` | Live table, filters, "allow this", temporary window (`feat/console-traffic`) |
 | `McpTab.jsx` | Servers, tools, calls, visibility per transport (`feat/console-mcp`) |
 | `TerminalTab.jsx` | xterm.js over the terminal WebSocket; my tab list is read from and written to the server, so a reload reopens the same shells. `showAll` (on by default) merges everybody's tabs from `presence.tabsAll` with who is in each, `fixedTab` shows one tab alone for a pop-out. A tab menu offers pop-out, the SSH/PuTTY line, "close for me" (my list only, the shell keeps running) and "close for everyone" (`feat/console-terminal`, workbox) |
