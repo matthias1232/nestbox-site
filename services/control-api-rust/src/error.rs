@@ -45,6 +45,13 @@ impl ErrorCode {
     /// WebSocket is not covered by the same-origin policy, so this check is the
     /// only thing standing between a logged-in operator and a page they visit.
     pub const SANDBOX_TERMINAL_ORIGIN: Self = Self("sandbox.terminal_origin_refused");
+    /// A desktop-only call reached a sandbox whose image has no desktop pack
+    /// (no `nestbox-display`, no X server). The caller's next step is another
+    /// sandbox, not a retry.
+    pub const SANDBOX_NO_DESKTOP: Self = Self("sandbox.no_desktop");
+    /// The display layout was changed by somebody else since the caller read it;
+    /// `details` carries the layout that is on the screen now.
+    pub const DISPLAY_CHANGED: Self = Self("display.changed");
 
     pub const POLICY_NOT_FOUND: Self = Self("policy.not_found");
     pub const POLICY_INVALID: Self = Self("policy.invalid");

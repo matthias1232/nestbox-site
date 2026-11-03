@@ -270,6 +270,8 @@ pub const OPERATIONS: &[Operation] = &[
     op("GET", "/api/v1/sandboxes/{id}/processes", "The sandbox's process table, read live", "sandboxes", "viewer", false, StreamKind::None),
     op("GET", "/api/v1/sandboxes/{id}/live/{kind}", "A live view of the sandbox: connections", "sandboxes", "viewer", false, StreamKind::None),
     op("GET", "/api/v1/sandboxes/{id}/desktop", "The sandbox desktop (VNC over WebSocket)", "sandboxes", "operator", false, StreamKind::Ws),
+    op("GET", "/api/v1/sandboxes/{id}/display", "The monitor layout of a desktop sandbox", "sandboxes", "viewer", false, StreamKind::None),
+    op("PUT", "/api/v1/sandboxes/{id}/display", "Apply a monitor layout to a desktop sandbox", "sandboxes", "member", true, StreamKind::None),
     op("GET", "/api/v1/sandboxes/{id}/inventory", "The last inventory snapshot and its age", "sandboxes", "viewer", false, StreamKind::None),
     op("POST", "/api/v1/sandboxes/{id}/inventory/refresh", "Take a new inventory snapshot", "sandboxes", "operator", true, StreamKind::None),
     op("POST", "/api/v1/internal/metrics/ingest", "Record a batch of resource samples (node token)", "sandboxes", "node", false, StreamKind::None),

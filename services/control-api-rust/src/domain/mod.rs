@@ -12,6 +12,7 @@ pub mod auth;
 pub mod builder;
 pub mod chat_turn;
 pub mod cudax;
+pub mod display;
 pub mod egress;
 pub mod environment;
 pub mod gateway;

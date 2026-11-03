@@ -121,6 +121,7 @@ Control Center (Wave 0; contracts C3-C13 of the plan):
 |---|---|
 | `accounting.rs` | Accounting: what a request used, what it cost, and what a window shows; a new row carries the proxy's `detail` identifiers (migration 0087) |
 | `cudax.rs` | CUDA-X components and their installation on a node. |
+| `display.rs` | The display layout of a desktop sandbox: `DisplayLayout`, `Monitor`, `AppliedDisplay`, `bounding_box`, and the `validate` that mirrors `nestbox-display`'s rules and messages one to one (1–8 monitors, 320–7680 per side, positions ≥ 0, no overlap, every monitor touching an edge, box ≤ 16384 × 8640, area ≤ 36 MP) |
 | `environment.rs` | Organization, environment, cluster, and node. |
 | `mod.rs` | Module root: declares and re-exports the submodules. |
 | `provider.rs` | Provider profiles: the shape that makes local and cloud models the same |
