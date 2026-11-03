@@ -48,6 +48,11 @@ the only place those two facts are shown together.
 |---|---|
 | `NodesPage.jsx` | The table: name and key, kind, status, tunnel state, egress lock, container GPU, sandbox count, budget; opens the drawer; keeps the tunnel list fresh |
 | `NodeDrawer.jsx` | One node: facts, budget, probe, its sandboxes, display rename |
+| `NodeWizard.jsx` | Add node wizard: source (script, connect by IP, rent), placement, details, optional model, review; Finish makes one `POST /nodes/quick` and follows the job |
+| `nodeWizard.js` | Pure wizard logic: `steps`, `validate`, `bodyFor`, `reviewLines`, `progressStates`; no JSX |
+| `nodeWizard.test.js` | Its rules, run with `node --test` |
+| `JobProgress.jsx` | A job's step ticks, last log line and optional join-command copy box; polls every 3 s plus live `job` events |
+| `DeleteNodeDialog.jsx` | Delete a node: loads the summary, drains first (move or stop only) when it is not empty |
 | `JoinNode.jsx` | Add a machine by handing out a one-time join command |
 | `ConnectNode.jsx` | Add an existing machine by address: SSH login used once, WireGuard port, egress lock |
 | `TunnelBadge.jsx` | One node's tunnel as a badge: state word, handshake age, colour |
@@ -70,4 +75,4 @@ identity per sandbox, so the only client-side way is one sandbox request per nod
 plus a second placement model in the browser — that duplicates the server's
 placement and would restructure the graph. It belongs in an endpoint change.
 
-`NodeWizard.jsx` is the placeholder of the add-node wizard (F07).
+`JoinNode.jsx` and `ConnectNode.jsx` are no longer mounted by `NodesPage` (the wizard replaced them) but are kept.
