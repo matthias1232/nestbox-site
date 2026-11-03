@@ -15,6 +15,8 @@ const PATHS = {
   Logs: 'M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3',
   Search: 'M2.5 7a4.5 4.5 0 1 0 9 0 4.5 4.5 0 1 0-9 0M10.5 10.5l3.5 3.5',
   Bell: 'M3.5 11.5h9l-1.2-1.8V7a3.3 3.3 0 0 0-6.6 0v2.7zM6.5 13.5h3',
+  // The bell with a diagonal line: the same bell, muted (U05).
+  BellOff: 'M3.5 11.5h9l-1.2-1.8V7a3.3 3.3 0 0 0-6.6 0v2.7zM6.5 13.5h3M2.5 2.5l11 11',
   Help: 'M2 8a6 6 0 1 0 12 0A6 6 0 1 0 2 8M6.2 6.3A1.9 1.9 0 0 1 8 5c1 0 1.9.7 1.9 1.7 0 1.2-1.9 1.5-1.9 2.8M8 11.3h.01',
   Terminal: 'M1.5 2.5h13v11h-13zM4 6l2.2 2L4 10M7.5 10.5h3.5',
   Desktop: 'M1.5 2.5h13v8.5h-13zM5.5 13.5h5M8 11v2.5',
@@ -118,6 +120,11 @@ export function IconSearch(props) {
 // The Bell icon.
 export function IconBell(props) {
   return <Svg name="Bell" {...props} />;
+}
+
+// The crossed Bell icon: the alert pop-ups are muted.
+export function IconBellOff(props) {
+  return <Svg name="BellOff" {...props} />;
 }
 
 // The Help icon.

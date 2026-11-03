@@ -18,6 +18,8 @@ export const DEFAULTS = Object.freeze({
   logPanes: [],
   paletteRecent: [],
   toursDismissed: [],
+  // Alert pop-ups: 'on', 'off' (until the operator turns them on), or { until: <ms epoch> }.
+  alertPopups: 'on',
 });
 
 const TREE_VIEWS = ['infrastructure', 'workloads', 'models'];
@@ -25,6 +27,17 @@ const DOCK_TABS = ['tasks', 'events', 'alerts'];
 
 const clamp = (value, low, high, fallback) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(high, Math.max(low, value)) : fallback;
+
+/**
+ * The stored pop-up choice, kept to its three shapes: 'on', 'off', or a live timed mute
+ * `{ until: <ms epoch> }`. Anything else falls back to 'on', so a broken value never
+ * silences an alert the operator never muted.
+ */
+function popupChoice(value) {
+  if (value === 'off') return 'off';
+  if (value && typeof value === 'object' && Number.isFinite(value.until)) return { until: value.until };
+  return 'on';
+}
 
 /** Turn anything parsed from storage into a complete, well-typed preference object. */
 export function sanitize(raw) {
@@ -50,6 +63,7 @@ export function sanitize(raw) {
       ? input.paletteRecent.filter((item) => item && typeof item.id === 'string').slice(0, 8)
       : [],
     toursDismissed: strings(input.toursDismissed, 20),
+    alertPopups: popupChoice(input.alertPopups),
   };
 }
 

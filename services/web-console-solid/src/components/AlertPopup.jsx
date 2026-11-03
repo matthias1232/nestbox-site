@@ -1,6 +1,7 @@
 // One refused destination with its answers: a card, or a table row when `inline` is set.
 // Props (contract C15): alert, onAllowNow, onAllowFor(minutes), onDraft, onIgnore, onOpenSandbox;
-// plus optional `busy` (disable buttons) and `result` (text shown instead of the buttons).
+// plus optional `busy` (disable buttons), `result` (text shown instead of the buttons) and
+// `onHide` (the card's × button, which hides this pop-up and leaves the alert open);
 //
 // The card is the refusal the operator must answer (V11): an eyebrow "REFUSED · 3 min ago" in
 // --bad, one line "<sandbox> → <host>:<port> (<channel>, N×)", and four answers in the order
@@ -58,6 +59,16 @@ export default function AlertPopup(props) {
       when={props.inline}
       fallback={
         <div class="alert-card" role="alert">
+          <Show when={props.onHide}>
+            <button
+              class="alert-hide ghost tiny"
+              aria-label="Hide this pop-up"
+              title="Hide this pop-up"
+              onClick={() => props.onHide?.()}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </Show>
           <p class="eyebrow alert-eyebrow">REFUSED{age() ? ` · ${age()}` : ''}</p>
           <p class="alert-line">
             <a href="#" onClick={openSandbox}>{props.alert.sandbox_name || 'sandbox'}</a>

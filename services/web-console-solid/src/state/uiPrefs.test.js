@@ -14,6 +14,21 @@ test('preferences round-trip', () => {
   assert.deepEqual(parse(serialize(prefs)), prefs);
 });
 
+test('the alert pop-up choice round-trips in all three shapes', () => {
+  for (const alertPopups of ['on', 'off', { until: 1762174800000 }]) {
+    const prefs = { ...DEFAULTS, alertPopups };
+    assert.deepEqual(parse(serialize(prefs)), prefs);
+  }
+  assert.equal(DEFAULTS.alertPopups, 'on');
+});
+
+test('an unknown alert pop-up value falls back to on', () => {
+  assert.equal(sanitize({ alertPopups: 'maybe' }).alertPopups, 'on');
+  assert.equal(sanitize({ alertPopups: { until: 'later' } }).alertPopups, 'on');
+  assert.equal(sanitize({ alertPopups: true }).alertPopups, 'on');
+  assert.equal(sanitize({ alertPopups: null }).alertPopups, 'on');
+});
+
 test('out-of-range and unknown values fall back', () => {
   const prefs = sanitize({ sidebarWidth: 5000, dockTab: 'nope', treeView: 'x', consoleMode: { a: 5 }, logPanes: [1, 'ok'] });
   assert.equal(prefs.sidebarWidth, 480);

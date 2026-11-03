@@ -79,7 +79,7 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 
 | File | Responsibility |
 |---|---|
-| `icons.jsx` | Every inline SVG icon (`IconNode`, ...) plus `Icon({ name })`; the one source for the sidebar menu, the palette kind glyph, the topology card glyph and the login eye (X10 — no private stand-ins in a feature) |
+| `icons.jsx` | Every inline SVG icon (`IconNode`, ..., `IconBellOff` for muted alert pop-ups) plus `Icon({ name })`; the one source for the sidebar menu, the palette kind glyph, the topology card glyph and the login eye (X10 — no private stand-ins in a feature) |
 | `IconButton.jsx` | A 28x28 icon-only button with tooltip and accessible name |
 | `StatTile.jsx` | Eyebrow label, big mono figure, unit and trend; a button when clickable |
 | `Gauge.jsx` / `gauge.js` | 270 degree SVG arc and its arc maths; optional `text` is the reading drawn under the arc in mono (V09) |
@@ -92,7 +92,7 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |
 F04: `CommandPalette.jsx` is the search dialog (props in, `onOpen(path)` out). Each row draws an `Icon` for its kind (X10). `palette.js` holds its pure logic (matching, grouping, filters, arrow movement, stale-answer counter); `palette.test.js` tests it.
-- `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); the card is V11: eyebrow `REFUSED · <age>` in `--bad`, one line `<sandbox> → <host>:<port> (<channel>, N×)`, frame `1px solid var(--bad)`, and the four answers `Allow 15 min` (primary) · `Allow now` · `Draft rule` · `Ignore`. `alertAnswers.js` holds the pure answer list (used by the table row) and request bodies (tested).
+- `AlertPopup.jsx` — one refused destination with its answers, card or table row (F13); the card is V11: eyebrow `REFUSED · <age>` in `--bad`, one line `<sandbox> → <host>:<port> (<channel>, N×)`, frame `1px solid var(--bad)`, and the four answers `Allow 15 min` (primary) · `Allow now` · `Draft rule` · `Ignore`. With `onHide` the card also draws a `×` (`aria-label="Hide this pop-up"`) that hides this pop-up only, leaving the alert open and the bell counting (U05). `alertAnswers.js` holds the pure answer list (used by the table row) and request bodies (tested).
 Topology (F16): `TopologyCanvas.jsx` is the layered SVG drawing with zoom, pan, traffic-window switch and legend;
 each card draws an `Icon` per kind from `icons.jsx` inside a `translate(10, 10)` group (X10);
 `TopologyPanel.jsx` is its side panel (facts, receives/sends lists, Open/Policies/Logs, Allow 15/30/60 on a refused
