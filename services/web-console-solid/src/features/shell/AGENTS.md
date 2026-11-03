@@ -14,8 +14,8 @@ mounts the overlays once. `App.jsx` wraps every page except the pop-outs in `<Sh
 | `useInventory.js` | Shared inventory tree hook: one 10 s poll, live-event refresh (debounced 500 ms), view from `ui.tree`. A load is skipped while the last good answer for the same view is younger than 2 s (`FRESH_MS`), so the sidebar, home and data-center pages that mount together cost one request; `refresh()` passes `force` and always loads |
 | `treeFilter.js` | Pure helpers: `filterTree`, `treePathFor` (breadcrumbs), `pathFor`, `ancestorIds`, `expandableIds`, `defaultExpanded` (the root plus every data center, the sidebar's opening state, V18) |
 | `treeFilter.test.js` | Tests for the helpers above |
-| `placeEnvironment.js` | Pure helper: the id of the data center that holds a place (`dc`, `site`, `node`, `admin`, `box`, `model`), or null; lets a link to another data center's entity move the session once instead of answering "does not exist" (V15) |
-| `placeEnvironment.test.js` | Tests for the helper above |
+| `placeEnvironment.js` | Pure helpers: `placeEnvironmentInfo` answers the data center that holds a place (`dc`, `site`, `node`, `admin`, `box`, `model`) as `{ environmentId, environmentName }`, `placeEnvironment` only its id, or null for both; lets a link to another data center's entity move the session once instead of answering "does not exist" (V15). The name is what `App.jsx` shows once the automatic switch was already followed: it offers "Open in <data center>" and "Home" instead of a loading line that never ends (F5) |
+| `placeEnvironment.test.js` | Tests for the helpers above |
 | `pages.js` | `PAGES` (menu id to page) and `EXTRAS` (overlays). Owned by Wave 0: packages never edit it |
 | `PaletteHost.jsx` | Command palette host (F04) |
 | `BulkHost.jsx` | Binds `ui.selection` to `BulkBar`, asks for the input an action needs, calls `api/bulk.js` or `installBulk`, opens the dock Tasks tab (F21). Style: `styles/bulk.css` |

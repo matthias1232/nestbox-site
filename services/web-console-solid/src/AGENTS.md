@@ -62,6 +62,10 @@ API enforces the same rule.
 
 `routing.js` says what a URL means (Admin Center, workbox, pop-outs); `App.jsx` only renders it.
 A pop-out window shares the opener's CSRF token (`adoptOpenerCsrf`) instead of rotating it.
+A link that names an entity of another data center moves the session once
+(`features/shell/placeEnvironment.js`, V15). A second time it does not move it again — that
+would fight the data-center picker — and `App.jsx` shows a notice with `Open in <data center>`
+and `Home` instead of a loading line that never ends (F5).
 
 Control Center routing (Wave 0): `routing.js` implements contract C1 (`paths`, `parsePath`, `SHELLLESS`); the address
 bar is the only source of truth. `navigation.js` holds the six menu groups; `App.jsx` maps `parsePath` results to pages

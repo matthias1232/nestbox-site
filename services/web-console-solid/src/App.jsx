@@ -25,7 +25,7 @@ const LogsPopout = lazy(() => import('./features/logs/LogsPopout.jsx'));
 const TrafficPopout = lazy(() => import('./features/traffic/TrafficPopout.jsx'));
 import Shell from './features/shell/Shell.jsx';
 import { useInventory } from './features/shell/useInventory.js';
-import { placeEnvironment } from './features/shell/placeEnvironment.js';
+import { placeEnvironmentInfo } from './features/shell/placeEnvironment.js';
 import { PAGES } from './features/shell/pages.js';
 import { SHELLLESS, navigate, parsePath, paths } from './routing.js';
 import { adoptOpenerCsrf } from './api/client.js';
@@ -98,27 +98,64 @@ export default function App() {
       if (!p.id) return null;
       const root = inventory.root();
       if (!root) return null;
-      const environment = placeEnvironment(root, p);
-      if (!environment || environment === session.activeEnvironment()) return null;
-      return environment;
+      const target = placeEnvironmentInfo(root, p);
+      if (!target || target.environmentId === session.activeEnvironment()) return null;
+      return target;
     });
     // No tree yet: the usual loading state, not a bare "does not exist" from the API. A tree
     // that failed to load is not "missing" either; the page itself then says what is wrong.
     const waiting = createMemo(() => Boolean(current().id) && !inventory.root() && !inventory.error());
 
+    // The link's target once its automatic switch has already been followed (F5). `followed` is
+    // a module variable and therefore not reactive, so the notice keeps its own answer; without
+    // that the screen would sit on "Loading…" forever after the data-center picker moved the
+    // session back.
+    const [stranded, setStranded] = createSignal(null);
+
     createEffect(() => {
-      const environment = elsewhere();
-      if (!environment) return;
+      const target = elsewhere();
+      if (!target) {
+        setStranded(null);
+        return;
+      }
       // One follow per address and target: switching remounts this page, so a guard that lives
       // only in the component would follow the same link again and again.
-      const key = `${current().kind}:${current().id}:${environment}`;
-      if (followed === key) return;
+      const key = `${current().kind}:${current().id}:${target.environmentId}`;
+      if (followed === key) {
+        // Following the link again would fight the picker that moved the session, so offer the
+        // choice instead of an automatic switch that never happens.
+        setStranded(target);
+        return;
+      }
+      setStranded(null);
       followed = key;
-      session.switchEnvironment(environment);
+      session.switchEnvironment(target.environmentId);
     });
+
+    // The notice's buttons: switch to the data center the link names, or go home and leave the
+    // session where it is.
+    const openTarget = () => {
+      const target = stranded();
+      if (target) session.switchEnvironment(target.environmentId);
+    };
+    const goHome = () => navigate('/');
 
     return (
       <Switch fallback={<HomePage />}>
+        {/* A link whose automatic switch was already followed names its data center and offers
+            the move, instead of a loading line that never ends (F5). It comes first, so it wins
+            over the loading match below. */}
+        <Match when={stranded()}>
+          <p class="notice">
+            This link points into data center {stranded().environmentName}.{' '}
+            <button class="ghost tiny" onClick={openTarget}>
+              Open in {stranded().environmentName}
+            </button>{' '}
+            <button class="ghost tiny" onClick={goHome}>
+              Home
+            </button>
+          </p>
+        </Match>
         <Match when={waiting() || elsewhere()}>
           <p class="muted loading">Loading…</p>
         </Match>
