@@ -4,14 +4,14 @@
 // Props: sandbox, role?, control?, mode?, onMode?(mode), onPopOut?(mode, tab).
 // The shared-tab strip (presence dots, +, close for me / for all) stays inside TerminalTab, which
 // owns the tab state and the WebSocket; the frame owns the mode, the font and the toolbar.
-import { Show, createMemo, createSignal } from 'solid-js';
+import { Show, createMemo, createSignal, lazy } from 'solid-js';
 import Segmented from './Segmented.jsx';
 import IconButton from './IconButton.jsx';
 import { useUi } from '../state/ui.jsx';
 import { useSession } from '../state/session.jsx';
 import { terminalPath, desktopPath } from '../routing.js';
-import TerminalTab from '../features/sandboxes/TerminalTab.jsx';
-import DesktopTab from '../features/sandboxes/DesktopTab.jsx';
+const TerminalTab = lazy(() => import('../features/sandboxes/TerminalTab.jsx'));
+const DesktopTab = lazy(() => import('../features/sandboxes/DesktopTab.jsx'));
 import ConnectPanel from '../features/sandboxes/ConnectPanel.jsx';
 import { FONT_DEFAULT, modes, nextFont, pickMode } from './consoleFrame.js';
 import '../styles/console.css';

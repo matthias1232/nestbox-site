@@ -13,7 +13,7 @@
 // The active tab lives in the URL (`?tab=`): `navigate(paths.sandbox(id, tab))` writes it and
 // `props.initialTab` (from parsePath) reads it, so a reload or a shared link lands on the same tab.
 
-import { Show, For, createSignal, createEffect, createMemo, onCleanup, untrack } from 'solid-js';
+import { Show, For, createSignal, createEffect, createMemo, onCleanup, untrack, lazy } from 'solid-js';
 import Tabs from '../../components/Tabs.jsx';
 import TabBoundary from '../../components/TabBoundary.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
@@ -36,7 +36,7 @@ import { resolveTab, subViewFor, tabsFor } from './adminTabs.js';
 import DashboardTab from './DashboardTab.jsx';
 import TrafficTab from './TrafficTab.jsx';
 import McpTab from './McpTab.jsx';
-import TerminalTab from './TerminalTab.jsx';
+const TerminalTab = lazy(() => import('./TerminalTab.jsx'));
 import AccessTab from './AccessTab.jsx';
 import MapTab from './MapTab.jsx';
 import SupervisorTab from './SupervisorTab.jsx';
@@ -49,7 +49,7 @@ import ConnectionsTab from './ConnectionsTab.jsx';
 import ChatsTab from './ChatsTab.jsx';
 import UsageTab from './UsageTab.jsx';
 import CommandsTab from './CommandsTab.jsx';
-import DesktopTab from './DesktopTab.jsx';
+const DesktopTab = lazy(() => import('./DesktopTab.jsx'));
 import InventoryTab from './InventoryTab.jsx';
 import LogsTab from './LogsTab.jsx';
 import MountEditor from './MountEditor.jsx';

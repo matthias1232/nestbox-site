@@ -4,25 +4,25 @@
 // `parsePath` returns to one page component and wraps it in the shell, except for the pop-out
 // windows, which own their whole window. Menu pages come from `features/shell/pages.js`.
 
-import { Show, createSignal, onMount, onCleanup } from 'solid-js';
+import { Show, Suspense, createSignal, onMount, onCleanup, lazy } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { useSession } from './state/session.jsx';
 import * as auth from './api/auth.js';
 import LoginPage from './features/auth/LoginPage.jsx';
-import AdminCenter from './features/sandboxes/AdminCenter.jsx';
-import WorkboxPage from './features/workbox/WorkboxPage.jsx';
-import MyBoxesPage from './features/workbox/MyBoxesPage.jsx';
-import TerminalPopout from './features/workbox/TerminalPopout.jsx';
-import DesktopPopout from './features/workbox/DesktopPopout.jsx';
-import HomePage from './features/home/HomePage.jsx';
-import DataCenterPage from './features/inventory/DataCenterPage.jsx';
-import SitePage from './features/inventory/SitePage.jsx';
-import NodePage from './features/inventory/NodePage.jsx';
-import ModelPage from './features/models/ModelPage.jsx';
-import ClusterDetailPage from './features/clusters/ClusterDetailPage.jsx';
-import DocsPage from './features/help/DocsPage.jsx';
-import LogsPopout from './features/logs/LogsPopout.jsx';
-import TrafficPopout from './features/traffic/TrafficPopout.jsx';
+const AdminCenter = lazy(() => import('./features/sandboxes/AdminCenter.jsx'));
+const WorkboxPage = lazy(() => import('./features/workbox/WorkboxPage.jsx'));
+const MyBoxesPage = lazy(() => import('./features/workbox/MyBoxesPage.jsx'));
+const TerminalPopout = lazy(() => import('./features/workbox/TerminalPopout.jsx'));
+const DesktopPopout = lazy(() => import('./features/workbox/DesktopPopout.jsx'));
+const HomePage = lazy(() => import('./features/home/HomePage.jsx'));
+const DataCenterPage = lazy(() => import('./features/inventory/DataCenterPage.jsx'));
+const SitePage = lazy(() => import('./features/inventory/SitePage.jsx'));
+const NodePage = lazy(() => import('./features/inventory/NodePage.jsx'));
+const ModelPage = lazy(() => import('./features/models/ModelPage.jsx'));
+const ClusterDetailPage = lazy(() => import('./features/clusters/ClusterDetailPage.jsx'));
+const DocsPage = lazy(() => import('./features/help/DocsPage.jsx'));
+const LogsPopout = lazy(() => import('./features/logs/LogsPopout.jsx'));
+const TrafficPopout = lazy(() => import('./features/traffic/TrafficPopout.jsx'));
 import Shell from './features/shell/Shell.jsx';
 import { PAGES } from './features/shell/pages.js';
 import { SHELLLESS, navigate, parsePath, paths } from './routing.js';
@@ -103,7 +103,7 @@ export default function App() {
           <Shell place={place()}>
             {/* Keyed: choosing another data center remounts the page, so every screen reloads its data. */}
             <Show when={session.activeEnvironment()} keyed>
-              {() => <Page />}
+              {() => <Suspense fallback={<p class="muted">Loading…</p>}><Page /></Suspense>}
             </Show>
           </Shell>
         </Show>
