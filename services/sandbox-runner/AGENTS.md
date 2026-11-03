@@ -23,7 +23,7 @@ control plane.
 | `GET` | `/v1/sandboxes/{name}/logs?tail=` | Last lines of stdout/stderr |
 | `POST` | `/v1/sandboxes/{name}/exec` | Run one argument vector, return output |
 | `GET` | `/v1/hardware` | Raw `/proc` and `nvidia-smi` text for the control plane to parse |
-| `POST` | `/v1/builds` | Build a recipe image from a generated Dockerfile |
+| `POST` | `/v1/builds` | Build a recipe image from a generated Dockerfile (the body may carry the desktop pack's embedded scripts; `MAX_DOCKERFILE_BYTES` is 1 MiB) |
 | `POST` | `/v1/catalogue` | Search a baseline image's native package index in a throwaway container |
 | `POST` | `/v1/images/verify` | Check a built image's package database against the recipe's packages |
 | `POST` | `/v1/models/download` | Fetch one GGUF into `NESTBOX_MODEL_BASE` |

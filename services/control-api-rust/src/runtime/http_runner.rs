@@ -77,6 +77,21 @@ impl From<RunnerSandbox> for RuntimeFacts {
     }
 }
 
+/// The bound every runner call shares.
+///
+/// A hung runner must not hold an API worker forever. Docker's own stop grace
+/// period is 10 s and an exec may run for minutes, so the bound is generous but
+/// finite.
+const CLIENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(660);
+
+/// The bound of one recipe build.
+///
+/// A build is not an ordinary call: it runs `apt-get`, Chrome and the desktop
+/// pack inside Docker and took about eleven minutes on the appliance, which is
+/// longer than [`CLIENT_TIMEOUT`]. The API answers the operator the moment the
+/// job starts, so a long wait here holds no request open, only the job.
+const BUILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
+
 /// Adapter, der einen HTTP-fähigen Runtime-Dienst anspricht.
 pub struct HttpRunner {
     base_url: String,
@@ -95,9 +110,10 @@ impl HttpRunner {
             network: network.into(),
             // A hung runner must not hold an API worker forever. Docker's own
             // stop grace period is 10 s and an exec may run for minutes, so the
-            // bound is generous but finite.
+            // bound is generous but finite. A build gets its own, longer one
+            // (see `send_with_timeout` and [`BUILD_TIMEOUT`]).
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(660))
+                .timeout(CLIENT_TIMEOUT)
                 .connect_timeout(std::time::Duration::from_secs(5))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
@@ -134,8 +150,25 @@ impl HttpRunner {
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<T, RuntimeError> {
+        self.send_with_timeout(method, path, body, CLIENT_TIMEOUT).await
+    }
+
+    /// The same call with its own bound instead of the client-wide one.
+    ///
+    /// Only a recipe build needs this: it installs apt packages, Chrome and the
+    /// desktop pack inside Docker, which took about eleven minutes on the
+    /// appliance and would be cut off by the 660 s bound every other call
+    /// shares. The API has already answered the operator by then, so waiting
+    /// here holds no request open.
+    async fn send_with_timeout<T: for<'de> Deserialize<'de>>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        timeout: std::time::Duration,
+    ) -> Result<T, RuntimeError> {
         let url = format!("{}{}", self.base_url, path);
-        let mut request = self.client.request(method, url);
+        let mut request = self.client.request(method, url).timeout(timeout);
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
@@ -314,8 +347,13 @@ impl RuntimeAdapter for HttpRunner {
     async fn build(&self, request: BuildRequest) -> Result<BuildResult, RuntimeError> {
         let payload = serde_json::to_value(&request)
             .map_err(|error| RuntimeError::Rejected(error.to_string()))?;
-        self.send(reqwest::Method::POST, "/v1/builds", Some(&payload))
-            .await
+        self.send_with_timeout(
+            reqwest::Method::POST,
+            "/v1/builds",
+            Some(&payload),
+            BUILD_TIMEOUT,
+        )
+        .await
     }
 
     async fn catalogue(&self, request: CatalogueRequest) -> Result<CatalogueAnswer, RuntimeError> {
@@ -891,6 +929,14 @@ mod runtime_choice_tests {
             assert_eq!(runtime_choice(true, mode), "docker-development", "{mode}");
         }
         assert_eq!(runtime_choice(false, "forward_proxy"), "docker-development");
+    }
+
+    #[test]
+    fn a_build_is_allowed_to_take_longer_than_a_normal_call() {
+        // The desktop image needs about eleven minutes; the bound every other
+        // call shares is shorter than that, which is why a build carries its
+        // own. Sharing it again would fail a real build while the runner works.
+        assert!(super::BUILD_TIMEOUT > super::CLIENT_TIMEOUT);
     }
 }
 

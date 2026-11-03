@@ -76,6 +76,7 @@ supersedes the old one and note the supersession in both files.
 | [0065](0065-a-model-cluster-is-installs-behind-one-provider-routed-by-the-proxy.md) | A model cluster is installs behind one provider, routed by the proxy | Accepted |
 | [0066](0066-an-alert-is-a-refused-destination-awaiting-an-answer.md) | An alert is a refused destination awaiting an answer | Accepted |
 | [0067](0067-help-and-docs-ship-inside-the-console.md) | Help and documentation ship inside the console | Accepted |
+| [0068](0068-a-build-outlives-the-call-that-started-it.md) | A recipe build outlives the call that started it, and its Dockerfile carries the pack | Accepted |
 
 ## Writing a new ADR
 
