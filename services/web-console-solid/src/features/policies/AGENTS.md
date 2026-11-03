@@ -32,3 +32,17 @@ A draft is not a rule. Approval is the only path that writes a rule, which is
 what makes the workflow meaningful (ADR 0011).
 
 `PolicyWizard.jsx` is the placeholder of the policy wizard (F14).
+
+## Policy wizard (F14)
+
+| File | Role |
+|---|---|
+| `PolicyWizard.jsx` | The `Wizard` page: loads the policy, walks the steps, runs `applyPlan`. Also holds the small Filesystem and Tools steps. |
+| `policyWizard.js` | Pure logic: `emptySpec`, `stepsFor`, `addAllow`, `removeEntry`, `setDns`, `setProcess`, `validateStep`, `applyPlan`, `runPlan`, suggestions. Tested in `policyWizard.test.js`. |
+| `NetworkStep.jsx` | Allow list table, quick add, suggestions from the last 24 h of decisions. |
+| `DnsStep.jsx` | Allow and block patterns; saved as DNS rules of the policy, not in the document. |
+| `ProcessStep.jsx` | Process fields and Landlock paths (apply after a recreate, ADR 0008). |
+| `ObservationStep.jsx` | Proposes an egress mode and an evaluation window; Review lists the calls. |
+| `ReviewStep.jsx`, `CompiledView.jsx` | Name, scope, compiled YAML, skipped rules, hot/cold badges, diff, and the calls Apply makes. |
+
+`PoliciesPage` opens the wizard from "New policy (wizard)", "Edit in wizard" and `?wizard=1&sandbox=<id>`.
