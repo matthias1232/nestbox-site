@@ -43,7 +43,7 @@ microseconds is that it has none.
 | `sandbox.rs` | Sandbox, status, health, spec, version |
 | `gateway.rs` | Gateway, status, settings drift |
 | `supervisor.rs` | Supervisor and its reported state |
-| `policy.rs` | The four-section document and its validation |
+| `policy.rs` | The four-section document and its validation; `hot_and_cold` splits its sections for the preview |
 | `network_rule.rs` | A network rule and its enforcement mode |
 | `telemetry.rs` | Network, DNS, and inference events |
 | `job.rs` | Job, status, progress |
@@ -88,6 +88,7 @@ session; `model_grant.rs` a grant and the inheritance rule; `node_tunnel.rs` a n
 and the `off_allow_all` answer.
 `openshell_policy.rs` compiles rules into an OpenShell policy; `allow_hosts` adds the destinations a
 suspended sandbox may still reach, in audit mode, because OpenShell 0.1.6 has no host wildcard.
+`to_yaml` renders a compiled document as deterministic YAML text for the policy preview (B10).
 | `privacy.rs` | Detectors, actions, modes, the settings matrix, and which requests are checked |
 | `privacy_json.rs` | String values of a JSON document by byte span, so a rewrite touches one value and nothing else |
 | `chat_turn.rs` | What one model call says: request, answer, tool calls, tokens, session, provider, agent |

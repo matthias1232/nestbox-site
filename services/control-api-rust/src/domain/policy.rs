@@ -730,6 +730,26 @@ pub fn document_sections(spec: &serde_json::Value) -> Vec<&'static str> {
         .collect()
 }
 
+/// Split the sections a document carries into hot and cold (ADR 0008).
+///
+/// Hot sections take effect on a running sandbox; cold ones are fixed when the
+/// workload starts, so a change needs a recreate. Order follows the document.
+pub fn hot_and_cold(spec: &serde_json::Value) -> (Vec<&'static str>, Vec<&'static str>) {
+    let mut hot = Vec::new();
+    let mut cold = Vec::new();
+    for name in document_sections(spec) {
+        let hot_reloadable = PolicySection::all()
+            .into_iter()
+            .any(|section| section.as_str() == name && section.is_hot_reloadable());
+        if hot_reloadable {
+            hot.push(name);
+        } else {
+            cold.push(name);
+        }
+    }
+    (hot, cold)
+}
+
 /// Classify one document.
 pub fn classify(spec: &serde_json::Value) -> PolicyKind {
     let sections = document_sections(spec);
@@ -1712,6 +1732,17 @@ pub fn rules_for_egress_proxy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hot_and_cold_splits_network_from_startup_sections() {
+        let spec = serde_json::json!({
+            "network_policies": {}, "filesystem_policy": {}, "landlock": {}, "process": {}
+        });
+        let (hot, cold) = hot_and_cold(&spec);
+        assert_eq!(hot, vec!["network_policies"]);
+        assert_eq!(cold, vec!["filesystem_policy", "landlock", "process"]);
+    }
+
     use serde_json::json;
 
     #[test]
