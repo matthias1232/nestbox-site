@@ -80,8 +80,8 @@ Control Center primitives (package F02; styles in `styles/primitives.css`):
 | `Sparkline.jsx` / `sparkline.js` | SVG polyline trend and the points calculation |
 | `KeyHint.jsx` | `<kbd>` rendering of a shortcut such as `mod+k` |
 | `Toast.jsx` | The toast stack, reading `ui.toast.queue()` |
-| `Tree.jsx` / `tree.js` | Keyboard-driven inventory tree with windowing over 400 rows; flatten, filter, cursor helpers |
-| `SelectTable.jsx` / `table.js` | Selectable, sortable table (the older `DataTable.jsx` stays); sort and selection helpers |
+| `Tree.jsx` / `tree.js` | Keyboard-driven inventory tree with windowing over 400 rows; flatten, filter, cursor helpers. A row of kind `organization` is a section label: its name carries the `eyebrow` face and no status dot (V04) |
+| `SelectTable.jsx` / `table.js` | Selectable, sortable table (the older `DataTable.jsx` stays); sort and selection helpers. Style (V10): muted normal-weight header over a 1 px line, 32 px rows, no zebra; ids, addresses and modes carry `.mono` in the column render |
 | `Wizard.jsx` | Step list, body and Back / Next / Finish footer |
 | `HelpTip.jsx` | A "?" button that opens the help drawer at an anchor |
 | `gauge.test.js`, `sparkline.test.js`, `tree.test.js`, `table.test.js` | Node tests for the helpers |

@@ -108,8 +108,12 @@ export default function Tree(props) {
                         {openSet().has(row.node.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
                       </Show>
                     </span>
-                    <i class="status-dot" data-status={row.node.status || 'unknown'} title={row.node.status || ''} />
-                    <span class="tree-name">{row.node.name}</span>
+                    {/* The organisation is a section label like the mockup's PLATFORM: eyebrow
+                        face, no status dot. Everything below it is an object with a state. */}
+                    <Show when={row.node.kind !== 'organization'}>
+                      <i class="status-dot" data-status={row.node.status || 'unknown'} title={row.node.status || ''} />
+                    </Show>
+                    <span class="tree-name" classList={{ eyebrow: row.node.kind === 'organization' }}>{row.node.name}</span>
                     <Show when={row.node.status}>
                       <span class="visually-hidden"> ({row.node.status})</span>
                     </Show>

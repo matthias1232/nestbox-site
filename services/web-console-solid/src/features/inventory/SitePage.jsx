@@ -29,7 +29,7 @@ export function NodesTable(props) {
   const columns = [
     { key: 'name', label: 'Node', sortable: true, render: (row) => <span class="mono">{row.name}</span> },
     { key: 'status', label: 'Status', sortable: true, render: (row) => <StatusBadge status={NODE_STATUS[row.status] || 'unknown'} label={row.status} /> },
-    { key: 'tunnel_state', label: 'Tunnel', render: (row) => row.tunnel_state || '–' },
+    { key: 'tunnel_state', label: 'Tunnel', render: (row) => (row.tunnel_state ? <span class="mono small">{row.tunnel_state}</span> : '–') },
     { key: 'gpu', label: 'GPU', render: (row) => (row.gpu ? 'yes' : 'no') },
     { key: 'sandboxes', label: 'Sandboxes', align: 'right', render: (row) => `${row.counts?.running ?? 0} / ${row.counts?.sandboxes ?? 0}` },
     { key: 'ram', label: 'Free RAM', align: 'right', render: (row) => <span class="mono">{gib(row.budget?.ram_free_bytes)}</span> },

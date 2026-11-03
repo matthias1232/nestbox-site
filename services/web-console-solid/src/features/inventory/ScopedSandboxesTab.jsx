@@ -32,7 +32,7 @@ export default function ScopedSandboxesTab(props) {
     { key: 'status', label: 'Status', sortable: true, render: (row) => <StatusBadge status={row.status} /> },
     { key: 'owner_name', label: 'Owner', sortable: true, render: (row) => row.owner_name || <span class="muted">shared</span> },
     { key: 'pack_key', label: 'Pack', sortable: true, render: (row) => <span class="mono small">{row.pack_key || '–'}</span> },
-    { key: 'egress_mode', label: 'Egress mode', render: (row) => (row.egress_mode ? String(row.egress_mode).replaceAll('_', ' ') : '–') },
+    { key: 'egress_mode', label: 'Egress mode', render: (row) => (row.egress_mode ? <span class="mono small">{String(row.egress_mode).replaceAll('_', ' ')}</span> : '–') },
     { key: 'allow_all', label: 'Allow-all', render: (row) => (row.allow_all ? <span class="badge bad"><i />allow-all</span> : <span class="muted">no</span>) },
     {
       key: 'actions',
