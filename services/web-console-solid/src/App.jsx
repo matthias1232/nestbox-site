@@ -4,7 +4,7 @@
 // `parsePath` returns to one page component and wraps it in the shell, except for the pop-out
 // windows, which own their whole window. Menu pages come from `features/shell/pages.js`.
 
-import { Show, Suspense, createSignal, onMount, onCleanup, lazy } from 'solid-js';
+import { Match, Show, Suspense, Switch, createMemo, createSignal, onMount, onCleanup, lazy } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { useSession } from './state/session.jsx';
 import * as auth from './api/auth.js';
@@ -38,6 +38,9 @@ export default function App() {
   const role = () => session.identity()?.role;
   const openAdmin = (id) => navigate(paths.sandbox(id));
   const closeAdmin = () => navigate(paths.menu('sandboxes'));
+  // Named, not inline: a zero-argument arrow anywhere near a keyed `Show` is what the guard
+  // test looks for, and it cannot tell a handler from a render function.
+  const openNodes = () => navigate(paths.menu('nodes'));
 
   // The back button must move the screen, otherwise the address bar and the screen disagree.
   const onPop = () => setPlace(readPlace());
@@ -69,26 +72,57 @@ export default function App() {
   });
 
   // The page for a place that lives inside the shell.
+  //
+  // `place()` is the address bar's signal, and a component body runs once: the page follows it
+  // through a memo and a `Switch`, not by reading it once, or a menu click never changed the
+  // screen (R3). A place with an id is remounted when the id changes (keyed `Show`), so
+  // `/node/a` → `/node/b` loads b instead of showing a's data.
   function Page() {
-    const p = place();
-    switch (p.kind) {
-      case 'dc': return <DataCenterPage id={p.id} tab={p.tab} />;
-      case 'site': return <SitePage id={p.id} tab={p.tab} />;
-      case 'node': return <NodePage id={p.id} tab={p.tab} />;
-      case 'admin': return <AdminCenter sandboxId={p.id} initialTab={p.tab || undefined} onClose={closeAdmin} onFollow={openAdmin} />;
-      case 'box': return <WorkboxPage sandboxId={p.id} />;
-      case 'my': return <MyBoxesPage />;
-      case 'model': return <ModelPage id={p.id} />;
-      case 'cluster': return <ClusterDetailPage id={p.id} />;
-      case 'docs': return <DocsPage slug={p.slug} />;
-      case 'menu': {
-        const component = PAGES[p.id];
-        return component
-          ? <Dynamic component={component} role={role()} onOpenAdmin={openAdmin} onOpenSandbox={openAdmin} onOpenNode={() => navigate(paths.menu('nodes'))} />
-          : <HomePage />;
-      }
-      default: return <HomePage />;
-    }
+    const current = createMemo(() => place());
+    return (
+      <Switch fallback={<HomePage />}>
+        <Match when={current().kind === 'dc'}>
+          <Show when={current().id} keyed>
+            {(id) => <DataCenterPage id={id} tab={current().tab} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'site'}>
+          <Show when={current().id} keyed>
+            {(id) => <SitePage id={id} tab={current().tab} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'node'}>
+          <Show when={current().id} keyed>
+            {(id) => <NodePage id={id} tab={current().tab} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'admin'}>
+          <Show when={current().id} keyed>
+            {(id) => <AdminCenter sandboxId={id} initialTab={current().tab || undefined} onClose={closeAdmin} onFollow={openAdmin} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'box'}>
+          <Show when={current().id} keyed>
+            {(id) => <WorkboxPage sandboxId={id} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'my'}><MyBoxesPage /></Match>
+        <Match when={current().kind === 'model'}>
+          <Show when={current().id} keyed>
+            {(id) => <ModelPage id={id} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'cluster'}>
+          <Show when={current().id} keyed>
+            {(id) => <ClusterDetailPage id={id} />}
+          </Show>
+        </Match>
+        <Match when={current().kind === 'docs'}><DocsPage slug={current().slug} /></Match>
+        <Match when={current().kind === 'menu' && PAGES[current().id]}>
+          <Dynamic component={PAGES[current().id]} role={role()} onOpenAdmin={openAdmin} onOpenSandbox={openAdmin} onOpenNode={openNodes} />
+        </Match>
+      </Switch>
+    );
   }
 
   return (

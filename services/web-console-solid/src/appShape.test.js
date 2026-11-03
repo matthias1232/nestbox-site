@@ -17,3 +17,8 @@ test('a keyed Show never gets a zero-argument child (it would re-create Suspense
 test('the render function of a keyed Show takes the key', () => {
   assert.match(source, /keyed>\s*\n?\s*\{\([A-Za-z_]+\)\s*=>/);
 });
+
+test('App.jsx uses Switch/Match for the page, so a menu click changes it', () => {
+  assert.match(source, /<Switch/);
+  assert.match(source, /<Match\s+when=/);
+});
