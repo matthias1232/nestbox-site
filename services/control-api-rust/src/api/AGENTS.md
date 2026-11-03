@@ -33,7 +33,7 @@ The architecture test enforces the last two.
 | `mod.rs` | Router composition and layers |
 | `principal.rs` | The `Auth` extractor: session, token, CSRF |
 | `auth.rs` | Login, logout, identity |
-| `system.rs` | Health, readiness, runtime, OpenAPI, environments, audit |
+| `system.rs` | Health, readiness (database state plus `disk_free_bytes` from the host load, `null` when the runner does not answer within 2 s; the status code never depends on the disk), runtime, OpenAPI, environments, audit |
 | `sandboxes.rs` | Sandbox list, detail, create (including the optional `gpu_count`), actions, logs, exec, stack membership (`PUT /sandboxes/{id}/stack`) |
 | `sandboxes_settings.rs` | A sandbox's supervisor settings: read the thresholds, write them back |
 | `policies.rs` | Policies (with the kind derived from their sections), the revision history, rules, drafts, traffic windows, and the node-token egress check (`feat/policy-decider`) |
@@ -165,7 +165,7 @@ Control Center routes (Wave 0 stubs; each handler calls a service that answers 5
 
 | File | Purpose |
 |---|---|
-| `accounting.rs` | Accounting and the internal ingest the proxy calls. |
+| `accounting.rs` | Accounting and the internal ingest the proxy calls; the record body keeps the proxy's `detail` object (cluster and member ids) instead of dropping it |
 | `backups.rs` | Backups of persistent roots. |
 | `cudax.rs` | CUDA-X catalogue and per-node installation endpoints. |
 | `privacy.rs` | Content privacy (DLP): the policy, a single filter test, incidents, purge. |

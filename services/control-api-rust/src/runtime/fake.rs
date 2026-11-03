@@ -551,6 +551,7 @@ impl RuntimeAdapter for FakeRuntime {
         Ok(serde_json::json!({
             "cpu_percent": 12.5, "cpus": 4,
             "memory": { "total": 8_000_000_000_i64, "available": 4_000_000_000_i64, "used": 4_000_000_000_i64, "swap_total": 0 },
+            "disk": { "total": 116_000_000_000_i64, "used": 16_000_000_000_i64, "free": 100_000_000_000_i64 },
             "sandboxes": { "total": 1, "running": 1 },
             "promised": { "memory_bytes": 1_000_000_000_i64, "cpus": 1.0 }
         }))

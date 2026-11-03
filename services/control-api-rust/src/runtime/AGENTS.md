@@ -29,7 +29,7 @@ services can be tested against `FakeAdapter` without a container runtime.
 |---|---|
 | `mod.rs` | The `RuntimeAdapter` trait (create, inspect, list, lifecycle, logs, exec, hardware, processes, inventory, build, model download/serve/stop, terminal), the `TerminalSocket` port, and its errors |
 | `http_runner.rs` | Adapter that speaks to the sandbox runner's internal API |
-| `fake.rs` | In-memory adapter for tests, including a terminal whose other end the test drives |
+| `fake.rs` | In-memory adapter for tests, including a terminal whose other end the test drives and a host load that carries a disk figure (`disk.total/used/free`) like the runner's |
 
 ## Extending
 
@@ -101,4 +101,5 @@ so both follow `request.node_id` — a joined node fetches and serves on its own
 stays local because a model is named by its key alone and nothing in the call says which machine.
 
 `RuntimeRouter::host_load_for(node)` asks the runner of that node (a remote adapter for a joined node, the local one otherwise);
-the node summary calls it with a 3 s timeout and shows the load as unknown when it fails.
+the node summary calls it with a 3 s timeout and shows the load as unknown when it fails. The answer's
+`disk` block is `{"total", "used", "free"}` in bytes or `null`; `readyz` reads it to report the free disk.

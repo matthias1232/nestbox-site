@@ -4,6 +4,13 @@
 //! `healthz` says the process is alive, `readyz` says it can actually serve —
 //! which means the database answered. A load balancer that only checks liveness
 //! will send traffic to a process that cannot reach its store.
+//!
+//! `readyz` also reports how much disk is left. A full appliance is not a
+//! readiness failure — the database still answers — but it is the failure that
+//! took the console down once, so the answer carries the number and the console
+//! can warn before writes start failing.
+
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::State;
@@ -21,13 +28,76 @@ pub async fn healthz() -> &'static str {
     "ok"
 }
 
+/// How long readiness waits for the host load before reporting no disk figure.
+///
+/// A probe must not hang; two seconds is several times what a local runner
+/// needs and short enough that a dead runner only delays an answer, it does not
+/// stall the load balancer.
+const HOST_LOAD_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Free bytes on the host's disk, taken from a host-load answer.
+///
+/// The runner reports `disk` as `{"total": …, "used": …, "free": …}`, or `null`
+/// when it cannot read the mount. The subtraction saturates: a container
+/// filesystem that states `used` above `total` yields 0, never a negative
+/// number that a caller could read as "some space is left".
+fn free_disk_bytes(load: &serde_json::Value) -> Option<i64> {
+    let disk = load.get("disk")?;
+    let total = disk.get("total")?.as_i64()?;
+    let used = disk.get("used")?.as_i64()?;
+    // `saturating_sub` covers the arithmetic overflow, `max(0)` the case the
+    // container reports more used than total; neither can answer a negative.
+    Some(total.saturating_sub(used).max(0))
+}
+
 /// Readiness: the process can serve, including its database.
+///
+/// The status code is unchanged by the disk figure: a full disk is reported,
+/// not enforced here. Failing readiness would take the console down, which is
+/// the state this number exists to warn about.
 pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
-    if crate::store::postgres::is_ready(state.pool()).await {
+    let readiness = if crate::store::postgres::is_ready(state.pool()).await {
         (StatusCode::OK, "ready")
     } else {
         tracing::error!("readiness check failed");
         (StatusCode::SERVICE_UNAVAILABLE, "database unavailable")
+    };
+    let (status, reason) = readiness;
+    let probe = tokio::time::timeout(HOST_LOAD_TIMEOUT, state.services.runtime.host_load());
+    let disk_free_bytes = match probe.await {
+        Ok(Ok(load)) => free_disk_bytes(&load),
+        _ => None,
+    };
+
+    (
+        status,
+        Json(serde_json::json!({
+            "status": reason,
+            "disk_free_bytes": disk_free_bytes,
+        })),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn free_disk_bytes_subtracts_and_saturates() {
+        let load = serde_json::json!({
+            "disk": { "total": 116_000_000_000_i64, "used": 16_000_000_000_i64, "free": 100_000_000_000_i64 }
+        });
+        assert_eq!(free_disk_bytes(&load), Some(100_000_000_000));
+
+        let over_reported = serde_json::json!({ "disk": { "total": 10, "used": 20 } });
+        assert_eq!(free_disk_bytes(&over_reported), Some(0));
+    }
+
+    #[test]
+    fn free_disk_bytes_is_none_without_a_disk_figure() {
+        assert_eq!(free_disk_bytes(&serde_json::json!({})), None);
+        assert_eq!(free_disk_bytes(&serde_json::json!({ "disk": null })), None);
+        assert_eq!(free_disk_bytes(&serde_json::json!({ "disk": { "total": 10 } })), None);
     }
 }
 

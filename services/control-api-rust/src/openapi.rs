@@ -57,7 +57,7 @@ pub struct Operation {
 /// reconstructed from attributes spread over ten files.
 pub const OPERATIONS: &[Operation] = &[
     op("GET", "/api/v1/healthz", "Liveness probe", "system", "none", false, StreamKind::None),
-    op("GET", "/api/v1/readyz", "Readiness probe, including the database", "system", "none", false, StreamKind::None),
+    op("GET", "/api/v1/readyz", "Readiness probe, including the database and the free disk", "system", "none", false, StreamKind::None),
     op("GET", "/api/v1/runtime", "Which runtime adapter is executing sandboxes", "system", "none", false, StreamKind::None),
     op("GET", "/api/v1/openapi.json", "This document", "system", "none", false, StreamKind::None),
     op("GET", "/api/schema/v1", "Alias of the OpenAPI document", "system", "none", false, StreamKind::None),
