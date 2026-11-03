@@ -29,10 +29,15 @@ export const GROUPS = [
 /**
  * Every route. `minRole` hides an entry from a role below it; the API still
  * enforces the same rule, so hiding is convenience and not protection.
+ *
+ * `hidden` keeps a route out of the menu while its page and path stay, so an
+ * old link still opens it. It is used for a page whose API is not there yet:
+ * `/api/v1/live/agents` does not exist, and a menu entry that only explains
+ * that would be a dead end.
  */
 export const ROUTES = [
   { id: 'home', label: 'Home', group: 'overview' },
-  { id: 'live', label: 'Agent situation', group: 'overview' },
+  { id: 'live', label: 'Agent situation', group: 'overview', hidden: true },
   { id: 'traffic', label: 'Live traffic', group: 'overview' },
   { id: 'logs', label: 'Live logs', group: 'overview' },
   { id: 'alerts', label: 'Alerts', group: 'overview', action: 'dock' },
@@ -84,10 +89,20 @@ export function visible(route, role) {
   return (RANK[role] ?? 0) >= RANK[route.minRole];
 }
 
-/** The menu for a role: groups in order, each with its visible routes, empty groups dropped. */
+/** True when `route` belongs in the menu at all; a hidden route never does. */
+export function listed(route) {
+  return !route.hidden;
+}
+
+/**
+ * The menu for a role: groups in order, each with its listed and visible routes,
+ * empty groups dropped.
+ */
 export function menuFor(role) {
   return GROUPS.map((group) => ({
     ...group,
-    routes: ROUTES.filter((route) => route.group === group.id && visible(route, role)),
+    routes: ROUTES.filter(
+      (route) => route.group === group.id && listed(route) && visible(route, role),
+    ),
   })).filter((group) => group.routes.length > 0);
 }

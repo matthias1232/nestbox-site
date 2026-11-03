@@ -18,12 +18,17 @@ that know nothing about the domain.
 
 ## The menu
 
-`navigation.js` is the menu as data: five groups (Status, Operations, Setup,
-Security, Administration) and the route list with a minimum role per entry.
+`navigation.js` is the menu as data: six groups (Overview, Operate, Setup,
+Security, Administration, Help) and the route list with a minimum role per entry.
 `App.jsx` only renders it. A new screen is one line there. `navigation.test.js`
 (`node --test src/navigation.test.js`) checks that every route is in exactly one
 group and that a role never sees an entry above it. Hiding is convenience; the
 API enforces the same rule.
+
+| Row | Meaning |
+|---|---|
+| `minRole` | The entry is hidden from a role below it; the API refuses such a call. |
+| `hidden: true` | The entry stays out of the menu (sidebar, palette, help search) while the page and its path stay, for a page whose API is not there yet — `live` today. |
 
 ## Rules
 

@@ -59,3 +59,12 @@ test('alerts and shortcuts are actions, not pages', () => {
   assert.equal(ROUTES.find((route) => route.id === 'alerts').action, 'dock');
   assert.equal(ROUTES.find((route) => route.id === 'shortcuts').action, 'shortcuts');
 });
+
+test('a hidden route never appears in the menu, whatever the role', () => {
+  for (const role of ['viewer', 'member', 'operator', 'admin', 'nobody']) {
+    assert.ok(!flat(role).includes('live'), role);
+  }
+  // The page and its path stay, so an old link still opens it.
+  assert.ok(ROUTES.some((route) => route.id === 'live'));
+  assert.equal(menuFor('admin').flatMap((group) => group.routes).length, ROUTES.length - 1);
+});

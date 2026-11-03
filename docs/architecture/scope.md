@@ -111,4 +111,5 @@ table; billing. See the amendments of ADR 0044-0050.
 - A light theme.
 - Offline export of the docs.
 - Role bindings beyond the shipped model (member grants on sandboxes, tree roles read-only).
-- The Agent situation page's `/live/agents*` routes: the page is restyled and shows an explanation.
+- Agent situation live routes (`/api/v1/live/agents*`): the page and its path stay so an
+  old link still opens it, the menu entry is hidden until the routes exist.
