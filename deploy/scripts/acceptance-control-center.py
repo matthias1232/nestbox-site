@@ -15,26 +15,43 @@ script prove it works there first (``/auth/me``). Without it the token acts in t
 data center the API picks, which on a box with more than one is the one that sorts
 first by name, an empty one as often as not. The run says which one it got either
 way, so it cannot change tenant unnoticed.
+
+Checks 14 to 16 prove the paths a unit test cannot: the accounting proxy's own model
+route (14), a bulk action that really succeeds (15) and an allow with no end that
+answers an alert (16). Every job the script starts carries ``"source": "acceptance"``
+in its params, so the console leaves it out of the operator's Tasks list.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import shlex
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 DEFAULT_BASE = "http://192.168.55.50:8080"
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
+# The accounting proxy the appliance runs; it is the only holder of the ingest token.
+PROXY_CONTAINER = "nestbox-accounting-proxy-1"
+PROXY_TOKEN_FILE = "/run/accounting/token"
+PROXY_CONTROL_API = "http://control-api:8000"
+# Marks a job as this script's own, so the console hides it instead of the operator.
+ACCEPTANCE = {"source": "acceptance"}
 BASE = DEFAULT_BASE
 TOKEN = ""
 ENVIRONMENT = ""
+DOCKER = "docker"
+ACTING_ENVIRONMENT = ""
 FAILURES: list[str] = []
 WARNINGS: list[str] = []
 PASSED: list[str] = []
 SANDBOXES: list[str] = []
+SANDBOX_NAMES: dict[str, str] = {}
 
 
 def raw(path: str, method: str = "GET", body: object | None = None, auth: bool = True, timeout: int = 60) -> tuple[int, bytes]:
@@ -101,6 +118,23 @@ def items_of(payload: object) -> list[dict]:
     return [row for row in items if isinstance(row, dict)]
 
 
+TERMINAL = {"completed", "failed", "succeeded", "done", "partial", "cancelled"}
+
+
+def wait_job(job_id: str, tries: int = 45) -> dict:
+    """Poll one job until it stopped moving; returns the job row."""
+    job: dict = {}
+    for _ in range(tries):
+        status, answer = api(f"/jobs/{job_id}")
+        if status == 200 and isinstance(answer, dict):
+            job = answer.get("job") if isinstance(answer.get("job"), dict) else answer
+            if str(job.get("status")) in TERMINAL:
+                return job
+        time.sleep(2)
+    assert job, f"job {job_id} never answered"
+    return job
+
+
 # ---------------------------------------------------------------------------
 # Check 0: which data center the token is working in
 # ---------------------------------------------------------------------------
@@ -108,10 +142,12 @@ def items_of(payload: object) -> list[dict]:
 
 def check_environment() -> str:
     """Check 0: the token acts in the data center named by --environment."""
+    global ACTING_ENVIRONMENT
     status, payload = api("/auth/me")
     expect(status, {200}, payload)
     acting = payload.get("environment_id") if isinstance(payload, dict) else None
     assert acting, f"no environment_id in /auth/me: {short(payload)}"
+    ACTING_ENVIRONMENT = str(acting)
     if not ENVIRONMENT:
         return f"no --environment given; the token acts in {acting}"
     assert str(acting).lower() == ENVIRONMENT.lower(), f"the token acts in {acting}, wanted {ENVIRONMENT}"
@@ -178,22 +214,14 @@ def check_search() -> str:
 
 def check_bulk_sandboxes() -> str:
     """Check 4: bulk sandbox actions validate and a bogus id fails on the job."""
-    status, payload = api("/sandboxes/bulk", "POST", {"ids": [], "action": "stop", "params": {}})
+    status, payload = api("/sandboxes/bulk", "POST", {"ids": [], "action": "stop", "params": dict(ACCEPTANCE)})
     expect(status, {422}, payload)
-    status, payload = api("/sandboxes/bulk", "POST", {"ids": [NIL_UUID], "action": "stop", "params": {}})
+    status, payload = api("/sandboxes/bulk", "POST", {"ids": [NIL_UUID], "action": "stop", "params": dict(ACCEPTANCE)})
     expect(status, {202}, payload)
     job_id = payload.get("job_id") if isinstance(payload, dict) else None
     assert job_id, f"no job_id: {short(payload)}"
-    job: object = {}
-    for _ in range(30):
-        status, job = api(f"/jobs/{job_id}")
-        if status == 200 and isinstance(job, dict) and (job.get("job") or job).get("status") in {"completed", "failed", "succeeded", "done"}:
-            break
-        time.sleep(2)
-    if isinstance(job, dict) and isinstance(job.get("job"), dict):
-        job = job["job"]
-    failed = job.get("failed") if isinstance(job, dict) else None
-    assert failed == 1, f"job failed counter is {failed!r}: {short(job)}"
+    job = wait_job(str(job_id))
+    assert job.get("failed") == 1, f"job failed counter is {job.get('failed')!r}: {short(job)}"
     return "empty ids 422, bogus id gives a job with failed == 1"
 
 
@@ -244,11 +272,12 @@ def check_alerts() -> str:
 
 
 def make_sandbox() -> str:
-    """Create the throw-away ubuntu-dev sandbox used by check 9."""
+    """Create the throw-away ubuntu-dev sandbox used by checks 9, 14, 15 and 16."""
     name = f"cc{time.strftime('%H%M')}{int(time.time()) % 100}"
     status, payload = api("/sandboxes", "POST", {"name": name, "pack_key": "ubuntu-dev", "memory_limit": "1Gi", "cpu_limit": 1.0, "pids_limit": 256}, timeout=300)
     assert status == 201 and isinstance(payload, dict) and payload.get("id"), f"create: HTTP {status}: {short(payload)}"
     SANDBOXES.append(str(payload["id"]))
+    SANDBOX_NAMES[str(payload["id"])] = str(payload.get("name") or name)
     return str(payload["id"])
 
 
@@ -332,6 +361,136 @@ def check_spa_fallback() -> str:
     return "SPA fallback serves HTML"
 
 
+# ---------------------------------------------------------------------------
+# Checks 14-16: the paths a unit test cannot prove on the appliance
+# ---------------------------------------------------------------------------
+
+
+def throw_away_sandbox() -> tuple[str, str]:
+    """The id and name of the script's own sandbox; created here if check 9 failed."""
+    if not SANDBOXES:
+        make_sandbox()
+    sandbox_id = SANDBOXES[0]
+    return sandbox_id, SANDBOX_NAMES.get(sandbox_id, "")
+
+
+def proxy_probe(name: str) -> str:
+    """The model lookup as the accounting proxy itself makes it.
+
+    The token is read from a file inside the container and never leaves it: only the
+    HTTP status is printed, so nothing secret can reach this script or its output.
+    """
+    return (
+        "import os, urllib.request\n"
+        "try:\n"
+        f"    t = open({PROXY_TOKEN_FILE!r}).read().strip()\n"
+        f"    url = os.environ.get('NESTBOX_CONTROL_API', {PROXY_CONTROL_API!r}) + '/api/v1/internal/accounting/models/' + {name!r}\n"
+        "    r = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + t})\n"
+        "    print(urllib.request.urlopen(r, timeout=30).status)\n"
+        "except Exception as failure:\n"
+        "    print(getattr(failure, 'code', 0))\n"
+    )
+
+
+def simulate_proxy(sandbox_id: str, why: str) -> str:
+    """The same read under the admin token, when the proxy container is out of reach."""
+    status, payload = api(f"/sandboxes/{sandbox_id}/models")
+    expect(status, {200}, payload)
+    raise Warning(f"{why}; the proxy path itself was not exercised, /sandboxes/<id>/models answered 200 instead")
+
+
+def check_accounting_proxy() -> str:
+    """Check 14: the accounting proxy's own model route answers 200 for a running sandbox."""
+    sandbox_id, name = throw_away_sandbox()
+    assert name, f"the throw-away sandbox {sandbox_id} has no name"
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", name), f"unusable sandbox name {name!r}"
+    command = shlex.split(DOCKER) + ["exec", "-i", PROXY_CONTAINER, "python3", "-"]
+    try:
+        # The program travels on stdin, so the command has no quoting to survive a shell
+        # or an ssh hop and no argument of it can end up in a process list.
+        done = subprocess.run(command, input=proxy_probe(name), capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        return simulate_proxy(sandbox_id, f"no {DOCKER} here")
+    except subprocess.TimeoutExpired:
+        return simulate_proxy(sandbox_id, "docker exec timed out")
+    answer = (done.stdout or "").strip()
+    # The container's stderr is never echoed: it is the one place a header could leak into.
+    assert done.returncode == 0, (
+        f"docker exec exited {done.returncode} without an answer; "
+        f"is {PROXY_CONTAINER} up, and does docker need sudo (--docker 'sudo -n docker')?"
+    )
+    assert re.fullmatch(r"\d{3}", answer), "the probe answered something other than an HTTP status"
+    expect(int(answer), {200}, "")
+    return f"the accounting proxy answered 200 for {name}"
+
+
+def alerts_for(sandbox_id: str, host: str, window: str = "15m") -> list[dict]:
+    """The alert rows of one sandbox and one host."""
+    status, payload = api(f"/alerts?window={window}")
+    expect(status, {200}, payload)
+    return [
+        row for row in items_of(payload)
+        if str(row.get("sandbox_id", "")).lower() == sandbox_id.lower()
+        and str(row.get("host", "")).lower() == host.lower()
+    ]
+
+
+def check_bulk_stop() -> str:
+    """Check 15: a bulk stop on the script's own sandbox really completes."""
+    sandbox_id, name = throw_away_sandbox()
+    status, payload = api("/sandboxes/bulk", "POST", {"ids": [sandbox_id], "action": "stop", "params": dict(ACCEPTANCE)})
+    expect(status, {202}, payload)
+    job_id = payload.get("job_id") if isinstance(payload, dict) else None
+    assert job_id, f"no job_id: {short(payload)}"
+    job = wait_job(str(job_id))
+    assert str(job.get("status")) in TERMINAL, f"the job ended {job.get('status')!r}: {short(job)}"
+    assert job.get("completed") == 1, f"completed is {job.get('completed')!r}, wanted 1: {short(job)}"
+    assert job.get("failed") == 0, f"failed is {job.get('failed')!r}, wanted 0: {short(job)}"
+    assert (job.get("payload") or {}).get("source") == "acceptance", (
+        f"the job payload carries no acceptance tag, so the dock cannot hide it: {short(job.get('payload'))}"
+    )
+    return f"bulk stop on {name} completed 1, tagged acceptance"
+
+
+def check_unlimited_window() -> str:
+    """Check 16: an allow with no end (minutes null) answers the alert it hides."""
+    sandbox_id, name = throw_away_sandbox()
+    environment = ACTING_ENVIRONMENT
+    if not environment:
+        status, payload = api("/auth/me")
+        expect(status, {200}, payload)
+        environment = str((payload or {}).get("environment_id") or "")
+    assert environment, "no data center to record the refusal in"
+    host = "acc-acceptance.example.org"
+    refusal = {
+        "kind": "network",
+        "id": str(uuid.uuid4()),
+        "environment_id": environment,
+        "sandbox_id": sandbox_id,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "direction": "outbound",
+        "protocol": "tls",
+        "source": "10.0.0.2",
+        "destination": host,
+        "port": 443,
+        "decision": "deny",
+        "channel": "proxy",
+        "enforcement": "enforced",
+    }
+    status, payload = api("/telemetry/ingest", "POST", refusal)
+    expect(status, {202}, payload)
+    assert alerts_for(sandbox_id, host), f"the refused {host} is not listed as an alert of {name}"
+    status, payload = api(f"/sandboxes/{sandbox_id}/quick", "PUT", {"what": "allow_all", "value": True, "minutes": None})
+    expect(status, {200}, payload)
+    try:
+        left = alerts_for(sandbox_id, host)
+    finally:
+        # Leave no allow-all behind, even when the assertion below fails.
+        api(f"/sandboxes/{sandbox_id}/quick", "PUT", {"what": "allow_all", "value": False, "minutes": None})
+    assert not left, f"an allow with no end left {len(left)} alert(s) for {host}"
+    return f"a refusal of {host} is answered by an allow with no end"
+
+
 def teardown() -> None:
     """Delete the throw-away sandbox(es)."""
     for sandbox_id in list(SANDBOXES):
@@ -347,7 +506,7 @@ def teardown() -> None:
 
 def main() -> int:
     """Parse arguments, run every check, print the verdict."""
-    global BASE, TOKEN, ENVIRONMENT
+    global BASE, TOKEN, ENVIRONMENT, DOCKER
     parser = argparse.ArgumentParser(description="Control Center acceptance against the appliance.")
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--token", required=True, help="Admin bearer token.")
@@ -356,10 +515,20 @@ def main() -> int:
         default="",
         help="Data center the token must work in. Sent as x-nestbox-environment and asserted on /auth/me first.",
     )
+    parser.add_argument(
+        "--docker",
+        default="docker",
+        help=(
+            "How to reach the Docker CLI for check 14, e.g. 'sudo -n docker' or "
+            "'ssh -i ~/.ssh/nestbox_builder nestbox@192.168.55.50 sudo -n docker'. "
+            "Only the HTTP status of the probe is printed; no token is read here."
+        ),
+    )
     arguments = parser.parse_args()
     BASE = arguments.base.rstrip("/")
     TOKEN = arguments.token.strip()
     ENVIRONMENT = arguments.environment.strip()
+    DOCKER = arguments.docker.strip() or "docker"
     target = f" (data center {ENVIRONMENT})" if ENVIRONMENT else ""
     print(f"Control Center acceptance against {BASE}{target}")
     try:
@@ -382,6 +551,9 @@ def main() -> int:
         run("11 illustration", check_illustration)
         run("12 bundle", check_bundle)
         run("13 spa fallback", check_spa_fallback)
+        run("14 accounting proxy", check_accounting_proxy)
+        run("15 bulk stop", check_bulk_stop)
+        run("16 unlimited window", check_unlimited_window)
     finally:
         teardown()
     print(f"\npassed {len(PASSED)}, warnings {len(WARNINGS)}, failed {len(FAILURES)}")

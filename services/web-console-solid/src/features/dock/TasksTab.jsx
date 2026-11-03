@@ -28,9 +28,13 @@ export default function TasksTab() {
       }
     }
   }
+  // A job the acceptance script starts is its own test subject, not the operator's work:
+  // `params.source == "acceptance"` rides along in the payload, so such a job never enters
+  // this list (and its log lines are not polled either).
+  const visible = (job) => !(job.payload && job.payload.source === 'acceptance');
   const poll = usePolling(() => jobsApi.list(20), {
     everyMs: 5000,
-    onData: (result) => { const list = result.items || []; setJobs(list); setError(''); loadLines(list); },
+    onData: (result) => { const list = (result.items || []).filter(visible); setJobs(list); setError(''); loadLines(list); },
     onError: (failure) => setError(failure.message),
   });
   onCleanup(live.on('job', () => poll.refresh()));
