@@ -1,9 +1,8 @@
-# ADR 0062 — Help and documentation ship inside the console
+# ADR 0067 — Help and documentation ship inside the console
 
 Status: Accepted
 Date: 2026-11-02
 
-Note: see the numbering note in ADR 0059; the file name is unique.
 
 ## Context
 

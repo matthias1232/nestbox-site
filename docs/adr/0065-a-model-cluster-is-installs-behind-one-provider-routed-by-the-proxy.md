@@ -1,9 +1,8 @@
-# ADR 0060 — A model cluster is installs behind one provider, routed by the proxy
+# ADR 0065 — A model cluster is installs behind one provider, routed by the proxy
 
 Status: Accepted
 Date: 2026-11-02
 
-Note: see the numbering note in ADR 0059; the file name is unique.
 
 ## Context
 
@@ -14,7 +13,7 @@ four. Models are granted per scope and reached through the accounting proxy's ro
 installs share one name.
 
 Not to be confused with a *site*, which the console shows where users say "cluster"
-(ADR 0059), or the old gateway `clusters` table.
+(ADR 0064), or the old gateway `clusters` table.
 
 ## Decision
 

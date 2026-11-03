@@ -1,11 +1,8 @@
-# ADR 0059 — The console is an inventory tree, and every view has a real address
+# ADR 0064 — The console is an inventory tree, and every view has a real address
 
 Status: Accepted
 Date: 2026-11-02
 
-Note: the number 0059 is also used by `0059-content-inspection-on-the-decrypted-hop.md`
-(and 0060–0062 by other files). The Control Center plan fixed these numbers before the
-clash was seen; the file names are unique. Renumbering is left to the maintainer.
 
 ## Context
 
