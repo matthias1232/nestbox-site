@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -55,6 +56,22 @@ BRIDGE = (
     "    if not d: break\n"
     "    os.write(1,d)\n"
 )
+
+
+def bridge_command(tag: str) -> list[str]:
+    """The argv that starts one bridge inside the sandbox.
+
+    The tag rides on the command line (Python leaves it in `sys.argv`), so the
+    runner can end exactly this bridge when the viewer goes away. Without the
+    tag a closed viewer left its bridge behind: after about seven connections
+    the sandbox refused further upgrades (`node.runtime_unavailable`).
+    """
+    return ["python3", "-c", BRIDGE, f"nestbox-vnc-bridge-{tag}"]
+
+
+def bridge_kill_command(tag: str) -> list[str]:
+    """The argv that ends one bridge by its tag, and only that one."""
+    return ["pkill", "-f", f"nestbox-vnc-bridge-{tag}"]
 
 
 def authorised(websocket: WebSocket) -> bool:
@@ -167,17 +184,37 @@ class ExecStream:
             pass
 
 
-def open_bridge(container: Any) -> Any:
+def open_bridge(container: Any, tag: str) -> Any:
     gateway = openshell_name(container.name)
     if gateway:
         # The desktop's loopback port lives inside the sandbox's own boundary, so
         # the bridge is started through the gateway, not beside it.
-        return GatewayStream.open(gateway, ["python3", "-c", BRIDGE])
+        return GatewayStream.open(gateway, bridge_command(tag))
     client = container.client
     created = client.api.exec_create(
-        container.id, ["python3", "-c", BRIDGE], tty=False, stdin=True, stdout=True, stderr=True
+        container.id, bridge_command(tag), tty=False, stdin=True, stdout=True, stderr=True
     )
     return ExecStream(client.api.exec_start(created["Id"], tty=False, socket=True))
+
+
+def close_bridge(container: Any, tag: str) -> None:
+    """End the bridge of one viewer, whatever state the socket is in.
+
+    Closing the exec socket does not end the process inside the sandbox, so the
+    tag from `bridge_command` is killed explicitly. A failure here is logged and
+    ignored: the viewer is already gone, and a leftover is better than an
+    exception in the teardown path.
+    """
+    try:
+        gateway = openshell_name(container.name)
+        if gateway:
+            GatewayStream.open(gateway, bridge_kill_command(tag)).close()
+            return
+        client = container.client
+        created = client.api.exec_create(container.id, bridge_kill_command(tag), tty=False)
+        client.api.exec_start(created["Id"])
+    except Exception as exc:  # noqa: BLE001 - teardown must never raise
+        logger.warning("vnc: could not end the bridge %s: %s", tag, exc)
 
 
 @router.websocket("/v1/sandboxes/{name}/vnc")
@@ -210,8 +247,9 @@ async def vnc(websocket: WebSocket, name: str) -> None:
         return
 
     await websocket.accept(subprotocol=SUBPROTOCOL)
+    tag = uuid.uuid4().hex[:12]
     try:
-        stream = await asyncio.to_thread(open_bridge, container)
+        stream = await asyncio.to_thread(open_bridge, container, tag)
     except DockerException as exc:
         await websocket.close(code=CLOSE_INTERNAL, reason=f"could not open the desktop: {exc}")
         return
@@ -250,6 +288,7 @@ async def vnc(websocket: WebSocket, name: str) -> None:
         for task in tasks:
             task.cancel()
         stream.close()
+        await asyncio.to_thread(close_bridge, container, tag)
         try:
             await websocket.close(code=CLOSE_NORMAL)
         except RuntimeError:

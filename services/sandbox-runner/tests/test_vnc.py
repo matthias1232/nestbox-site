@@ -28,8 +28,12 @@ class _WebSocketDisconnect(Exception):
 
 
 class _APIRouter:
-    def websocket(self, _path: str):
+    """Enough of the router for the module import: a decorator per verb."""
+
+    def _decorator(self, *_args, **_kwargs):
         return lambda handler: handler
+
+    get = post = put = patch = delete = websocket = _decorator
 
 
 _fastapi = types.ModuleType("fastapi")
@@ -40,6 +44,7 @@ sys.modules.setdefault("fastapi", _fastapi)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app import vnc  # noqa: E402
 from app.vnc import RfbClientFilter  # noqa: E402
 
 # --- message shapes -------------------------------------------------------
@@ -118,3 +123,12 @@ class ViewOnlyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BridgeTagTest(unittest.TestCase):
+    def test_each_bridge_carries_its_own_tag(self) -> None:
+        argv = vnc.bridge_command("abc123")
+        self.assertEqual(argv[:2], ["python3", "-c"])
+        self.assertIn("nestbox-vnc-bridge-abc123", argv[-1])
+
+    def test_the_kill_command_names_exactly_one_tag(self) -> None:
+        self.assertEqual(vnc.bridge_kill_command("abc123"), ["pkill", "-f", "nestbox-vnc-bridge-abc123"])
