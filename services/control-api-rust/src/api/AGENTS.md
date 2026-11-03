@@ -25,13 +25,22 @@ The architecture test enforces the last two.
 3. A path parameter is parsed into a typed value (`Uuid`) by the extractor, so a
    malformed id is a 400 before any logic runs.
 4. An id supplied in a create body is ignored where the database assigns one.
+5. Either credential — a session cookie or an API token — may name the data
+   center it works in with `x-nestbox-environment`. The extractor hands the id to
+   `auth_service::principal_for_environment`, which checks membership, so the
+   header can never widen what a credential reaches: a data center without a role
+   is a 403 and an unknown id a 404. Without the header nothing changes, and a
+   malformed header is ignored rather than refused, because a request that would
+   have worked must not fail over an optional hint. The acceptance script relies
+   on this: it sets the header and asserts `/auth/me.environment_id`, so a run
+   cannot silently grade an empty data center.
 
 ## Files
 
 | File | Routes |
 |---|---|
 | `mod.rs` | Router composition and layers |
-| `principal.rs` | The `Auth` extractor: session, token, CSRF |
+| `principal.rs` | The `Auth` extractor: session, token, CSRF, `x-nestbox-environment` |
 | `auth.rs` | Login, logout, identity |
 | `system.rs` | Health, readiness (database state plus `disk_free_bytes` from the host load, `null` when the runner does not answer within 2 s; the status code never depends on the disk), runtime, OpenAPI, environments, audit |
 | `sandboxes.rs` | Sandbox list, detail, create (including the optional `gpu_count`), actions, logs, exec, stack membership (`PUT /sandboxes/{id}/stack`) |
