@@ -12,7 +12,7 @@
 // with `?view=1` and the control API drops keyboard, pointer, clipboard and
 // resize messages before they reach the desktop. `rfb.viewOnly` alone is a
 // promise from the client to itself, which anybody can take back in DevTools.
-import { Show, createSignal, onCleanup, onMount } from 'solid-js';
+import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import RFB from '@novnc/novnc/lib/rfb';
 import * as deck from '../../api/deck.js';
 import '../../styles/workbox-sessions.css';
@@ -22,7 +22,7 @@ export default function DesktopTab(props) {
   let rfb;
   const [state, setState] = createSignal('idle');
   const [note, setNote] = createSignal(null);
-  const [viewOnly, setViewOnly] = createSignal(false);
+  const [viewOnly, setViewOnly] = createSignal(props.viewOnly === true);
   const [browser, setBrowser] = createSignal(null);
   const running = () => props.sandbox.status === 'running';
 
@@ -108,7 +108,23 @@ export default function DesktopTab(props) {
     }
   }
 
-  onMount(() => { connect(); loadBrowser(); });
+  // The console frame can switch watching on or off; the stream opens again.
+  let lastView = viewOnly();
+  createEffect(() => {
+    const wanted = props.viewOnly === true;
+    if (wanted === lastView) return;
+    lastView = wanted;
+    setWatch(wanted);
+  });
+
+  onMount(() => {
+    connect();
+    loadBrowser();
+    props.onReady?.({
+      sendCtrlAltDel: () => rfb?.sendCtrlAltDel(),
+      fullscreen: () => screen?.requestFullscreen?.(),
+    });
+  });
   onCleanup(disconnect);
 
   return (

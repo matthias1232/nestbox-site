@@ -45,3 +45,4 @@ Every stylesheet except `tokens.css` reads colours only through tokens: square c
 - `admin-center.css` — Admin Center action bar, console split menu, Summary tiles and grids (F10); imported by `features/sandboxes/AdminCenter.jsx`.
 - `mounts.css` — mount editor chips, path lists (F15); imported by `features/sandboxes/MountEditor.jsx`.
 - `traffic.css` — Live traffic page: filter bar, red lane, side panel, sticky table header (F17); imported by `features/traffic/TrafficPage.jsx`.
+| `console.css` | toolbar and body of `components/ConsoleFrame.jsx` |

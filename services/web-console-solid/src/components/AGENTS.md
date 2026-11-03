@@ -89,3 +89,4 @@ Topology (F16): `TopologyCanvas.jsx` is the layered SVG drawing with zoom, pan, 
 `TopologyPanel.jsx` is its side panel (facts, receives/sends lists, Open/Policies/Logs, Allow 15/30/60 on a refused
 destination); `Minimap.jsx` is the 160 px overview; `topologyLayout.js` is the pure layout, edge path, fit, zoom and the
 `fromCluster` / `fromStack` mappers (`node --test topologyLayout.test.js`). Styles: `styles/topology.css`.
+| `ConsoleFrame.jsx`, `consoleFrame.js`, `consoleFrame.test.js` | one console per sandbox: Shell/Desktop/SSH split button, toolbar (font, copy, paste, fullscreen, Ctrl+Alt+Del, view-only, pop-out); pure `modes`, `pickMode`, `nextFont`, `sshLines` |

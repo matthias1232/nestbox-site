@@ -117,3 +117,6 @@ or inspect a file, and it keeps every run in the audit trail as an argument
 vector. An interactive terminal is a later transport, not a change to this one.
 
 `CreateSandboxWizard.jsx` (F24) is a placeholder created in Wave 0.
+`MountEditor.jsx` (F15) and `CreateSandboxWizard.jsx` (F24) are placeholders created in Wave 0.
+
+Note: `TerminalTab` takes `fontSize` and `onReady({copy, paste, focus, fit, activeTab})`; `DesktopTab` takes `viewOnly` and `onReady({sendCtrlAltDel, fullscreen})`; both are driven by `components/ConsoleFrame.jsx`.

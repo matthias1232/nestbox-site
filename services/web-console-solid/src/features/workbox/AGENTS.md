@@ -60,3 +60,5 @@ terminal imports for its presence events so a page keeps one event stream.
 | `NetworkCard.jsx` | now only the open evaluation windows and the recreate hint; the mode switch moved to the strip |
 | `ModelsCard.jsx` | "Add model" offers the models the user holds and this sandbox lacks, with "Another endpoint" as the old free form |
 | `MyBoxesPage.jsx` | box cards with status, node, allow-all badge and Open / Shell / Desktop |
+
+Note: `SessionsPanel.jsx` now renders `components/ConsoleFrame.jsx` under the presence line.
