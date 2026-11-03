@@ -1137,6 +1137,12 @@ pub async fn create(
                 if let Err(error) = crate::services::mcp_service::attach(ctx, principal, sandbox.id, "chrome-browser", true).await {
                     tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "could not attach the browser MCP");
                 }
+                // The browser drives pages; the desktop server drives the whole screen, every
+                // monitor, the windows and the input. A desktop sandbox gets both, so an agent
+                // never has to discover that half of its workspace is missing (U12).
+                if let Err(error) = crate::services::mcp_service::attach(ctx, principal, sandbox.id, "desktop-control", true).await {
+                    tracing::warn!(sandbox = %sandbox.name, code = error.code.0, "could not attach the desktop MCP");
+                }
             }
             // An agent starts with the Nestbox MCP hub attached when the hub is
             // deployed (the same condition that put its address in the environment).
