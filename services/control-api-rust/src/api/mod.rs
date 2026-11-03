@@ -15,6 +15,7 @@ pub mod auth;
 pub mod cluster;
 pub mod control;
 pub mod cudax;
+pub mod display;
 pub mod events;
 pub mod hosting;
 pub mod image_templates;
@@ -190,6 +191,11 @@ pub fn router(state: AppState) -> Router {
         )
         // Admin Center: terminal, SSH, ports, sessions
         .route("/api/v1/sandboxes/{id}/desktop", get(sandboxes_vnc::desktop))
+        // The monitors of that desktop: which ones exist, how large, where.
+        .route(
+            "/api/v1/sandboxes/{id}/display",
+            get(display::get).put(display::set),
+        )
         .route(
             "/api/v1/sandboxes/{id}/terminal-sessions",
             get(sandboxes_terminal::sessions),

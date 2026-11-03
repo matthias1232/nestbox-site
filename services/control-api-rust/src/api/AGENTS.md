@@ -66,6 +66,7 @@ The architecture test enforces the last two.
 | `mcp.rs` | MCP registry and sandbox attachments, and the discovery trigger |
 | `media.rs` | Media settings, a sandbox's choice, renders and assets, and the media-token bridge |
 | `sandboxes_terminal.rs` | The terminal WebSocket and the stored tab list a reload reopens (`feat/terminal`) |
+| `display.rs` | `GET` and `PUT /sandboxes/{id}/display`: the monitor layout of a desktop sandbox (U10a). The `PUT` body is `{ layout, expected_applied_at }`; a stale stamp is a `409 display.changed` whose `details` carry the current layout |
 | `topology.rs` | The cluster graph and its live edges (`feat/live-traffic`) |
 
 The Admin Center's read endpoints (`traffic.rs`, `topology.rs`) take a window and
@@ -121,6 +122,13 @@ ends the stream. `GET /sandboxes/{id}/live/{kind}` (in `metrics.rs`) is the read
 live view (`connections`); the kind is a closed list. `POST
 /sandboxes/{id}/allow` creates an enabled allow rule for one destination in one
 step (idempotent) — the one-click release from the Traffic tab.
+
+`display.rs` is the monitor layout of that desktop: `GET` reads it and `PUT`
+replaces it, both through `display_service`. Reading needs `SandboxRead` (a
+viewer already sees the same screen), writing needs `SandboxExec` (the same
+permission as VNC input). The `PUT` body carries `expected_applied_at`; a
+mismatch is a `409 display.changed` with the layout that is on the screen now,
+so a console redraws instead of overwriting a change an agent made in between.
 
 ## Multi-tenant and multi-node routes
 

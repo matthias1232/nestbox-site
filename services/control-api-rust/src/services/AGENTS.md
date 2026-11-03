@@ -94,6 +94,7 @@ that push (ADR 0053).
 | `media_service.rs` | Media settings, the effective model per sandbox, the provider call, renders and their assets; `sandbox_environment` answers the data center a named sandbox lives in (one → use it, two → 409, none → 404, function missing → the single-data-center fallback), which is the tenant for every appliance-side caller that has no principal |
 | `persist_service.rs` | Persistent roots: derived host paths, mounts, the one-read-write rule, honest usage |
 | `terminal_service.rs` | The browser terminal: permission, the four-per-sandbox and twenty-per-user limits, the idle clock, the session row and its two audit events, and the stored tab list a reload reopens (`feat/terminal`) |
+| `display_service.rs` | The monitor layout of a desktop sandbox: `get` reads it with `nestbox-display get`, `set` validates it, applies it with `nestbox-display set` (the actor travels as `NESTBOX_DISPLAY_ACTOR`), audits `sandbox.display`, publishes `SandboxControlChanged { what: "display" }`, and refuses a stale `expected_applied_at` with `409 display.changed`; a sandbox without the tool is `409 sandbox.no_desktop` |
 | `session_service.rs` | The login overview of running sandboxes: the in-sandbox probe, the assessed login, and per agent the chosen mode with `signed_in` |
 
 ## Probing a node
@@ -416,3 +417,30 @@ Control Center services (Wave 0 stubs returning `ApiError::internal("not built: 
 | `secret_service.rs` | The secret store: keys typed into the console, kept encrypted, never shown again. |
 | `snapshot_service.rs` | Snapshots on a timer, and clearing out old ones (ADR 0049). |
 | `user_service.rs` | Users: who may sign in, with what role, in this environment. |
+
+## The display of a desktop sandbox
+
+`display_service.rs` is deliberately thin, because the sandbox owns its screen.
+`nestbox-display` inside the desktop pack is the only code that talks to RandR;
+this service decides who may ask, refuses an invalid layout early with the same
+sentences the tool would print, and records the result.
+
+1. **Reading needs `SandboxRead`, writing needs `SandboxExec`.** A viewer may
+   already watch the same screen through the view-only desktop stream, so the
+   geometry is not a secret; changing it is the same power as typing into the
+   desktop, so it needs the same permission as the VNC input path.
+2. **Nothing is cached.** Every `get` executes the tool, so a layout an agent
+   changed through the desktop-control MCP server is what the console sees on
+   its next poll or its `control` event.
+3. **A write carries `expected_applied_at`.** `nestbox-display set` returns the
+   layout it read back from X, whose `applied_at` is the new stamp. A mismatch
+   means somebody else (an agent, another operator) changed the screen in
+   between; overwriting that silently would undo their work, so the answer is
+   `409 display.changed` with the layout that is really there in `details`.
+4. **A missing tool is a 409, not a 500.** Exit code 127 means the image has no
+   desktop pack; the caller's next step is another sandbox, so
+   `409 sandbox.no_desktop` says so. Any other refusal from the tool is a 422
+   carrying its own sentence, which was written for a person.
+5. **One audit line and one event per apply.** `sandbox.display` holds the mode
+   and the monitors; `SandboxControlChanged { what: "display" }` is what makes an
+   open console redraw its tabs.

@@ -43,6 +43,7 @@ component never contains a URL.
 | `recipes.js` | recipe CRUD, build, instantiate |
 | `persistent.js` | persistent roots, mount, dismount, usage |
 | `jobs.js` | jobs, logs, schedules |
+| `display.js` | the monitor layout of a desktop sandbox: `get` and `set`, with the `applied_at` the caller read so the server can refuse a stale write (U10a) |
 
 ## Extending
 

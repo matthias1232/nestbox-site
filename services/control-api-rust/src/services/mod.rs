@@ -19,6 +19,7 @@ pub mod catalog_sync;
 pub mod catalogue_service;
 pub mod control_service;
 pub mod cudax_service;
+pub mod display_service;
 pub mod egress_live_service;
 pub mod environment_service;
 pub mod gateway_service;
