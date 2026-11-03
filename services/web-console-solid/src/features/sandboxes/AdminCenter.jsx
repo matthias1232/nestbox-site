@@ -13,11 +13,12 @@
 // The active tab lives in the URL (`?tab=`): `navigate(paths.sandbox(id, tab))` writes it and
 // `props.initialTab` (from parsePath) reads it, so a reload or a shared link lands on the same tab.
 
-import { Show, For, createSignal, createEffect, createMemo, onCleanup, untrack, lazy } from 'solid-js';
+import { Show, For, createSignal, createEffect, createMemo, onCleanup, untrack } from 'solid-js';
 import Tabs from '../../components/Tabs.jsx';
 import TabBoundary from '../../components/TabBoundary.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 import PendingPanel from '../../components/PendingPanel.jsx';
+import ConsoleFrame from '../../components/ConsoleFrame.jsx';
 import PresenceDots from '../../components/PresenceDots.jsx';
 import Segmented from '../../components/Segmented.jsx';
 import { usePolling } from '../../components/Poll.js';
@@ -36,7 +37,6 @@ import { resolveTab, subViewFor, tabsFor } from './adminTabs.js';
 import DashboardTab from './DashboardTab.jsx';
 import TrafficTab from './TrafficTab.jsx';
 import McpTab from './McpTab.jsx';
-const TerminalTab = lazy(() => import('./TerminalTab.jsx'));
 import AccessTab from './AccessTab.jsx';
 import MapTab from './MapTab.jsx';
 import SupervisorTab from './SupervisorTab.jsx';
@@ -49,7 +49,6 @@ import ConnectionsTab from './ConnectionsTab.jsx';
 import ChatsTab from './ChatsTab.jsx';
 import UsageTab from './UsageTab.jsx';
 import CommandsTab from './CommandsTab.jsx';
-const DesktopTab = lazy(() => import('./DesktopTab.jsx'));
 import InventoryTab from './InventoryTab.jsx';
 import LogsTab from './LogsTab.jsx';
 import MountEditor from './MountEditor.jsx';
@@ -67,12 +66,7 @@ const LIVE_VIEWS = [
 ];
 const LIVE_COMPONENTS = { connections: ConnectionsTab, commands: CommandsTab, chats: ChatsTab };
 
-// Console: Terminal and Desktop behind one switch, until the ConsoleFrame package (F20) lands.
-const CONSOLE_VIEWS = [
-  { value: 'shell', label: 'Shell' },
-  { value: 'desktop', label: 'Desktop' },
-];
-const CONSOLE_COMPONENTS = { shell: TerminalTab, desktop: DesktopTab };
+// Console: the shared frame (components/ConsoleFrame.jsx) owns Shell, Desktop and SSH.
 
 
 // A tab that groups several views: a switch on top, the chosen view below.
@@ -98,7 +92,7 @@ function Grouped(props) {
 const BODIES = {
   summary: (p) => <SummaryTab sandbox={p.sandbox} control={p.control} revision={p.revision} onTab={p.goTab} />,
   live: (p) => <Grouped views={LIVE_VIEWS} components={LIVE_COMPONENTS} view={p.liveView()} onView={p.setLiveView} {...p.base} />,
-  console: (p) => <Grouped views={CONSOLE_VIEWS} components={CONSOLE_COMPONENTS} view={p.consoleView()} onView={p.setConsoleView} {...p.base} />,
+  console: (p) => <ConsoleFrame sandbox={p.base.sandbox} mode={p.consoleView() || undefined} onMode={p.setConsoleView} />,
   traffic: (p) => <TrafficTab {...p.base} />,
   policies: (p) => (
     <div>
@@ -139,7 +133,9 @@ export default function AdminCenter(props) {
   const tab = createMemo(() => resolveTab(props.initialTab, role()));
   const visibleTabs = createMemo(() => tabsFor(role()));
   const [liveView, setLiveView] = createSignal('connections');
-  const [consoleView, setConsoleView] = createSignal('shell');
+  // The console view: set by an old link (`?tab=terminal` / `?tab=desktop`) or by the split
+  // button; null lets ConsoleFrame use the last choice for this sandbox.
+  const [consoleView, setConsoleView] = createSignal(null);
   const [sandbox, setSandbox] = createSignal(null);
   const [control, setControl] = createSignal(null);
   const [error, setError] = createSignal(null);
