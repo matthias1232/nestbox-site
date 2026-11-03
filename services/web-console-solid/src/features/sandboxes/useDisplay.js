@@ -39,6 +39,22 @@ export const QUIET_MS = 400;
 export const REFRESH_MS = 10000;
 
 /**
+ * How long one display request may take before it is treated as failed.
+ *
+ * A fetch that never answers would otherwise leave `applying` true for good, and
+ * the panel would say "Applying…" while every later edit is quietly dropped. The
+ * request is left running (the browser will end it); only the wait is bounded.
+ */
+export const REQUEST_TIMEOUT_MS = 15000;
+
+/** Reject after `ms`, for a request that may never settle. */
+function timeout(ms) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('The display did not answer in time.')), ms);
+  });
+}
+
+/**
  * Keep the display layout of `sandboxId` (a string or a getter) applied live.
  *
  * Returns the layout and its status, plus one method per edit. Every edit is
@@ -95,7 +111,10 @@ export function useDisplay(sandboxId) {
     applying = true;
     setStatus({ kind: 'applying', text: 'Applying…' });
     try {
-      const answer = await displayApi.set(target, wanted, appliedAt());
+      const answer = await Promise.race([
+        displayApi.set(target, wanted, appliedAt()),
+        timeout(REQUEST_TIMEOUT_MS),
+      ]);
       if (!alive || target !== id()) return;
       const applied = adopt(answer) || wanted;
       setStatus({ kind: 'applied', text: describeApplied(applied, Date.now() - started) });
@@ -144,7 +163,10 @@ export function useDisplay(sandboxId) {
     // undo what the operator is doing right now.
     if (!alive || !target || applying || timer !== null) return;
     try {
-      const answer = await displayApi.get(target);
+      const answer = await Promise.race([
+        displayApi.get(target),
+        timeout(REQUEST_TIMEOUT_MS),
+      ]);
       if (!alive || target !== id() || applying || timer !== null) return;
       const previous = JSON.stringify(layout());
       const changed = (answer?.applied_at || null) !== appliedAt();

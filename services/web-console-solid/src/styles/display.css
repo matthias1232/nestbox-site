@@ -3,7 +3,8 @@
  * The tab strip keeps the terminal strip's look (.terminal-tab in
  * workbox-sessions.css): a bordered tab, the active one lime, an icon button
  * inside it, and a menu that drops under the tab so the strip never moves.
-
+ * The arrangement is the OS display dialog: one rectangle per monitor, the
+ * selected one lime, and the counters under it.
  *
  * Only the tokens from tokens.css are used, so a theme change needs no second
  * palette here.
@@ -154,4 +155,121 @@ button.monitor-tab {
   display: flex;
   align-items: flex-end;
   gap: var(--space-1);
+}
+
+/* ---- the arrangement ----------------------------------------------------- */
+
+.display-arrange {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.display-svg {
+  display: block;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  touch-action: none;
+  user-select: none;
+}
+
+.display-monitor rect {
+  fill: var(--bg-hover);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  cursor: grab;
+}
+
+.display-monitor.active rect {
+  fill: var(--accent-dim);
+  stroke: var(--accent);
+}
+
+.display-monitor.dragging rect {
+  cursor: grabbing;
+  fill: var(--accent-dim);
+  stroke: var(--accent);
+  stroke-dasharray: 3 2;
+}
+
+.display-monitor text {
+  fill: var(--fg-muted);
+  font-size: 10px;
+  font-family: var(--font);
+  pointer-events: none;
+}
+
+.display-monitor text.display-size {
+  fill: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.display-primary {
+  fill: var(--accent);
+}
+
+.display-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.display-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.display-field select,
+.display-field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.display-spacer {
+  flex: 1;
+}
+
+.display-counters {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.display-counters.over {
+  color: var(--bad);
+}
+
+.display-status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+
+.display-status[data-kind='applied'] {
+  color: var(--ok);
+}
+
+.display-status[data-kind='error'],
+.display-status[data-kind='invalid'] {
+  color: var(--bad);
+}
+
+.display-status[data-kind='changed'] {
+  color: var(--warn);
+}
+
+.display-problems {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: 11px;
+  color: var(--bad);
 }

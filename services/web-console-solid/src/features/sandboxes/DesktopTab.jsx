@@ -426,6 +426,10 @@ export default function DesktopTab(props) {
           running={running()}
           busy={busy()}
           clipboard={clipboard()}
+          display={display}
+          monitors={monitors()}
+          activeMonitor={activeId()}
+          onSelectMonitor={chooseTab}
           onSendClipboard={clipboardSend}
           onSendKey={sendKey}
           onFullscreen={fullscreen}
