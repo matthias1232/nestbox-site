@@ -13,13 +13,17 @@ unit test. Nothing here is imported by a service; each script is started by hand
   code when an assertion failed.
 - An acceptance script builds its own artefacts under a unique prefix and removes them again, so
   it can run on the shared dev appliance while somebody else works on it.
+- An acceptance script that starts a job tags it `params: {"source": "acceptance"}`. The API copies
+  the tag into the job payload and the console's Tasks tab hides such a job, so a test run never
+  fills the operator's own list. A token is never printed: where a check needs one, it is read by
+  the process that already holds it and only the resulting status reaches the output.
 
 ## Files
 
 | File | What it does |
 |---|---|
-| `acceptance-control-center.py` | Acceptance for the Control Center routes (tree, search, bulk, clusters, node summary, alerts, mounts, quick, preview, permissions), the help files and the console bundle. `--environment <uuid>` sends `x-nestbox-environment` and asserts `/auth/me.environment_id` first, then stops instead of grading a data center nobody asked for. Prints `ok`/`WARN`/`FAIL` per check. |
-| `acceptance-control-center-browser.md` | Browser checklist the coordinator walks with a signed-in user after the script passes. |
+| `acceptance-control-center.py` | Acceptance for the Control Center routes (tree, search, bulk, clusters, node summary, alerts, mounts, quick, preview, permissions), the accounting proxy's own model route, a bulk action that really succeeds, an allow with no end that answers an alert, the help files and the console bundle. `--environment <uuid>` sends `x-nestbox-environment` and asserts `/auth/me.environment_id` first, then stops instead of grading a data center nobody asked for. `--docker` says how to reach the Docker CLI for the proxy probe (`sudo -n docker`, or an `ssh … sudo -n docker` prefix). Prints `ok`/`WARN`/`FAIL` per check. |
+| `acceptance-control-center-browser.md` | Browser checklist the coordinator walks with a signed-in user after the script passes; items 17–19 cover the dock's Tasks tab and the unlimited allow. |
 | `acceptance-image-builder.py` | Acceptance for the image-builder catalogues, repositories, MCP assignments and templates. |
 | `acceptance-workbox-control.py` | Acceptance for the workbox controls: agent sign-in modes, live egress mode, evaluation window, presence, model grants, tunnels, move preflight, control overview. Prints one German `CLEARAND` line per assertion. |
 | `backup-control-plane.sh` | Back up PostgreSQL and, separately, the key that opens every stored secret. |

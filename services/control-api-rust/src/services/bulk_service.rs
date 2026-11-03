@@ -194,6 +194,11 @@ async fn run_one(
 /// The job itself runs in the background with the caller's principal, so row-level security
 /// and every per-target check still apply. Each target gets one job log line
 /// `{ "sandbox_id", "ok", "message" }` and one `JobProgress` event.
+///
+/// A caller may tag its own job with `params.source`. The tag is copied into the job payload
+/// verbatim and the runner never reads it; it exists so a job whose outcome nobody needs, such
+/// as one the acceptance script starts, can be left out of the Tasks list instead of confusing
+/// the operator.
 pub async fn sandboxes(
     ctx: &ServiceContext,
     config: Arc<Config>,
@@ -207,7 +212,12 @@ pub async fn sandboxes(
     let mut scope = TenantScope::begin_for(&ctx.pool, principal)
         .await
         .map_err(ApiError::from)?;
-    let payload = serde_json::json!({ "action": action, "ids": ids });
+    let payload = match params.get("source") {
+        Some(source) if source.is_string() => {
+            serde_json::json!({ "action": action, "ids": ids, "source": source })
+        }
+        _ => serde_json::json!({ "action": action, "ids": ids }),
+    };
     let job = job_store::create(
         &mut scope,
         JobKind::SandboxBulkAction,
