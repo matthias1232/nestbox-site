@@ -96,6 +96,16 @@ export function ago(iso, now = Date.now()) {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
+// An ISO instant as the local "YYYY-MM-DD HH:mm" an operator reads in a detail view (V16).
+// A raw "2026-10-27T01:00:25.368741Z" says nothing about the operator's clock; unknown reads "–".
+export function stamp(iso) {
+  const ms = Date.parse(iso || '');
+  if (Number.isNaN(ms)) return '–';
+  const at = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
 // The sandboxes, nodes and online nodes found under a tree node (any depth).
 export function countBelow(node) {
   const out = { sandboxes: 0, running: 0, nodes: 0, online: 0, sites: 0 };

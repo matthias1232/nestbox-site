@@ -3,7 +3,7 @@ import { Show } from 'solid-js';
 import Gauge from '../../components/Gauge.jsx';
 import StatTile from '../../components/StatTile.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
-import { ago, gib, pairText, toGib } from './inventoryTabs.js';
+import { gib, pairText, stamp, toGib } from './inventoryTabs.js';
 
 // Props: `summary` (the answer of GET /nodes/{id}/summary).
 export default function NodeSummaryTab(props) {
@@ -43,7 +43,7 @@ export default function NodeSummaryTab(props) {
             <dd>
               <StatusBadge status={tunnel().state === 'up' ? 'running' : tunnel().state === 'stale' ? 'degraded' : tunnel().state ? 'offline' : 'unknown'} label={tunnel().state || 'unknown'} />
             </dd>
-            <dt>Last handshake</dt><dd>{ago(tunnel().handshake_at)}</dd>
+            <dt>Last handshake</dt><dd class="mono small">{stamp(tunnel().handshake_at)}</dd>
             <dt>Received</dt><dd class="mono">{gib(tunnel().rx_bytes)}</dd>
             <dt>Sent</dt><dd class="mono">{gib(tunnel().tx_bytes)}</dd>
             <dt>Egress lock</dt><dd>{tunnel().egress_lock === 'exit_local' ? 'Exit locally' : tunnel().egress_lock === 'strict' ? 'Strict' : '–'}</dd>
@@ -58,8 +58,8 @@ export default function NodeSummaryTab(props) {
             <dt>Data center</dt><dd>{s()?.data_center?.name || '–'}</dd>
             <dt>Runner URL</dt><dd class="mono small">{node().runner_url || '–'}</dd>
             <dt>GPU</dt><dd>{node().container_gpu ? 'available' : 'none'}</dd>
-            <dt>Last seen</dt><dd class="mono small">{ago(node().last_seen)}</dd>
-            <dt>Joined</dt><dd class="mono small">{node().created_at || '–'}</dd>
+            <dt>Last seen</dt><dd class="mono small">{stamp(node().last_seen)}</dd>
+            <dt>Joined</dt><dd class="mono small">{stamp(node().created_at)}</dd>
           </dl>
         </section>
       </div>

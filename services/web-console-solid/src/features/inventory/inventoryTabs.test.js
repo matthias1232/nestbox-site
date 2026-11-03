@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activeTab, ago, countBelow, findNode, gib, nodesBelow, pairText, tabFromSearch, tabPath, tabsFor, toGib, worstStatus } from './inventoryTabs.js';
+import { activeTab, ago, countBelow, findNode, gib, nodesBelow, pairText, stamp, tabFromSearch, tabPath, tabsFor, toGib, worstStatus } from './inventoryTabs.js';
 
 const ids = (kind, role) => tabsFor(kind, role).map((t) => t.id);
 
@@ -46,6 +46,14 @@ test('age reads in words', () => {
   const now = Date.parse('2026-11-03T12:00:00Z');
   assert.equal(ago('2026-11-03T11:57:00Z', now), '3 min ago');
   assert.equal(ago('nope', now), '–');
+});
+
+test('a timestamp reads as the local date and minute, not a raw ISO string', () => {
+  const at = new Date(2026, 9, 27, 1, 5);
+  assert.equal(stamp(at.toISOString()), '2026-10-27 01:05');
+  assert.equal(stamp('2026-10-27T01:00:25.368741Z').length, 16);
+  assert.equal(stamp(''), '–');
+  assert.equal(stamp('nope'), '–');
 });
 
 const tree = {
