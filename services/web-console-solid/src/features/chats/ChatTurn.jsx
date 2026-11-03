@@ -161,7 +161,7 @@ export default function ChatTurn(props) {
 
         <div class="chat-meta">
           <Show when={pending()}>
-            <span class="chat-live-dot" title="Antwort wächst noch">running</span>
+            <span class="chat-live-dot" title="The answer is still growing">running</span>
           </Show>
           <span class="chat-tokens">{tokenLine(turn())}</span>
           <span class="chat-clock">{formatClock(turn().ended_at || turn().ts)}</span>

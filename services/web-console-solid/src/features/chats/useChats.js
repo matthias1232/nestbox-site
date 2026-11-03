@@ -24,7 +24,7 @@ export const GROUPINGS = [
 /** The order of the group list. A thread itself always reads oldest first. */
 export const ORDERS = [
   { value: 'newest', label: 'neueste' },
-  { value: 'oldest', label: 'älteste' },
+  { value: 'oldest', label: 'oldest' },
 ];
 
 /** The content-check filter, in the server's states. */
