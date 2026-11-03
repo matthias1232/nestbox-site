@@ -90,7 +90,7 @@
       "allow all",
       "recording"
     ],
-    "summary": "*Egress* is traffic leaving a sandbox. The egress mode decides how Nestbox sees and controls it.",
+    "summary": "Egress is traffic leaving a sandbox. The egress mode decides how Nestbox sees and controls it.",
     "headings": [
       {
         "id": "the-four-modes",
@@ -227,7 +227,7 @@
       "dock",
       "allow"
     ],
-    "summary": "An *alert* is a destination a sandbox tried to reach and was refused, which nobody has answered yet. This page shows where alerts appear and what to do with them.",
+    "summary": "An alert is a destination a sandbox tried to reach and was refused, which nobody has answered yet. This page shows where alerts appear and what to do with them.",
     "headings": [
       {
         "id": "open-the-logs",
@@ -304,7 +304,7 @@
       "read-write",
       "recreate"
     ],
-    "summary": "A sandbox's own disk is discarded when it is recreated. A *persistent root* is a folder that survives: it lives on one node and can be mounted into sandboxes on that node (ADR 0049).",
+    "summary": "A sandbox's own disk is discarded when it is recreated. A persistent root is a folder that survives: it lives on one node and can be mounted into sandboxes on that node (ADR 0049).",
     "headings": [
       {
         "id": "what-a-root-is",
@@ -474,7 +474,7 @@
       "palette",
       "navigation"
     ],
-    "summary": "Everything in the console can be done with a mouse. These shortcuts are faster. Press `?` at any time to see the list in the console itself.",
+    "summary": "Everything in the console can be done with a mouse. These shortcuts are faster. Press ? at any time to see the list in the console itself.",
     "headings": [
       {
         "id": "search-and-help",
@@ -548,7 +548,7 @@
       "console",
       "move"
     ],
-    "summary": "If you are a member, **My sandboxes** is your home. Each sandbox you own has a page, the *workbox*, where you work and decide what the sandbox may do.",
+    "summary": "If you are a member, My sandboxes is your home. Each sandbox you own has a page, the workbox, where you work and decide what the sandbox may do.",
     "headings": [
       {
         "id": "the-control-strip",

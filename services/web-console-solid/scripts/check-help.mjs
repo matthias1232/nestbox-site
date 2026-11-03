@@ -11,7 +11,7 @@ import { headings, parseFrontMatter } from '../src/components/markdown.js';
 const dir = new URL('../public/help/', import.meta.url);
 const distDir = new URL('../dist/help/', import.meta.url);
 
-const names = (await readdir(dir)).filter((name) => name.endsWith('.md')).sort();
+const names = (await readdir(dir)).filter((name) => name.endsWith('.md') && name !== 'AGENTS.md').sort();
 const documents = [];
 const problems = [];
 
