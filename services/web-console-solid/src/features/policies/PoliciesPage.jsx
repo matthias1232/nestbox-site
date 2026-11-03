@@ -76,6 +76,12 @@ export default function PoliciesPage() {
       setGlobalPolicy(policyList.global || null);
       setRules(ruleList.items || []);
       setDrafts(draftList.items || []);
+      // `?id=<policy>` (a link from the policy wizard or the tree) preselects that policy, once.
+      const wanted = new URLSearchParams(window.location.search).get('id');
+      if (wanted && !selected()) {
+        const found = (policyList.items || []).find((item) => item.id === wanted);
+        if (found) open(found);
+      }
     } catch (failure) {
       setError(failure.message);
     }

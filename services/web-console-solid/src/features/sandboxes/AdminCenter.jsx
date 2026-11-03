@@ -52,7 +52,7 @@ import CommandsTab from './CommandsTab.jsx';
 import DesktopTab from './DesktopTab.jsx';
 import InventoryTab from './InventoryTab.jsx';
 import LogsTab from './LogsTab.jsx';
-import MountsTab from './MountsTab.jsx';
+import MountEditor from './MountEditor.jsx';
 import PrivacyTab from './PrivacyTab.jsx';
 import AgentsTab from './AgentsTab.jsx';
 
@@ -74,8 +74,6 @@ const CONSOLE_VIEWS = [
 ];
 const CONSOLE_COMPONENTS = { shell: TerminalTab, desktop: DesktopTab };
 
-// The component behind the Mounts tab. When MountEditor (F15) is built, import it and put it here.
-const MountsBody = MountsTab;
 
 // A tab that groups several views: a switch on top, the chosen view below.
 function Grouped(props) {
@@ -110,7 +108,7 @@ const BODIES = {
       <PoliciesTab {...p.base} />
     </div>
   ),
-  mounts: (p) => <MountsBody {...p.base} />,
+  mounts: (p) => <MountEditor sandboxId={p.sandbox.id} />,
   access: (p) => <AccessTab {...p.base} />,
   mcp: (p) => <McpTab {...p.base} />,
   agents: (p) => <AgentsTab {...p.base} />,

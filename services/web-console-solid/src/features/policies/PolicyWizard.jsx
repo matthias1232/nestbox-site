@@ -9,6 +9,7 @@ import { useUi } from '../../state/ui.jsx';
 import * as policiesApi from '../../api/policies.js';
 import * as trafficApi from '../../api/traffic.js';
 import * as mcpApi from '../../api/mcp.js';
+import MountEditor from '../sandboxes/MountEditor.jsx';
 import NetworkStep from './NetworkStep.jsx';
 import DnsStep from './DnsStep.jsx';
 import ProcessStep from './ProcessStep.jsx';
@@ -31,21 +32,14 @@ const OPS = {
   window: (call) => policiesApi.openWindow(call.sandboxId, call.minutes, 'policy wizard evaluation window', 'audit'),
 };
 
-// Filesystem step. F15's MountEditor takes over the lists when it lands; until then
-// two text areas, one path per line, with the same spec-in, spec-out contract.
+// Filesystem step: F15's MountEditor in policy mode edits the read-only and read-write lists
+// with the same spec-in, spec-out contract.
 function FilesystemStep(props) {
-  const lists = () => filesystemLists(props.spec);
-  const put = (key, text) => props.onSpec(setFilesystemLists(props.spec, { ...lists(), [key]: text }));
   return (
     <div class="pw-step">
       <h2>Filesystem</h2>
       <p class="warn-note">This section applies after a recreate of the sandbox (ADR 0008).</p>
-      <label class="pw-field"><span>Read-only paths (one per line)</span>
-        <textarea class="pf-input mono" rows="5" value={lists().read_only.join('\n')} onChange={(e) => put('read_only', e.currentTarget.value)} />
-      </label>
-      <label class="pw-field"><span>Read-write paths (one per line)</span>
-        <textarea class="pf-input mono" rows="5" value={lists().read_write.join('\n')} onChange={(e) => put('read_write', e.currentTarget.value)} />
-      </label>
+      <MountEditor policyMode spec={props.spec} onChange={props.onSpec} />
     </div>
   );
 }

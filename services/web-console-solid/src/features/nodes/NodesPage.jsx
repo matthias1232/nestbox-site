@@ -15,6 +15,7 @@
 // and lock state is small enough to stay here, next to the two columns it feeds.
 
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { useUi } from '../../state/ui.jsx';
 import Empty from '../../components/Empty.jsx';
 import * as nodesConnect from '../../api/nodesConnect.js';
 import { stateStream } from '../../api/telemetry.js';
@@ -35,6 +36,9 @@ const TUNNEL_REFRESH_MS = 10000;
 const LOCK_TEXT = { strict: 'Strict', exit_local: 'Exit locally' };
 
 export default function NodesPage(props) {
+  const ui = useUi();
+  const picked = (id) => ui?.selection.kind() === 'node' && ui.selection.ids().has(id);
+  onCleanup(() => { if (ui?.selection.kind() === 'node') ui.selection.clear(); });
   const state = useNodes();
   const [openId, setOpenId] = createSignal(null);
   const [tunnels, setTunnels] = createSignal({});
@@ -156,6 +160,7 @@ export default function NodesPage(props) {
           <table class="node-table">
             <thead>
               <tr>
+                <th class="narrow" />
                 <th>Node</th>
                 <th class="narrow">Kind</th>
                 <th class="narrow">Status</th>
@@ -171,6 +176,9 @@ export default function NodesPage(props) {
               <For each={state.items()}>
                 {(node) => (
                   <tr class={openId() === node.id ? 'selected' : ''}>
+                    <td class="narrow">
+                      <input type="checkbox" aria-label={`Select ${node.display_name}`} checked={picked(node.id)} onChange={() => ui?.selection.toggle('node', node.id)} />
+                    </td>
                     <td>
                       <button class="link" onClick={() => setOpenId(node.id)}>
                         {node.display_name}

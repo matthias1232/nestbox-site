@@ -1,5 +1,5 @@
 // A site (the "cluster" of the tree): header, Summary, Nodes and Sandboxes tabs (contract C1, C3).
-import { For, Show, createMemo, createSignal } from 'solid-js';
+import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js';
 import Breadcrumb from '../shell/Breadcrumb.jsx';
 import PageHeader from '../shell/PageHeader.jsx';
 import { treePathFor } from '../shell/treeFilter.js';
@@ -23,6 +23,9 @@ const NODE_STATUS = { online: 'running', degraded: 'degraded', offline: 'offline
 
 // A table of tree nodes (kind 'node'); a row opens the node page. Also used by the data center page.
 export function NodesTable(props) {
+  const ui = useUi();
+  const selected = () => (ui?.selection.kind() === 'node' ? ui.selection.ids() : new Set());
+  onCleanup(() => { if (ui?.selection.kind() === 'node') ui.selection.clear(); });
   const columns = [
     { key: 'name', label: 'Node', sortable: true, render: (row) => <span class="mono">{row.name}</span> },
     { key: 'status', label: 'Status', sortable: true, render: (row) => <StatusBadge status={NODE_STATUS[row.status] || 'unknown'} label={row.status} /> },
@@ -37,6 +40,9 @@ export function NodesTable(props) {
       columns={columns}
       rows={props.rows}
       rowKey="id"
+      selectable
+      selected={selected()}
+      onSelect={(set) => ui?.selection.set('node', [...set])}
       onRowClick={(row) => navigate(paths.node(row.id))}
       empty={{ title: 'No nodes here', hint: props.hint || 'Add a node to run sandboxes and models.' }}
     />

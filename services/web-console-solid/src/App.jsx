@@ -72,9 +72,9 @@ export default function App() {
   function Page() {
     const p = place();
     switch (p.kind) {
-      case 'dc': return <DataCenterPage id={p.id} />;
-      case 'site': return <SitePage id={p.id} />;
-      case 'node': return <NodePage id={p.id} />;
+      case 'dc': return <DataCenterPage id={p.id} tab={p.tab} />;
+      case 'site': return <SitePage id={p.id} tab={p.tab} />;
+      case 'node': return <NodePage id={p.id} tab={p.tab} />;
       case 'admin': return <AdminCenter sandboxId={p.id} initialTab={p.tab || undefined} onClose={closeAdmin} onFollow={openAdmin} />;
       case 'box': return <WorkboxPage sandboxId={p.id} />;
       case 'my': return <MyBoxesPage />;

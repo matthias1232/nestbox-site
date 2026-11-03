@@ -6,11 +6,8 @@ import { usePolling } from '../../components/Poll.js';
 import { useLive } from '../../state/live.jsx';
 import * as jobsApi from '../../api/jobs.js';
 import { navigate } from '../../routing.js';
+import { labelFor, summaryLine } from '../jobs/jobLabels.js';
 
-// Labels come from features/jobs/jobLabels.js (F26); until it exists the kind is shown.
-function labelOf(kind) {
-  return kind;
-}
 
 export default function TasksTab() {
   const [jobs, setJobs] = createSignal([]);
@@ -51,10 +48,10 @@ export default function TasksTab() {
           <For each={jobs()}>
             {(job) => (
               <tr>
-                <td class="mono small">{labelOf(job.kind)}</td>
+                <td class="mono small">{labelFor(job.kind)}</td>
                 <td><StatusBadge status={job.status} /></td>
                 <td class="dock-progress">
-                  <Meter label="" value={job.completed + job.failed} max={job.total} text={`${job.completed + job.failed}/${job.total}${job.failed ? ` · ${job.failed} failed` : ''}`} />
+                  <Meter label="" value={job.completed + job.failed} max={job.total} text={summaryLine(job)} />
                 </td>
                 <td class="small muted dock-line">{line(job)}</td>
                 <td><button class="secondary tiny" onClick={() => navigate(`/operations?id=${job.id}`)}>Open</button></td>
