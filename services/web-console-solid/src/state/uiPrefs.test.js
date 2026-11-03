@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, parse, sanitize, serialize } from './uiPrefs.js';
+import { DEFAULTS as DEFAULT_VNC } from '../features/sandboxes/vncOptions.js';
 
 test('empty or broken storage gives the defaults', () => {
   assert.deepEqual(parse(null), { ...DEFAULTS });
@@ -36,6 +37,17 @@ test('out-of-range and unknown values fall back', () => {
   assert.equal(prefs.treeView, 'infrastructure');
   assert.deepEqual(prefs.consoleMode, {});
   assert.deepEqual(prefs.logPanes, ['ok']);
+});
+
+test('the console options of each sandbox round-trip, completed and clamped', () => {
+  const prefs = {
+    ...DEFAULTS,
+    vncOptions: { 'sbx-1': { ...DEFAULT_VNC, scaling: 'none', quality: 9, viewOnly: true } },
+  };
+  assert.deepEqual(parse(serialize(prefs)), prefs);
+  assert.deepEqual(sanitize({ vncOptions: { 'sbx-1': { quality: 99, scaling: 'x' }, 'sbx-2': 'nope' } }).vncOptions['sbx-1'], { ...DEFAULT_VNC, quality: 9 });
+  assert.equal(sanitize({ vncOptions: { 'sbx-2': 'nope' } }).vncOptions['sbx-2'], undefined);
+  assert.deepEqual(sanitize({ vncOptions: [1, 2] }).vncOptions, {});
 });
 
 test('nothing that looks like a token is part of the stored shape', () => {

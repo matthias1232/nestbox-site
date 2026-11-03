@@ -27,7 +27,7 @@ component never contains a URL.
 
 | File | Resource |
 |---|---|
-| `client.js` | fetch wrapper, CSRF, environment header, error mapping with `code` and `details` |
+| `client.js` | fetch wrapper, CSRF, environment header, error mapping with `code` and `details`; `environmentUrl(url)` appends `?environment=<id>` for the URLs the browser opens itself. It imports `withEnvironment` **and** re-exports it: `export { x } from` alone left the name undefined inside this module, which took the whole console down (found and fixed in U04) |
 | `auth.js` | login, logout, identity, environments |
 | `sandboxes.js` | list, detail, create, actions, logs, exec, inference, rules, agents |
 | `nodes.js` | nodes with their computed budget: free memory, cores, sandbox count |

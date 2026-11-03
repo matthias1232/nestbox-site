@@ -25,12 +25,14 @@ export default function ConsoleFrame(props) {
   const session = useSession();
   let frame;
   const [font, setFont] = createSignal(FONT_DEFAULT);
-  const [viewOnly, setViewOnly] = createSignal(false);
   const [term, setTerm] = createSignal(null);
   const [desk, setDesk] = createSignal(null);
   const offered = createMemo(() => modes(props.sandbox, props.role || session.identity()?.role));
   // The caller's mode wins; otherwise the last choice for this sandbox; otherwise the first.
   const mode = () => pickMode(props.mode || ui.console.mode(props.sandbox.id), offered());
+  // The desktop's view-only switch lives in the sandbox's stored options, so the
+  // toolbar and the VNC sidebar can never disagree.
+  const viewOnly = () => ui.console.vncOptions(props.sandbox.id)?.viewOnly === true;
 
   function choose(next) {
     ui.console.setMode(props.sandbox.id, next);
@@ -84,10 +86,10 @@ export default function ConsoleFrame(props) {
         </Show>
         <Show when={mode() === 'desktop'}>
           <label class="small">
-            <input type="checkbox" checked={viewOnly()} onChange={(e) => setViewOnly(e.currentTarget.checked)} />
+            <input type="checkbox" checked={viewOnly()} onChange={(e) => desk()?.setOptions({ viewOnly: e.currentTarget.checked })} />
             {' '}view only
           </label>
-          <button type="button" class="tiny" disabled={viewOnly()} onClick={() => desk()?.sendCtrlAltDel()}>
+          <button type="button" class="tiny" disabled={viewOnly()} onClick={() => desk()?.sendCombo('ctrlAltDel')}>
             Ctrl+Alt+Del
           </button>
         </Show>
@@ -101,7 +103,7 @@ export default function ConsoleFrame(props) {
           <TerminalTab sandbox={props.sandbox} showAll fontSize={font()} onReady={setTerm} />
         </Show>
         <Show when={mode() === 'desktop'}>
-          <DesktopTab sandbox={props.sandbox} viewOnly={viewOnly()} onReady={setDesk} />
+          <DesktopTab sandbox={props.sandbox} onReady={setDesk} />
         </Show>
         <Show when={mode() === 'ssh'}>
           <ConnectPanel sandboxId={props.sandbox.id} />

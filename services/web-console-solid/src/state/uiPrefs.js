@@ -3,6 +3,8 @@
 // Only presentation lives here: sidebar width, dock state, tree view, the last console choice
 // per sandbox, log panes, palette recents and dismissed tours. Never a token, never a secret.
 
+import { sanitizeOptions } from '../features/sandboxes/vncOptions.js';
+
 /** The localStorage key. */
 export const STORAGE_KEY = 'nestbox:ui';
 
@@ -15,6 +17,9 @@ export const DEFAULTS = Object.freeze({
   dockHeight: 220,
   treeView: 'infrastructure',
   consoleMode: {},
+  // The noVNC options of each desktop, per sandbox: a person's taste about one
+  // screen, not a property of the sandbox.
+  vncOptions: {},
   logPanes: [],
   paletteRecent: [],
   toursDismissed: [],
@@ -50,6 +55,15 @@ export function sanitize(raw) {
   }
   const strings = (list, max) =>
     Array.isArray(list) ? list.filter((item) => typeof item === 'string').slice(0, max) : [];
+  // One entry per sandbox, each completed and clamped by the desktop's own rules.
+  const vncOptions = {};
+  if (input.vncOptions && typeof input.vncOptions === 'object') {
+    for (const [id, options] of Object.entries(input.vncOptions)) {
+      if (typeof id === 'string' && id.length <= 64 && options && typeof options === 'object') {
+        vncOptions[id] = sanitizeOptions(options);
+      }
+    }
+  }
   return {
     sidebarCollapsed: input.sidebarCollapsed === true,
     sidebarWidth: clamp(input.sidebarWidth, 200, 480, DEFAULTS.sidebarWidth),
@@ -58,6 +72,7 @@ export function sanitize(raw) {
     dockHeight: clamp(input.dockHeight, 120, 600, DEFAULTS.dockHeight),
     treeView: TREE_VIEWS.includes(input.treeView) ? input.treeView : DEFAULTS.treeView,
     consoleMode,
+    vncOptions,
     logPanes: strings(input.logPanes, 8),
     paletteRecent: Array.isArray(input.paletteRecent)
       ? input.paletteRecent.filter((item) => item && typeof item.id === 'string').slice(0, 8)
