@@ -1,0 +1,21 @@
+/* Live logs: pane grid, pane chrome, red lane, pop-out frame. Tokens only. */
+.logs-page .logview, .logs-popout .logview { height: 100%; min-height: 220px; }
+.log-grid { display: grid; gap: var(--space-3); grid-template-columns: 1fr; margin-top: var(--space-3); }
+.log-grid[data-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.log-grid[data-count="3"], .log-grid[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .log-grid[data-count] { grid-template-columns: 1fr; } }
+.log-pane { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; height: 60vh; background: var(--bg-raised); border: 1px solid var(--border); padding: var(--space-2); }
+.log-grid[data-count="3"] .log-pane, .log-grid[data-count="4"] .log-pane { height: 42vh; }
+.log-pane .logview { flex: 1; min-height: 0; }
+.log-pane-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.log-pane-head select { max-width: 16rem; }
+.log-pane-head input[type="search"] { flex: 1; min-width: 8rem; }
+.log-pane-tools { display: inline-flex; gap: var(--space-1); margin-left: auto; }
+.log-pane footer { font-family: var(--mono); }
+.red-lane { position: sticky; top: 0; z-index: 2; background: var(--bg-raised); border: 1px solid var(--bad); border-left-width: 3px; padding: var(--space-2) var(--space-3); margin-top: var(--space-3); }
+.red-lane-head { display: flex; align-items: center; gap: var(--space-2); }
+.logs-popout { min-height: 100vh; background: var(--bg); color: var(--fg); padding: var(--space-3); box-sizing: border-box; }
+.logs-popout-head { display: flex; align-items: center; gap: var(--space-3); border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
+.logs-popout-head h1 { font-size: 1.05rem; margin: 0; }
+.logs-popout-head .brand-mark { font-weight: 800; letter-spacing: -0.05em; }
+.logs-popout-head .brand-mark i { color: var(--accent); font-style: normal; }
