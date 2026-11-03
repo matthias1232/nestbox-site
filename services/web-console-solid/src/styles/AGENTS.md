@@ -19,6 +19,7 @@ a new colour asks for a token; it does not invent a hex value.
 | `controls.css` | Workbox primitives: switch, segmented, countdown, dialog, banner, presence dots; imported by those components |
 | `workbox-sessions.css` | The shared terminal tab strip with its per-tab menu and SSH line, the desktop panel, and the two pop-out layouts; imported by `TerminalTab`, `DesktopTab`, `SessionsPanel` and the pop-outs |
 | `workbox.css` | The Workbox header, its card and panel grids, and the "my sandboxes" tiles |
+| `users.css` | Permissions tab, invite dialog and Users page extras (F22) |
 
 A screen-specific file is the exception, not the pattern: it exists where a
 feature says something app.css has no word for. Import it from the module that

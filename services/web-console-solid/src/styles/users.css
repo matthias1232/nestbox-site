@@ -1,0 +1,12 @@
+/* Users page and Permissions tab (package F22). */
+.users-permissions { display: grid; gap: var(--space-4); }
+.users-add { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; border: 1px solid var(--border); background: var(--bg-raised); padding: var(--space-3); }
+.users-sentence { flex-basis: 100%; }
+.users-invites { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.users-invites li { display: flex; gap: var(--space-3); align-items: center; border: 1px solid var(--border); padding: var(--space-2) var(--space-3); }
+.users-dialog-backdrop { position: fixed; inset: 0; background: #000a; display: grid; place-items: center; z-index: 60; }
+.users-dialog { background: var(--bg-raised); border: 1px solid var(--border-strong); padding: var(--space-5); width: min(440px, 92vw); display: grid; gap: var(--space-3); }
+.users-link { width: 100%; box-sizing: border-box; }
+.users-tabs { margin: var(--space-3) 0; }
+.users-drawer-form { display: grid; gap: var(--space-3); }
+.users-password { border: 1px solid var(--border); padding: var(--space-3); background: var(--bg-raised); }
