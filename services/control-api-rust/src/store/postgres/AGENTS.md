@@ -120,7 +120,7 @@ Control Center stores (Wave 0): `inventory.rs` (B01), `search.rs` (B02), `model_
 `permissions.rs` (B12) lists and writes roles per data center, sandbox and organisation; `tours.rs` is complete (the table
 `ui_tours_seen` is per user, so it takes the pool, not a tenant scope). Migration `0086_control_center.sql` adds
 `model_clusters`, `model_cluster_members`, `sandboxes.telemetry_mute_until`/`telemetry_mute_bodies_until` and `ui_tours_seen`.
-`model_clusters.rs` (B05): list/get/create/update/delete, `add_member` (upsert weight), `remove_member`, `members` (joins installs, nodes, provider profiles), `proxy_view` (takes a scope: the tables have RLS), `model_exists`, `install_model_key`.
+`model_clusters.rs` (B05): list/get/create/update/delete, `add_member` (upsert weight), `remove_member`, `members` (joins installs, nodes, provider profiles), `proxy_view` (takes a scope: the tables have RLS), `environment_of` (calls `nb_cluster_environment` on the pool: the one cross-tenant read the accounting proxy needs, migration 0087), `model_exists`, `install_model_key`.
 
 
 ## Files added by the Control Center phase

@@ -2,7 +2,6 @@
 // Collapsed (56 px) it shows menu icons only; the right edge is a drag handle for the width.
 import { For, Show, createMemo, createSignal, onCleanup } from 'solid-js';
 import { useSession } from '../../state/session.jsx';
-import { emptyDataCenterNotice } from '../../state/environments.js';
 import { useUi } from '../../state/ui.jsx';
 import { menuFor } from '../../navigation.js';
 import { navigate, paths } from '../../routing.js';
@@ -95,13 +94,6 @@ export default function Sidebar(props) {
   }
 
   const shown = createMemo(() => filterTree(inv.root(), appliedFilter()));
-  // A data center with no nodes looks like an empty console. Say so, and offer the one that
-  // has nodes, instead of switching silently; a remembered choice means the user decided.
-  const emptyCenter = createMemo(() => (
-    session.rememberedEnvironment()
-      ? null
-      : emptyDataCenterNotice(inv.root(), session.activeEnvironment())
-  ));
   // With a filter every branch is open so the matches are visible; otherwise the user's choice
   // plus the way to the current place and the root.
   const openSet = createMemo(() => {
@@ -194,15 +186,6 @@ export default function Sidebar(props) {
       </div>
 
       <Show when={!props.collapsed}>
-        <Show when={emptyCenter()}>
-          <p class="muted small cc-tree-note cc-dc-empty">
-            This data center has no nodes. {emptyCenter().currentName} is empty; switch to{' '}
-            {emptyCenter().targetName}.{' '}
-            <button class="ghost tiny" onClick={() => session.switchEnvironment(emptyCenter().targetId)}>
-              Switch
-            </button>
-          </p>
-        </Show>
         <div class="cc-tree-controls">
           <Segmented options={VIEWS} value={inv.view()} onChange={(value) => inv.setView(value)} />
           <input

@@ -315,10 +315,18 @@ pub async fn remove_member(
 
 /// The accounting proxy's view of a cluster (bridge token, no principal).
 ///
-/// The tenant comes from the appliance's own data center, as for the other
-/// internal accounting routes, never from the request.
+/// The data center comes from the cluster row itself: the proxy has no
+/// principal, so `nb_cluster_environment` (migration 0087) answers the one id
+/// across tenants and the read then runs under that scope, as every other
+/// tenant read does. A cluster that does not exist is a 404, not a guess. The
+/// media bridge stays as the fallback for an installation whose schema predates
+/// the function, where only one data center can exist anyway.
 pub async fn proxy_view(ctx: &ServiceContext, id: Uuid) -> Result<serde_json::Value, ApiError> {
-    let environment = super::media_service::bridge_environment(ctx).await?;
+    let environment = match store::environment_of(&ctx.pool, id).await {
+        Ok(Some(environment)) => environment,
+        Ok(None) => return Err(not_found()),
+        Err(_) => super::media_service::bridge_environment(ctx).await?,
+    };
     let mut scope = TenantScope::begin(&ctx.pool, environment).await.map_err(ApiError::from)?;
     let value = store::proxy_view(&mut scope, id).await.map_err(ApiError::from)?;
     scope.commit().await.map_err(ApiError::from)?;

@@ -214,3 +214,65 @@ async fn a_cluster_is_installs_of_one_model_behind_one_provider_profile() {
         .expect("count profiles");
     assert_eq!(left, 0);
 }
+
+#[tokio::test]
+async fn the_proxy_finds_a_cluster_in_a_second_data_center() {
+    let Some(pool) = pool().await else {
+        eprintln!("skipping: TEST_DATABASE_URL is not set");
+        return;
+    };
+    let runtime = Arc::new(FakeRuntime::new());
+    let ctx = context(&pool, &runtime);
+
+    // A second data center breaks every "the appliance has one" default, which
+    // is why the proxy view reads the cluster's own environment (X06).
+    let organization: Uuid = sqlx::query_scalar(
+        "INSERT INTO organizations (name, slug, kind)
+         VALUES ('b05 second organization', 'b05-second-org', 'customer') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("insert the organization");
+    let environment: Uuid = sqlx::query_scalar(
+        "INSERT INTO environments (organization_id, name, slug)
+         VALUES ($1, 'b05 second data center', 'second') RETURNING id",
+    )
+    .bind(organization)
+    .fetch_one(&pool)
+    .await
+    .expect("insert the second data center");
+    let admin = principal(environment);
+
+    let node_id = node(&pool, "gpu-b05-3").await;
+    let one = install(&pool, environment, "b05-second-model", node_id, "http://10.77.3.6:8080").await;
+    let created = model_cluster_service::create(
+        &ctx,
+        &admin,
+        json!({ "name": "b05-second-cluster", "model_key": "b05-second-model", "install_ids": [one] }),
+    )
+    .await
+    .expect("create the cluster in the second data center");
+    let id = Uuid::parse_str(created["id"].as_str().expect("an id")).expect("a uuid");
+
+    // No principal and two data centers: the answer can only come from the row.
+    let view = model_cluster_service::proxy_view(&ctx, id)
+        .await
+        .expect("the proxy view in a second data center");
+    assert_eq!(view["model_key"], "b05-second-model");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+
+    // An unknown cluster is a 404, never a guess at one data center.
+    assert!(model_cluster_service::proxy_view(&ctx, Uuid::new_v4()).await.is_err());
+
+    model_cluster_service::delete(&ctx, &admin, id).await.expect("delete the cluster");
+    sqlx::query("DELETE FROM environments WHERE id = $1")
+        .bind(environment)
+        .execute(&pool)
+        .await
+        .expect("remove the second data center");
+    sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(organization)
+        .execute(&pool)
+        .await
+        .expect("remove the organization");
+}

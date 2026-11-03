@@ -6,42 +6,13 @@
 import { createContext, createSignal, useContext } from 'solid-js';
 import * as auth from '../api/auth.js';
 import { setCsrfMissingHandler, setCsrfToken, setEnvironment } from '../api/client.js';
-import { pickEnvironment, storageKey } from './environments.js';
 
 const SessionContext = createContext();
-
-// The remembered data center of one user, or null. The value is an id; a token never
-// goes into storage.
-function readRemembered(userId) {
-  const key = storageKey(userId);
-  if (!key) return null;
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-// Remember a choice, or forget it. A browser that refuses storage still works, it only
-// forgets where the user was.
-function writeRemembered(userId, environmentId) {
-  const key = storageKey(userId);
-  if (!key) return;
-  try {
-    if (environmentId) localStorage.setItem(key, environmentId);
-    else localStorage.removeItem(key);
-  } catch {
-    /* storage is optional; the console works without it */
-  }
-}
 
 export function SessionProvider(props) {
   const [identity, setIdentity] = createSignal(null);
   const [environments, setEnvironments] = createSignal([]);
   const [activeEnvironment, setActiveEnvironment] = createSignal(null);
-  // The data center this browser remembers for the user, so the empty-data-center notice
-  // can stay quiet when the user already chose one.
-  const [rememberedEnvironment, setRememberedEnvironment] = createSignal(null);
   const [error, setError] = createSignal(null);
   const [busy, setBusy] = createSignal(false);
 
@@ -68,14 +39,8 @@ export function SessionProvider(props) {
         user_id: result.user_id ?? null,
       });
       setEnvironments(result.environments || []);
-      // A returning user opens the data center they chose last, as long as the server still
-      // lists it. Without such a choice the server's current data center opens (X15).
-      const remembered = readRemembered(result.user_id);
-      const chosen = pickEnvironment(result.environments || [], remembered, result.environment_id)
-        || result.environment_id;
-      setRememberedEnvironment(remembered && chosen === remembered ? remembered : null);
-      setActiveEnvironment(chosen);
-      setEnvironment(chosen);
+      setActiveEnvironment(result.environment_id);
+      setEnvironment(result.environment_id);
       return true;
     } catch (failure) {
       setError(failure.message);
@@ -101,11 +66,7 @@ export function SessionProvider(props) {
   // Restore the identity after a page reload, without a CSRF token: the token
   // is deliberately memory-only, so a reload requires a fresh sign-in before any
   // mutating action. Read-only views keep working.
-  //
-  // `/auth/me` names the session's data center but not the ones the user reaches, so the
-  // list is fetched too: the remembered choice opens once it is known to be reachable
-  // (X15), and the server's data center stands until that answer arrives.
-  async function restore(identityPayload) {
+  function restore(identityPayload) {
     setIdentity({
       display_name: identityPayload.display_name,
       role: identityPayload.role,
@@ -113,22 +74,8 @@ export function SessionProvider(props) {
       // The owner of a sandbox is matched by id; a reload must not lose it.
       user_id: identityPayload.user_id ?? null,
     });
-    const remembered = readRemembered(identityPayload.user_id);
     setActiveEnvironment(identityPayload.environment_id);
     setEnvironment(identityPayload.environment_id);
-    try {
-      const answer = await auth.environments();
-      const list = answer?.items || [];
-      setEnvironments(list);
-      const chosen = pickEnvironment(list, remembered, identityPayload.environment_id);
-      if (chosen && chosen !== identityPayload.environment_id) {
-        setActiveEnvironment(chosen);
-        setEnvironment(chosen);
-      }
-      setRememberedEnvironment(remembered && chosen === remembered ? remembered : null);
-    } catch {
-      /* the server's data center stands, and the empty notice reads its inventory */
-    }
   }
 
   // After a reload: a fresh token for the live session. If the session itself is gone the
@@ -145,9 +92,6 @@ export function SessionProvider(props) {
   function switchEnvironment(id) {
     setActiveEnvironment(id);
     setEnvironment(id);
-    // The choice is remembered per user, as an id: the next sign-in opens this one (X15).
-    setRememberedEnvironment(id);
-    writeRemembered(identity()?.user_id, id);
   }
 
   return (
@@ -156,7 +100,6 @@ export function SessionProvider(props) {
         identity,
         environments,
         activeEnvironment,
-        rememberedEnvironment,
         error,
         busy,
         signIn,

@@ -7,7 +7,7 @@ mounts the overlays once. `App.jsx` wraps every page except the pop-outs in `<Sh
 |---|---|
 | `Shell.jsx` | Grid of topbar, sidebar, content, dock; mounts `EXTRAS` once |
 | `Topbar.jsx` | Wordmark, data-center picker, search trigger (shortcut as `KeyHint keys="mod+k"`, X10), alert bell, help, user menu |
-| `Sidebar.jsx` | Tree views, filter and `Tree` above collapsible menu groups from `menuFor(role)`; resizable, collapsible to icons: a local `MENU_ICONS` map picks an `Icon` per route, `Settings` for an unknown one (X10); an empty data center gets a one-line notice with a switch button instead of a silent switch (X15) |
+| `Sidebar.jsx` | Tree views, filter and `Tree` above collapsible menu groups from `menuFor(role)`; resizable, collapsible to icons: a local `MENU_ICONS` map picks an `Icon` per route, `Settings` for an unknown one (X10) |
 | `Dock.jsx` | Tasks / Live events / Alerts tabs, collapsed by default, resizable, pop-out, bottom sheet under 720 px |
 | `Breadcrumb.jsx` | The trail at the top of a page |
 | `PageHeader.jsx` | Sticky title row with status and the action bar |

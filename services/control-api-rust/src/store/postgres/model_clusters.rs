@@ -273,3 +273,22 @@ pub async fn proxy_view(
         "members": members,
     })))
 }
+
+/// The data center a cluster lives in, answered across tenants by the database.
+///
+/// The accounting proxy carries no principal, so there is no scope to read
+/// `model_clusters` under, and asking which environments exist answers only while
+/// the appliance holds one data center. `nb_cluster_environment` (migration 0087)
+/// returns the one id from any data center; `None` means no such cluster, which
+/// the service turns into its 404.
+pub async fn environment_of(
+    pool: &sqlx::PgPool,
+    cluster: Uuid,
+) -> Result<Option<Uuid>, StoreError> {
+    let environment: Option<Uuid> =
+        sqlx::query_scalar("SELECT nb_cluster_environment($1)")
+            .bind(cluster)
+            .fetch_one(pool)
+            .await?;
+    Ok(environment)
+}
