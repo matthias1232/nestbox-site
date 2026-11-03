@@ -207,6 +207,13 @@ async fn close_windows(
 }
 
 /// Move the recording mutes of a sandbox to one level.
+///
+/// `Off` mutes flows *and* bodies for up to a day, so the sandbox's traffic is
+/// not recorded. What it does not do is hide a refusal: `telemetry_service`
+/// still stores a denied network or DNS event as metadata, without its bodies,
+/// so the alerts, the tree badge and the audit trail survive the mute (ADR 0066,
+/// addendum). The permission is unchanged — a member may switch recording off,
+/// because the user asked for the switch; the refusals are what stays visible.
 async fn set_recording(
     ctx: &ServiceContext,
     principal: &Principal,

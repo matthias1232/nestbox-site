@@ -52,6 +52,38 @@ An alert that was answered by a time-limited window returns when the window ends
 destination is refused again, which is the intent. `would_deny` (evaluation windows) is
 carried so the console can colour it differently from a real refusal.
 
+## Addendum — recording off keeps the refusals (2026-11-03)
+
+`recording=off` on the quick controls sets both recording mutes for up to 24 hours
+(`quick_control_service::set_recording`). Until now that muted `all`: no network, DNS or
+MCP row was stored, so no alert could be derived from history, the tree badge went
+green, and the audit trail showed a sandbox that was quiet rather than a sandbox that
+was refusing traffic.
+
+The mute is a request to keep no *content*, not a request to hide a decision. So
+`telemetry_service::ingest` and `ingest_batch` now keep an event while `all` is muted
+when both hold:
+
+* `kind` is `network` or `dns`, and
+* the stored `detail.decision` is `deny`.
+
+Such an event is stored as metadata only: the `traffic_bodies` row, the MCP tool-call
+row and the chat turn are dropped, and `detail.has_body` is stored as `false`. `allow`
+and `audit` flows, inference rows and everything else are still not stored while the
+mute runs. The live stream is unchanged: it already published every event, muted or
+not, which is why the console's bell could fire while history could not explain it.
+
+The end-user permission is deliberately unchanged: a member may still switch recording
+off, because the user asked for that switch (F6 of the 2026-11-03 review). What changes
+is that the governance hole closes — an operator keeps the refusals, the alerts, the
+tree badge and the audit trail for the duration of the mute. The cost is bounded: at
+most one row per refused destination per attempt, and no bytes.
+
+One consequence to keep in mind: an event that arrives without a decision is read as a
+deny (`parse_decision`), so a proxy version that stops sending the field keeps storing
+its flows during a mute. That is the same conservative default the traffic log already
+uses.
+
 ## Not built
 
 Notification channels outside the console (email, chat), and per-user alert rules.
