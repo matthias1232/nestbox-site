@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { placeEnvironment } from './placeEnvironment.js';
+import { placeEnvironment, placeEnvironmentInfo } from './placeEnvironment.js';
 
 const U = (n) => `00000000-0000-0000-0000-0000000000${n}`;
 
@@ -48,4 +48,39 @@ test('an unknown id answers null, so the page shows its own error', () => {
 test('without a tree or a place there is nothing to answer', () => {
   assert.equal(placeEnvironment(null, { kind: 'box', id: U('30') }), null);
   assert.equal(placeEnvironment(root, null), null);
+});
+
+test('the info helper answers the id and the name the tree shows', () => {
+  assert.deepEqual(
+    placeEnvironmentInfo(root, { kind: 'box', id: U('30') }),
+    { environmentId: U('02'), environmentName: 'default' },
+  );
+  // A data center names itself, so a notice can say which one the link aims at.
+  assert.deepEqual(
+    placeEnvironmentInfo(root, { kind: 'dc', id: U('03') }),
+    { environmentId: U('03'), environmentName: 'Berlin' },
+  );
+});
+
+test('the info helper answers null exactly where the id helper does', () => {
+  const places = [
+    { kind: 'box', id: U('30') },
+    { kind: 'node', id: U('20') },
+    { kind: 'site', id: U('10') },
+    { kind: 'model', id: 'deepseek-r1-7b' },
+    { kind: 'dc', id: U('02') },
+    { kind: 'dc', id: U('03') },
+    { kind: 'cluster', id: U('40') },
+    { kind: 'box', id: U('99') },
+    { kind: 'home' },
+    { kind: 'menu', id: 'traffic' },
+    { kind: 'my' },
+  ];
+  for (const place of places) {
+    assert.equal(
+      placeEnvironmentInfo(root, place)?.environmentId ?? null,
+      placeEnvironment(root, place),
+      `the two helpers must agree for ${place.kind}`,
+    );
+  }
 });
