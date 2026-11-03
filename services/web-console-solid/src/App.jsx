@@ -102,8 +102,15 @@ export default function App() {
         <Show when={!SHELLLESS.has(place().kind)}>
           <Shell place={place()}>
             {/* Keyed: choosing another data center remounts the page, so every screen reloads its data. */}
+            {/* The child function takes the key: a zero-argument child is called inside a
+                tracked effect, and creating Suspense plus a lazy page there reads and writes
+                signals on every pass, which re-created the page forever (2026-11-03). */}
             <Show when={session.activeEnvironment()} keyed>
-              {() => <Suspense fallback={<p class="muted">Loading…</p>}><Page /></Suspense>}
+              {(environment) => (
+                <Suspense fallback={<p class="muted loading">Loading…</p>}>
+                  <Page environment={environment} />
+                </Suspense>
+              )}
             </Show>
           </Shell>
         </Show>

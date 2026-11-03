@@ -472,3 +472,23 @@ table.traffic td { vertical-align: top; padding-top: 4px; padding-bottom: 4px; }
 
 /* Eyebrow style for small field and nav labels, as on the website. */
 .field span, .nav-heading, .env-picker label, .context-bar label { font-family: var(--mono); letter-spacing: 0.12em; }
+
+/* A loading line the user can see: one lime dot beside the word. */
+.loading::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  background: var(--accent);
+  animation: loading-pulse 1s ease-in-out infinite;
+}
+
+@keyframes loading-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading::before { animation: none; }
+}
