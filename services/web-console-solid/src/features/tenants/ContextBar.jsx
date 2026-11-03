@@ -24,7 +24,7 @@ export default function ContextBar() {
 
   return (
     <Show when={total() > 0}>
-      <div class="context-bar">
+      <div class="cc-context-bar">
         <label for="context">Data center</label>
         <select
           id="context"
