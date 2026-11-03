@@ -45,7 +45,7 @@ export default function ChatBrowser(props) {
               type="button"
               class="tiny chat-live"
               data-on={chats.liveEnabled() ? 'on' : 'off'}
-              title={chats.liveEnabled() ? 'Live-Stream läuft' : 'Live-Stream ist aus'}
+              title={chats.liveEnabled() ? 'Live stream on' : 'Live stream off'}
               onClick={() => chats.setLiveEnabled(!chats.liveEnabled())}
             >
               Live
@@ -67,7 +67,7 @@ export default function ChatBrowser(props) {
               onInput={(event) => chats.setProvider(event.currentTarget.value)}
             />
             <select
-              aria-label="Prüfung filtern"
+              aria-label="Filter by check"
               value={chats.dlp()}
               onChange={(event) => chats.setDlp(event.currentTarget.value)}
             >
@@ -109,7 +109,7 @@ export default function ChatBrowser(props) {
             fallback={
               <li>
                 <p class="muted small chat-empty">
-                  {chats.loading() ? 'Lädt…' : 'Noch keine Chats.'}
+                  {chats.loading() ? 'Loading…' : 'No chats yet.'}
                 </p>
               </li>
             }
@@ -163,7 +163,7 @@ export default function ChatBrowser(props) {
               disabled={chats.loadingOlder()}
               onClick={() => chats.loadOlder()}
             >
-              {chats.loadingOlder() ? 'Lädt…' : 'Ältere laden'}
+              {chats.loadingOlder() ? 'Loading…' : 'Load older'}
             </button>
           </div>
         </Show>

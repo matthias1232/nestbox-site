@@ -29,7 +29,7 @@ export const ORDERS = [
 
 /** The content-check filter, in the server's states. */
 export const DLP_STATES = [
-  { value: '', label: 'alle Prüfungen' },
+  { value: '', label: 'all checks' },
   { value: 'clean', label: 'sauber' },
   { value: 'blocked', label: 'blockiert' },
   { value: 'replaced', label: 'ersetzt' },
@@ -40,7 +40,7 @@ export const DLP_STATES = [
 export const ACCOUNT_KINDS = [
   { value: '', label: 'alle Konten' },
   { value: 'subscription', label: 'Abo' },
-  { value: 'api_key', label: 'API-Schlüssel' },
+  { value: 'api_key', label: 'API key' },
 ];
 
 /** Turns per page. Large enough to fill a thread, small enough to arrive fast. */
