@@ -30,6 +30,44 @@ export function pickEnvironment(environments, remembered, current) {
   return flagged ? flagged.id : null;
 }
 
+// The data centers of `GET /api/v1/organizations`, flattened, with their node counts.
+//
+// `GET /api/v1/environments` names the data centers a user may open but does not say what is
+// inside them; the organization list does, as `environments[].nodes`. The console needs that
+// count to answer one question on a first sign-in: is the data center the session opens empty
+// while another one holds every node (U02)? An entry without an id is dropped, because a data
+// center the console cannot name is one it cannot open.
+export function environmentsWithNodes(organizations) {
+  const out = [];
+  (Array.isArray(organizations) ? organizations : []).forEach((organization) => {
+    const entries = Array.isArray(organization?.environments) ? organization.environments : [];
+    entries.forEach((entry) => {
+      if (!entry || typeof entry.id !== 'string' || !entry.id) return;
+      const nodes = Number(entry.nodes);
+      out.push({ id: entry.id, name: entry.name || entry.id, nodes: Number.isFinite(nodes) ? nodes : 0 });
+    });
+  });
+  return out;
+}
+
+// The data center a first sign-in opens: the current one while it has nodes, otherwise the
+// first one that has any, otherwise null (nothing to switch to).
+//
+// The order is the promise this makes: the server's current data center is where the user
+// already is, so it keeps the console where they expect it. Only an empty one gives way, and
+// the console says so once instead of switching silently (U02).
+export function firstUsable(environments, current) {
+  const list = (Array.isArray(environments) ? environments : [])
+    .filter((entry) => entry && typeof entry.id === 'string' && entry.id);
+  const nodesOf = (id) => {
+    const entry = list.find((candidate) => candidate.id === id);
+    return entry ? Number(entry.nodes) || 0 : 0;
+  };
+  if (current && nodesOf(current) > 0) return current;
+  const usable = list.find((entry) => (Number(entry.nodes) || 0) > 0);
+  return usable ? usable.id : null;
+}
+
 // The data centers of an inventory tree (contract C3), root first, depth first.
 function dataCenters(root) {
   const found = [];

@@ -5,8 +5,9 @@
 
 import { createContext, createSignal, useContext } from 'solid-js';
 import * as auth from '../api/auth.js';
+import * as tenancy from '../api/tenancy.js';
 import { setCsrfMissingHandler, setCsrfToken, setEnvironment } from '../api/client.js';
-import { pickEnvironment, storageKey } from './environments.js';
+import { environmentsWithNodes, firstUsable, pickEnvironment, storageKey } from './environments.js';
 
 const SessionContext = createContext();
 
@@ -42,6 +43,9 @@ export function SessionProvider(props) {
   // The data center this browser remembers for the user, so the empty-data-center notice
   // can stay quiet when the user already chose one.
   const [rememberedEnvironment, setRememberedEnvironment] = createSignal(null);
+  // The data center the console opened by itself, and the empty one it left, so the sidebar can
+  // say so once. Null means it did not switch and has nothing to explain (U02).
+  const [autoSwitched, setAutoSwitched] = createSignal(null);
   const [error, setError] = createSignal(null);
   const [busy, setBusy] = createSignal(false);
 
@@ -52,6 +56,52 @@ export function SessionProvider(props) {
     setCsrfToken(null);
     setError('Please sign in again: a page reload ends the security token that changes need.');
   });
+
+  // The data centers of this session with their node counts.
+  //
+  // `/environments` says which ones the user may open but not whether anything is in them, so
+  // the counts come from the organization list. Only data centers the session may open are
+  // kept, and a failed count is an empty list: a first sign-in must never fail because the
+  // count could not be read, it only stays where the server put it (U02).
+  async function countedEnvironments(list) {
+    try {
+      const answer = await tenancy.organizations();
+      const known = new Set(list.map((entry) => entry?.id));
+      return environmentsWithNodes(answer?.items || []).filter((entry) => known.has(entry.id));
+    } catch {
+      return [];
+    }
+  }
+
+  // Open the data center this session starts on, and explain a switch the console made alone.
+  //
+  // The remembered choice always wins, and the server's current one is next (X15). Only when
+  // the browser remembers nothing does the node count matter: an empty current data center
+  // gives way to one that has nodes, is switched without remembering (the user did not pick
+  // it), and is reported once so the move is not silent (U02).
+  async function openEnvironment(list, current, remembered) {
+    const chosen = pickEnvironment(list, remembered, current) || current;
+    setRememberedEnvironment(remembered && chosen === remembered ? remembered : null);
+    setActiveEnvironment(chosen);
+    setEnvironment(chosen);
+    if (remembered) {
+      setAutoSwitched(null);
+      return;
+    }
+    const counted = await countedEnvironments(list);
+    const target = firstUsable(counted, chosen);
+    if (!target || target === chosen) {
+      setAutoSwitched(null);
+      return;
+    }
+    const nameOf = (id) => counted.find((entry) => entry.id === id)?.name;
+    const name = nameOf(target) || 'the other data center';
+    const currentName = nameOf(chosen)
+      || (list.find((entry) => entry?.id === chosen)?.name)
+      || 'This data center';
+    switchEnvironment(target, { remember: false });
+    setAutoSwitched({ id: target, name, currentName });
+  }
 
   async function signIn(email, password) {
     setBusy(true);
@@ -80,13 +130,9 @@ export function SessionProvider(props) {
       });
       setEnvironments(result.environments || []);
       // A returning user opens the data center they chose last, as long as the server still
-      // lists it. Without such a choice the server's current data center opens (X15).
-      const remembered = readRemembered(userId);
-      const chosen = pickEnvironment(result.environments || [], remembered, result.environment_id)
-        || result.environment_id;
-      setRememberedEnvironment(remembered && chosen === remembered ? remembered : null);
-      setActiveEnvironment(chosen);
-      setEnvironment(chosen);
+      // lists it. Without such a choice the server's current data center opens (X15), unless
+      // it has no nodes and another one has (U02).
+      await openEnvironment(result.environments || [], result.environment_id, readRemembered(userId));
       return true;
     } catch (failure) {
       setError(failure.message);
@@ -107,6 +153,7 @@ export function SessionProvider(props) {
     setCsrfToken(null);
     setEnvironment(null);
     setActiveEnvironment(null);
+    setAutoSwitched(null);
   }
 
   // Restore the identity after a page reload, without a CSRF token: the token
@@ -131,12 +178,9 @@ export function SessionProvider(props) {
       const answer = await auth.environments();
       const list = answer?.items || [];
       setEnvironments(list);
-      const chosen = pickEnvironment(list, remembered, identityPayload.environment_id);
-      if (chosen && chosen !== identityPayload.environment_id) {
-        setActiveEnvironment(chosen);
-        setEnvironment(chosen);
-      }
-      setRememberedEnvironment(remembered && chosen === remembered ? remembered : null);
+      // The remembered choice opens once it is known to be reachable, and without one an empty
+      // data center gives way to one with nodes, exactly as on sign-in (X15, U02).
+      await openEnvironment(list, identityPayload.environment_id, remembered);
     } catch {
       /* the server's data center stands, and the empty notice reads its inventory */
     }
@@ -162,6 +206,8 @@ export function SessionProvider(props) {
     // The choice is remembered per user, as an id: the next sign-in opens this one (X15).
     setRememberedEnvironment(id);
     writeRemembered(identity()?.user_id, id);
+    // The user picked a data center, so the notice about the one the console opened is done.
+    setAutoSwitched(null);
   }
 
   return (
@@ -171,6 +217,7 @@ export function SessionProvider(props) {
         environments,
         activeEnvironment,
         rememberedEnvironment,
+        autoSwitched,
         error,
         busy,
         signIn,
