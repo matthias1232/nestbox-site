@@ -54,9 +54,12 @@
 .shortcuts-grid dl { display: grid; grid-template-columns: 1fr auto; gap: var(--space-2) var(--space-3); margin: var(--space-2) 0 0; align-items: center; }
 .shortcuts-grid dt { color: var(--fg-muted); }
 .shortcuts-grid dd { margin: 0; }
-.tour-shade { position: fixed; inset: 0; z-index: 40; }
+/* The tour dims and marks a region but does not take the console away: the shade and the
+   spotlight never catch a click, so the page under them stays usable and Escape ends the
+   tour. The spotlight is the region's own box, drawn with its border inside it. */
+.tour-shade { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
 .tour-spot { position: fixed; z-index: 41; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); pointer-events: none; }
-.tour-card { width: min(340px, 92vw); }
+.tour-card { width: min(340px, 92vw); pointer-events: auto; }
 .tour-card h2 { margin: var(--space-1) 0 var(--space-2); }
 .tour-card p { margin: 0 0 var(--space-3); color: var(--fg-muted); }
 .tour-actions { display: flex; justify-content: space-between; gap: var(--space-2); }
