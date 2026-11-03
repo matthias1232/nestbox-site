@@ -48,4 +48,4 @@ Two different jobs:
 | `mounts.rs` | B09: mount, change, remove and wrong-node refusal (needs TEST_DATABASE_URL; db `nestbox_cc_b09`) |
 | `model_bulk.rs` | The bulk model install against a database (`nestbox_cc_b04`): two nodes give two targets and a job whose total is the non-skipped count; a request without exactly one selector is refused |
 | `model_clusters.rs` | Cluster create with two installs, provider profile with the cluster endpoint, proxy view, wrong-model refusal, delete removes the profile (DB `nestbox_cc_b05`; compiled only here) |
-| `control_center.rs` | B13: tree, search, bulk, cluster, node summary, alerts, mounts, preview, quick recording and permissions together (db `nestbox_cc_all`; needs TEST_DATABASE_URL) |
+| `control_center.rs` | B13: tree, search, bulk, cluster, node summary, alerts (a bounded window and an unlimited one each answer an alert, in the list and the tree), mounts, preview, quick recording and permissions together (db `nestbox_cc_all`; needs TEST_DATABASE_URL) |

@@ -66,7 +66,7 @@ pub async fn refused_grouped(
                  WHERE w.environment_id = $1
                    AND (w.sandbox_id = g.sandbox_id OR w.scope = 'environment')
                    AND w.revoked_at IS NULL
-                   AND w.expires_at > now()
+                   AND (w.expires_at IS NULL OR w.expires_at > now())
                    AND w.channel IN ('all', g.channel)
                    AND w.created_at > g.last_at)
             AND NOT EXISTS (
